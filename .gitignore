@@ -1,0 +1,89 @@
+# =========================================================
+# Global: OS junk, editor temp files, logs
+# Applies to the whole monorepo
+# =========================================================
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*.tmp
+*.temp
+*.log
+
+
+# =========================================================
+# Root / shared environment files
+# Keep example files in repo, ignore local-only variants
+# =========================================================
+.env
+.env.*
+!.env.example
+!.env.*.example
+
+
+# =========================================================
+# Android / Kotlin
+# Targets: android/
+# Ignore Gradle caches, local machine config, IDE state, builds
+# =========================================================
+android/.gradle/
+android/build/
+android/**/build/
+android/local.properties
+android/.idea/
+android/*.iml
+android/**/captures/
+android/.cxx/
+
+
+# =========================================================
+# Windows client: Tauri + frontend toolchain
+# Targets: windows/
+# Ignore node deps, frontend build outputs, Rust/Tauri artifacts
+# =========================================================
+windows/node_modules/
+windows/dist/
+windows/build/
+windows/.parcel-cache/
+windows/.vite/
+windows/.next/
+windows/.nuxt/
+windows/coverage/
+windows/src-tauri/target/
+windows/src-tauri/gen/
+windows/src-tauri/Cargo.lock
+
+
+# =========================================================
+# Server / Go
+# Targets: server/
+# Ignore compiled binaries, test coverage, local work outputs
+# =========================================================
+server/bin/
+server/dist/
+server/coverage/
+server/.cache/
+server/*.test
+server/*.out
+server/coverage.out
+
+
+# =========================================================
+# Scripts / tooling outputs
+# Targets: scripts/
+# Ignore ad-hoc generated outputs from local helper scripts
+# =========================================================
+scripts/.cache/
+scripts/tmp/
+scripts/out/
+
+
+# =========================================================
+# Generic archives and packaged artifacts
+# Applies to the whole monorepo
+# =========================================================
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.rar
