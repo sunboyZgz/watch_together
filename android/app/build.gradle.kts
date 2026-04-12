@@ -3,6 +3,21 @@ plugins {
     alias(libs.plugins.kotlin.compose)
 }
 
+import java.util.Properties
+
+val localProperties = Properties().apply {
+    val localPropertiesFile = rootProject.file("local.properties")
+    if (localPropertiesFile.exists()) {
+        localPropertiesFile.inputStream().use(::load)
+    }
+}
+
+fun configValue(name: String, defaultValue: String): String {
+    return localProperties.getProperty(name)
+        ?: providers.gradleProperty(name).orNull
+        ?: defaultValue
+}
+
 android {
     namespace = "com.example.watch_together"
     compileSdk {
@@ -19,6 +34,24 @@ android {
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        buildConfigField("String", "APP_ENV", "\"${configValue("APP_ENV", "local")}\"")
+        buildConfigField(
+            "String",
+            "API_BASE_URL",
+            "\"${configValue("API_BASE_URL", "http://10.0.2.2:8080")}\""
+        )
+        buildConfigField(
+            "String",
+            "WS_BASE_URL",
+            "\"${configValue("WS_BASE_URL", "ws://10.0.2.2:8080/ws")}\""
+        )
+        buildConfigField(
+            "String",
+            "MEDIA_BASE_URL",
+            "\"${configValue("MEDIA_BASE_URL", "http://10.0.2.2:9000/media")}\""
+        )
+        buildConfigField("boolean", "DEBUG_SYNC", configValue("DEBUG_SYNC", "true"))
     }
 
     buildTypes {
@@ -36,6 +69,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 }
 
