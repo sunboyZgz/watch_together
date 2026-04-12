@@ -41,6 +41,12 @@
 
 这个技术栈是当前仓库结构和后续任务拆解的基础假设。
 
+## Repository Strategy
+
+当前仓库采用 monorepo 组织方式，把 Android、Windows、Server、shared 和 scripts 放在同一个代码仓库中统一管理。
+
+当前阶段暂不引入额外的 monorepo 项目管理工具，先保持目录结构清晰、依赖关系直接，等跨模块构建、任务编排或共享代码管理复杂度明显上升后，再评估是否引入专门工具。
+
 ## Repository Structure
 
 ```text

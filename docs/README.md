@@ -14,9 +14,12 @@
 ## Local Files
 
 - [架构.png](./架构.png): 当前架构图静态资源
+- [contributing.md](./contributing.md): 当前仓库的基础工作规约
+- [environment-config.md](./environment-config.md): 当前阶段环境参数清单与归类
 
 ## Maintenance Rule
 
 - 项目目标、架构、产品边界和 ADR 统一在 Linear 更新。
+- 仓库内的操作性规约与工程说明可以保留本地副本，例如贡献约定和环境配置说明。
 - 仓库内 `docs/` 默认不再维护上述对应 Markdown 副本。
 - 如果后续确实需要本地化文档，应先明确哪一侧是唯一权威来源。

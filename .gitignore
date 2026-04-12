@@ -12,8 +12,14 @@ Thumbs.db
 
 
 # =========================================================
-# Root / shared environment files
+# Environment files
+# Applies to root and module directories
 # Keep example files in repo, ignore local-only variants
+# Examples:
+# - server/.env           -> ignore
+# - server/.env.local     -> ignore
+# - server/.env.example   -> keep
+# - windows/.env.example  -> keep
 # =========================================================
 .env
 .env.*
