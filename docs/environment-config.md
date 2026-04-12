@@ -233,6 +233,68 @@
 
 ---
 
+## Local Development Environment Record
+
+### Android Development Environment
+
+当前机器已确认的 Android 开发环境如下：
+
+- Android Studio: installed
+- Android SDK Location: `/Users/sunboy/Library/Android/sdk`
+- Installed SDK Platform:
+  - Android 16.0 (`Baklava`)
+  - API Level: `36.1`
+  - Revision: `1`
+- `adb`:
+  - Android Debug Bridge version `1.0.41`
+  - Version `37.0.0-14910828`
+  - Path: `/Users/sunboy/Library/Android/sdk/platform-tools/adb`
+- Gradle user home: `/Users/sunboy/.gradle`
+- Android Studio Gradle JVM criteria:
+  - Version: `21`
+  - Vendor: `Any vendor`
+- Terminal Java:
+  - OpenJDK `22`
+
+### Notes For Android Runtime
+
+- 当前记录反映的是本机已安装环境，不等同于未来项目最终锁定的工程基线。
+- Android Studio 的 Gradle JVM criteria 当前为 `21`，终端 Java 当前为 OpenJDK `22`，后续初始化 Android 工程时应确认项目实际要求的 JDK 版本并保持一致。
+
+### Go Development Environment
+
+当前机器已确认的 Go 开发环境如下：
+
+- Go version: `go1.26.2`
+- OS / Arch: `darwin/arm64`
+
+### JavaScript / Node.js Environment
+
+当前机器已确认的 JavaScript / Node.js 开发环境如下：
+
+- Node.js version: `v20.12.2`
+- npm version: `10.8.1`
+
+### Rust Development Environment
+
+当前机器已确认的 Rust 开发环境如下：
+
+- rustc version: `1.91.1`
+- cargo version: `1.91.1`
+- Default host: `aarch64-apple-darwin`
+- rustup home: `/Users/sunboy/.rustup`
+- Active toolchain: `stable-aarch64-apple-darwin`
+- Installed targets:
+  - `aarch64-apple-darwin`
+
+### Notes For Go / Node.js / Rust Runtime
+
+- 当前记录用于描述本机已安装工具链状态，便于后续初始化 `server/` 和 `windows/` 工程时对照环境。
+- Node.js 和 Rust 共同构成当前 Windows/Tauri 方向的本地开发基础。
+- Go 版本与系统架构已记录，后续初始化 Go 服务工程时应以工程实际要求为准，再决定是否需要进一步锁版本。
+
+---
+
 ## Notes
 
 - 当前阶段只保留最小必要配置，避免过度设计。
