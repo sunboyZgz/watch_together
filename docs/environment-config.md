@@ -2,13 +2,16 @@
 
 > Current-stage environment parameter catalog for `watch_together`.
 
-本文档只定义当前阶段真正需要的环境配置参数，并区分哪些属于环境配置，哪些属于业务规则常量。
+本文档定义当前阶段的环境配置参数与模块级配置策略，并区分哪些属于环境配置，哪些属于业务规则常量。
 
 本文件当前聚焦：
 
 - 参数清单
 - 参数用途
 - 参数归属
+- 模块级配置承载方式
+- 配置文件提交规则
+- 环境命名与变量命名规则
 - 环境参数与业务常量的边界
 
 本文件当前不展开：
@@ -37,6 +40,75 @@
 - `prod`: 正式运行环境
 
 当前仓库主要围绕 `local` 阶段设计，`dev` 和 `prod` 先保留命名约定。
+
+## Variable Naming
+
+环境变量统一使用大写蛇形命名，例如：
+
+- `APP_ENV`
+- `SERVER_PORT`
+- `API_BASE_URL`
+- `MEDIA_DEFAULT_ID`
+
+---
+
+## Per-module Config Strategy
+
+### Server
+
+`server/` 使用 `.env.example` + `.env.local` + 运行时环境变量。
+
+策略说明：
+
+- `.env.example` 用于提交默认模板和字段说明。
+- `.env.local` 用于本地开发机的实际值，不提交到仓库。
+- 运行时环境变量可用于覆盖本地文件或后续部署环境中的配置。
+
+### Windows
+
+`windows/` 使用 `.env.example` + `.env.local`。
+
+策略说明：
+
+- `.env.example` 用于提交示例配置。
+- `.env.local` 用于本地联调时的真实地址和调试开关，不提交到仓库。
+- 当前阶段不引入更复杂的配置系统，先保持轻量。
+
+### Android
+
+`android/` 不单独引入 `.env` 文件，使用 Gradle / BuildConfig / `local.properties` 注入配置。
+
+策略说明：
+
+- 面向版本化的默认配置，应通过 Gradle 或 BuildConfig 注入。
+- 本地开发机相关的私有配置，优先放在 `local.properties`。
+- 当前阶段先定义接入方式，不强行对齐到 `.env` 体系。
+
+---
+
+## File Commit Rules
+
+以下规则适用于当前仓库：
+
+- `.env.example` 可以提交。
+- `.env.local` 不可以提交。
+- 其他本地环境文件，例如实际 `.env`，默认不提交。
+- Android 的 `local.properties` 不提交。
+- 模板文件应只包含示例值，不包含生产 secret 或个人私有地址。
+
+当前规则已由根目录 `.gitignore` 配合约束。
+
+---
+
+## Template And Doc Locations
+
+当前约定的文档和模板文件位置：
+
+- `docs/environment-config.md`: 环境参数与配置策略统一说明
+- `server/.env.example`: Server 配置模板
+- `windows/.env.example`: Windows 配置模板
+
+后续如增加更多配置模板，应继续沿用“模块内模板 + 仓库级文档说明”的方式维护。
 
 ---
 
