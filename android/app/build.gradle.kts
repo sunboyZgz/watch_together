@@ -51,6 +51,11 @@ android {
             "MEDIA_BASE_URL",
             "\"${configValue("MEDIA_BASE_URL", "http://10.0.2.2:9000/media")}\""
         )
+        buildConfigField(
+            "String",
+            "MEDIA_DEFAULT_ID",
+            "\"${configValue("MEDIA_DEFAULT_ID", "")}\""
+        )
         buildConfigField("boolean", "DEBUG_SYNC", configValue("DEBUG_SYNC", "true"))
     }
 
@@ -82,6 +87,9 @@ dependencies {
     implementation(libs.androidx.compose.ui.graphics)
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.compose.material3)
+    implementation(libs.androidx.media3.exoplayer)
+    implementation(libs.androidx.media3.exoplayer.hls)
+    implementation(libs.androidx.media3.ui)
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
