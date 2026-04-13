@@ -24,6 +24,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -49,10 +50,23 @@ fun PlayerScreen(modifier: Modifier = Modifier) {
     val sampleUrl = remember {
         AppConfig.sampleHlsUrl()
     }
+    val eventLogs = remember { mutableStateListOf<String>() }
     var currentPosition by remember { mutableLongStateOf(0L) }
     var duration by remember { mutableLongStateOf(0L) }
     var isPlaying by remember { mutableStateOf(false) }
     var playbackSpeed by remember { mutableFloatStateOf(1f) }
+
+    DisposableEffect(adapter) {
+        adapter.setEventListener { event ->
+            eventLogs.add(0, event.toDebugLabel())
+            while (eventLogs.size > 8) {
+                eventLogs.removeLast()
+            }
+        }
+        onDispose {
+            adapter.setEventListener(null)
+        }
+    }
 
     LaunchedEffect(adapter) {
         while (isActive) {
@@ -84,6 +98,7 @@ fun PlayerScreen(modifier: Modifier = Modifier) {
                 adapter.setPlaybackSpeed(speed)
             }
         )
+        PlayerEventDebugPanel(eventLogs = eventLogs)
         ConfigInjectionHint()
     }
 }
@@ -282,6 +297,37 @@ private fun ConfigInjectionHint() {
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+        }
+    }
+}
+
+@Composable
+private fun PlayerEventDebugPanel(eventLogs: List<String>) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Text(
+                text = "Player event log",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Medium
+            )
+            if (eventLogs.isEmpty()) {
+                Text(
+                    text = "No events emitted yet.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            } else {
+                eventLogs.forEach { line ->
+                    Text(
+                        text = line,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
         }
     }
 }

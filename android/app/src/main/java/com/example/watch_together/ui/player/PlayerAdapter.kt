@@ -6,6 +6,8 @@ interface PlayerAdapter {
     fun attach(playerView: PlayerView)
     fun detach()
 
+    fun setEventListener(listener: ((PlayerEvent) -> Unit)?)
+
     fun load(url: String)
     fun play()
     fun pause()
