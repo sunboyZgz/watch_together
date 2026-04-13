@@ -52,6 +52,7 @@
 ```text
 watch_together/
 ├─ android/
+├─ media/
 ├─ windows/
 ├─ server/
 ├─ docs/
@@ -64,6 +65,7 @@ watch_together/
 各目录职责：
 
 - `android/`: Android 客户端工程与播放器同步能力
+- `media/`: 本地开发和联调使用的样例媒体资源
 - `windows/`: Windows 客户端工程与跨平台同步能力
 - `server/`: 房间服务、同步逻辑与最小鉴权能力
 - `docs/`: 仓库内文档入口和静态资源
@@ -77,6 +79,7 @@ watch_together/
 主要文档入口：
 
 - [docs/README.md](./docs/README.md)
+- [media/README.md](./media/README.md)
 - [Project Overview](https://linear.app/interestings/document/01-project-overview-3e260fd6f4d3)
 - [System Architecture](https://linear.app/interestings/document/02-system-architecture-3eb5b105f074)
 - [Product Scope & Lifecycle](https://linear.app/interestings/document/03-product-scope-and-lifecycle-6089958d7517)

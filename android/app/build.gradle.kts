@@ -49,7 +49,7 @@ android {
         buildConfigField(
             "String",
             "MEDIA_BASE_URL",
-            "\"${configValue("MEDIA_BASE_URL", "http://10.0.2.2:9000/media")}\""
+            "\"${configValue("MEDIA_BASE_URL", "http://10.0.2.2:9000/media/tmp")}\""
         )
         buildConfigField(
             "String",

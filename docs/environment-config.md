@@ -105,6 +105,7 @@
 当前约定的文档和模板文件位置：
 
 - `docs/environment-config.md`: 环境参数与配置策略统一说明
+- `media/README.md`: 样例媒体资源目录与本地访问约定
 - `server/.env.example`: Server 配置模板
 - `windows/.env.example`: Windows 配置模板
 
@@ -165,7 +166,8 @@
 #### `MEDIA_BASE_URL`
 
 - 用途：指定 HLS 媒体资源根地址
-- 示例：`http://127.0.0.1:9000/media`
+- 示例：`http://127.0.0.1:9000/media/tmp`
+- 说明：当前仓库样例资源按 `${MEDIA_BASE_URL}/${MEDIA_DEFAULT_ID}/index.m3u8` 约定访问
 - 适用模块：Server、Windows、Android
 
 #### `MEDIA_DEFAULT_ID` `(optional)`

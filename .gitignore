@@ -43,6 +43,21 @@ android/.cxx/
 
 
 # =========================================================
+# Media assets / local transcoding workspace
+# Targets: media/
+# Keep curated sample assets in repo.
+# Do not ignore *.ts globally, because HLS segments use .ts
+# while future TypeScript source files may also use .ts.
+# =========================================================
+media/tmp/
+media/out/
+media/.cache/
+media/source/
+media/**/*.tmp
+media/**/*.part
+
+
+# =========================================================
 # Windows client: Tauri + frontend toolchain
 # Targets: windows/
 # Ignore node deps, frontend build outputs, Rust/Tauri artifacts
