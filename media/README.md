@@ -39,7 +39,7 @@ http://127.0.0.1:9000/media/tmp/sample_001/index.m3u8
 
 当前 Android 与 Windows 的示例配置也应基于这个路径约定：
 
-- `MEDIA_BASE_URL=http://127.0.0.1:9000/media/hls`
+- `MEDIA_BASE_URL=http://127.0.0.1:9000/media/tmp`
 - `MEDIA_DEFAULT_ID=sample_001`
 
 最终播放器侧拼接出的地址形式为：
@@ -50,6 +50,7 @@ ${MEDIA_BASE_URL}/${MEDIA_DEFAULT_ID}/index.m3u8
 
 ## Maintenance Rule
 
-- 当前仓库保留一份稳定、固定、可重复引用的 HLS 样例资源。
-- 这些样例文件属于项目开发资产，可以提交到仓库。
-- 后续临时转码目录、缓存和中间产物不应直接堆在当前样例目录里，应放到 `media/tmp/` 或其他忽略目录。
+- 当前样例资源主要服务于本地开发与联调，不作为 GitHub 仓库内的正式版本化资产。
+- `media/tmp/` 与 `media/source/` 默认视为本地媒体工作区，由根目录 `.gitignore` 忽略。
+- 这些本地样例文件可以用于播放器验证与同步联调，但不要求提交到远端仓库。
+- 如果后续需要一份可提交的长期样例资产，应单独约定固定目录，而不是继续复用 `media/tmp/`。
