@@ -2,7 +2,7 @@
  * @Author: sunboy
  * @LastEditors: sunboy
  * @Date: 2026-04-11 14:17:43
- * @LastEditTime: 2026-04-12 12:19:51
+ * @LastEditTime: 2026-04-15 00:31:48
 -->
 1. 项目目标、架构、产品边界和 ADR 统一在 Linear 更新
    1. 对应文件。。。
@@ -17,3 +17,5 @@
    1. 核心模块更换版本要及时进行更新，非核心工具模块无需更新。
 6. 环境参数类
    1. 后续改动影响到环境参数类的功能时请更新docs/environment-config.md
+7. 协议后续需要扩充和更新
+   1. docs/websocket-event-protocol.md可能需要进行更新

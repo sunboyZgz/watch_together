@@ -80,6 +80,7 @@ watch_together/
 
 - [docs/README.md](./docs/README.md)
 - [media/README.md](./media/README.md)
+- [WebSocket Event Protocol](./docs/websocket-event-protocol.md)
 - [Project Overview](https://linear.app/interestings/document/01-project-overview-3e260fd6f4d3)
 - [System Architecture](https://linear.app/interestings/document/02-system-architecture-3eb5b105f074)
 - [Product Scope & Lifecycle](https://linear.app/interestings/document/03-product-scope-and-lifecycle-6089958d7517)
@@ -91,5 +92,5 @@ watch_together/
 
 - Android 客户端工程初始化
 - 房间服务基础能力搭建
-- 同步协议和共享结构沉淀
+- WebSocket 同步协议和共享结构沉淀
 - Phase 1 所需的最小可运行链路

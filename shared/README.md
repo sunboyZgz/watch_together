@@ -11,3 +11,5 @@
 - 跨端约束说明
 
 目标是让 Android、Windows 和 Server 在关键接口与语义上保持一致。
+
+当前阶段最小 WebSocket 协议草案已记录在 [docs/websocket-event-protocol.md](../docs/websocket-event-protocol.md)。
