@@ -44,6 +44,7 @@
 当前已明确的核心实现库：
 
 - Android player: AndroidX Media3 ExoPlayer
+- Android networking: OkHttp
 - Server HTTP: Go standard library `net/http`
 - Server WebSocket: `github.com/coder/websocket`
 - Server message encoding: Go standard library `encoding/json`
@@ -73,13 +74,46 @@ watch_together/
 
 各目录职责：
 
-- `android/`: Android 客户端工程与播放器同步能力
+- `android/`: Android 客户端工程，当前已包含播放器适配层、协议草案和 join-time initial state sync 能力
 - `media/`: 本地开发和联调使用的样例媒体资源
 - `windows/`: Windows 客户端工程与跨平台同步能力
 - `server/`: 基于 Go 的房间服务骨架，当前已包含 `POST /rooms`、`/ws`、协议解析和最小房间管理结构
 - `docs/`: 仓库内文档入口和静态资源
 - `shared/`: 跨端共享定义，例如协议、Schema、常量
 - `scripts/`: 开发、维护和初始化辅助脚本
+
+当前已经落地的关键子结构：
+
+```text
+android/app/src/main/java/com/example/watch_together/
+├─ config/
+├─ sync/
+│  └─ protocol/
+├─ ui/
+│  ├─ player/
+│  └─ theme/
+└─ MainActivity.kt
+
+server/
+├─ cmd/roomserver/
+└─ internal/
+   ├─ app/
+   ├─ protocol/
+   ├─ room/
+   └─ transport/
+```
+
+子结构职责速览：
+
+- `android/.../config/`: Android 配置注入与运行时地址拼装
+- `android/.../sync/`: 建房、入房、消息解码、本地同步状态和 join 后初始状态应用
+- `android/.../sync/protocol/`: Android 侧对齐 `INT-19` 的协议草案模型
+- `android/.../ui/player/`: 播放器页面、适配器和播放器事件
+- `server/cmd/roomserver/`: Go 服务启动入口
+- `server/internal/app/`: HTTP server 与路由组装
+- `server/internal/protocol/`: 服务端协议外壳、事件模型和解码
+- `server/internal/room/`: 房间、连接和房间管理器
+- `server/internal/transport/`: `POST /rooms`、`/ws` 以及对应测试
 
 ## Documentation
 

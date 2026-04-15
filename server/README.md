@@ -64,6 +64,15 @@ server/
 - `internal/room/`: 房间、连接、房间管理器，以及房间创建逻辑的内存模型
 - `internal/transport/`: `POST /rooms` 和 `/ws` 的接入层与最小 HTTP / WebSocket 处理
 
+当前关键文件对应关系：
+
+- `cmd/roomserver/main.go`: 读取配置并启动服务
+- `internal/app/server.go`: 注册 `/healthz`、`POST /rooms` 和 `/ws`
+- `internal/protocol/events.go`: create room、join room、room_state、error 等最小结构
+- `internal/room/manager.go`: 房间创建、查询、唯一 `roomId` 生成和客户端清理
+- `internal/transport/room_http_handler.go`: create room HTTP 入口
+- `internal/transport/websocket_handler.go`: join room 和最小协议消息处理
+
 ## Current Validation
 
 当前已完成的本地验证：
