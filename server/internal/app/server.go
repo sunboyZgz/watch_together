@@ -48,11 +48,13 @@ type Server struct {
 func NewServer(config Config) *Server {
 	roomManager := room.NewManager()
 	mux := http.NewServeMux()
+	roomHTTPHandler := transport.NewRoomHTTPHandler(roomManager)
 
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
 	})
+	mux.HandleFunc("/rooms", roomHTTPHandler.CreateRoom)
 	mux.Handle("/ws", transport.NewWebSocketHandler(roomManager, config.DebugSync))
 
 	httpServer := &http.Server{

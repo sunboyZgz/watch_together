@@ -3,6 +3,7 @@ package room
 import "sync"
 
 type State struct {
+	RoomID       string
 	MediaID      string
 	HostUserID   string
 	Paused       bool
@@ -24,6 +25,7 @@ func New(id string) *Room {
 		id:      id,
 		clients: make(map[*ClientConnection]struct{}),
 		state: State{
+			RoomID:       id,
 			MediaID:      "",
 			HostUserID:   "",
 			Paused:       true,
@@ -34,9 +36,25 @@ func New(id string) *Room {
 	}
 }
 
+// NewCreatedRoom creates a room that already has an initial host and media binding.
+func NewCreatedRoom(id string, hostUserID string, mediaID string) *Room {
+	room := New(id)
+	room.state.MediaID = mediaID
+	room.state.HostUserID = hostUserID
+	return room
+}
+
 // ID returns the stable room identifier.
 func (r *Room) ID() string {
 	return r.id
+}
+
+// StateSnapshot returns the current room state in a read-safe way.
+func (r *Room) StateSnapshot() State {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	return r.state
 }
 
 // Join registers a client in the room and returns the current room snapshot.

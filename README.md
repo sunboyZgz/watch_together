@@ -76,7 +76,7 @@ watch_together/
 - `android/`: Android 客户端工程与播放器同步能力
 - `media/`: 本地开发和联调使用的样例媒体资源
 - `windows/`: Windows 客户端工程与跨平台同步能力
-- `server/`: 基于 Go 的房间服务骨架，当前已包含 `/ws` 接入、协议解析和最小房间管理结构
+- `server/`: 基于 Go 的房间服务骨架，当前已包含 `POST /rooms`、`/ws`、协议解析和最小房间管理结构
 - `docs/`: 仓库内文档入口和静态资源
 - `shared/`: 跨端共享定义，例如协议、Schema、常量
 - `scripts/`: 开发、维护和初始化辅助脚本

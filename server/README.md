@@ -5,6 +5,7 @@
 当前目录已经完成 `INT-14 bootstrap websocket room server` 的第一阶段骨架，主要包含：
 
 - 可启动的 Go HTTP / WebSocket 服务入口
+- `POST /rooms` 的最小 create room 能力
 - `/ws` WebSocket 接入路由
 - 最小 `Room / ClientConnection / RoomManager` 内存结构
 - 基于 `INT-19` 协议草案的最小消息解析层
@@ -46,6 +47,8 @@ server/
 │   │   └── room.go
 │   └── transport/
 │       ├── json.go
+│       ├── room_http_handler.go
+│       ├── room_http_handler_test.go
 │       ├── websocket_handler.go
 │       └── websocket_handler_test.go
 ├── go.mod
@@ -57,9 +60,9 @@ server/
 
 - `cmd/roomserver/`: 服务端启动入口
 - `internal/app/`: 应用组装层，负责配置和 HTTP server 初始化
-- `internal/protocol/`: 与 `INT-19` 对齐的最小 WebSocket 协议结构和解码逻辑
-- `internal/room/`: 房间、连接和房间管理器的内存模型
-- `internal/transport/`: `/ws` 接入层和最小 WebSocket 读写处理
+- `internal/protocol/`: 与 `INT-19` 对齐的最小协议结构，包含 create room 请求 / 响应和 WebSocket 事件模型
+- `internal/room/`: 房间、连接、房间管理器，以及房间创建逻辑的内存模型
+- `internal/transport/`: `POST /rooms` 和 `/ws` 的接入层与最小 HTTP / WebSocket 处理
 
 ## Current Validation
 
@@ -67,5 +70,6 @@ server/
 
 - `go test ./...`
 - `go run ./cmd/roomserver`
+- `POST /rooms` 返回 `201 Created` 与初始 `room_state`
 
-其中 `/ws` 的最小 `join_room -> room_state` 连通流程已通过集成测试验证。
+其中 `POST /rooms` 和 `/ws` 的最小 `create room -> join_room -> room_state` 路径已具备基础验证条件。

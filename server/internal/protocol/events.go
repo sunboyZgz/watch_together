@@ -1,5 +1,15 @@
 package protocol
 
+type CreateRoomRequest struct {
+	UserID  string `json:"userId"`
+	MediaID string `json:"mediaId"`
+}
+
+type CreateRoomResponse struct {
+	RoomID    string           `json:"roomId"`
+	RoomState RoomStatePayload `json:"roomState"`
+}
+
 type JoinRoomPayload struct {
 	RoomID string `json:"roomId"`
 	UserID string `json:"userId"`
