@@ -6,10 +6,10 @@
 
 - 可启动的 Go HTTP / WebSocket 服务入口
 - `POST /rooms` 的最小 create room 能力
-- `/ws` WebSocket 接入路由
+- `/ws` WebSocket 接入路由与正式 join room 语义
 - 最小 `Room / ClientConnection / RoomManager` 内存结构
 - 基于 `INT-19` 协议草案的最小消息解析层
-- `join_room` 的最小处理流程
+- `join_room` 的已存在房间接入流程
 - 基础断连清理逻辑
 
 这里会成为全系统的房间协调与同步中心。
@@ -71,5 +71,6 @@ server/
 - `go test ./...`
 - `go run ./cmd/roomserver`
 - `POST /rooms` 返回 `201 Created` 与初始 `room_state`
+- `join_room` 仅允许加入已存在房间，不存在房间时返回 `error`
 
-其中 `POST /rooms` 和 `/ws` 的最小 `create room -> join_room -> room_state` 路径已具备基础验证条件。
+其中 `POST /rooms` 和 `/ws` 的最小 `create room -> join_room -> room_state` 路径已通过基础测试验证。

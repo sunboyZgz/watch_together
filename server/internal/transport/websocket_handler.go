@@ -17,6 +17,15 @@ type WebSocketHandler struct {
 	debugSync   bool
 }
 
+type protocolMessageError struct {
+	roomID  string
+	message string
+}
+
+func (e protocolMessageError) Error() string {
+	return e.message
+}
+
 // NewWebSocketHandler builds the /ws entrypoint around the shared room manager.
 func NewWebSocketHandler(roomManager *room.Manager, debugSync bool) *WebSocketHandler {
 	return &WebSocketHandler{
@@ -56,13 +65,20 @@ func (h *WebSocketHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			if h.debugSync {
 				log.Printf("protocol handling failed: %v", err)
 			}
+			roomID := client.RoomID()
+			message := err.Error()
+			var protocolErr protocolMessageError
+			if errors.As(err, &protocolErr) {
+				roomID = protocolErr.roomID
+				message = protocolErr.message
+			}
 			// Protocol errors are sent back as minimal server-side error events instead of
 			// immediately dropping the connection.
 			_ = client.WriteJSON(ctx, protocol.ErrorEnvelope{
 				Type: protocol.TypeError,
 				Payload: protocol.ErrorPayload{
-					RoomID:  client.RoomID(),
-					Message: err.Error(),
+					RoomID:  roomID,
+					Message: message,
 				},
 			})
 		}
@@ -88,7 +104,7 @@ func (h *WebSocketHandler) handleMessage(
 	}
 }
 
-// handleJoinRoom attaches the client to an in-memory room and returns the current
+// handleJoinRoom attaches the client to an existing room and returns the current
 // room_state snapshot expected by the protocol draft.
 func (h *WebSocketHandler) handleJoinRoom(
 	ctx context.Context,
@@ -100,9 +116,17 @@ func (h *WebSocketHandler) handleJoinRoom(
 		return err
 	}
 
+	existingRoom, ok := h.roomManager.Get(payload.RoomID)
+	if !ok {
+		return protocolMessageError{
+			roomID:  payload.RoomID,
+			message: "room not found",
+		}
+	}
+
 	// We persist identity on the connection first so disconnect cleanup can find the room later.
 	client.SetIdentity(payload.UserID, payload.RoomID)
-	state := h.roomManager.GetOrCreate(payload.RoomID).Join(client)
+	state := existingRoom.Join(client)
 
 	return client.WriteJSON(ctx, protocol.Envelope{
 		Type: protocol.TypeRoomState,
