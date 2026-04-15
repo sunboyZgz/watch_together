@@ -41,6 +41,15 @@
 
 这个技术栈是当前仓库结构和后续任务拆解的基础假设。
 
+当前已明确的核心实现库：
+
+- Android player: AndroidX Media3 ExoPlayer
+- Server HTTP: Go standard library `net/http`
+- Server WebSocket: `github.com/coder/websocket`
+- Server message encoding: Go standard library `encoding/json`
+
+这些库当前属于项目关键实现基础。若后续发生替换或重大升级，应同步更新对应 issue 和仓库文档。
+
 ## Repository Strategy
 
 当前仓库采用 monorepo 组织方式，把 Android、Windows、Server、shared 和 scripts 放在同一个代码仓库中统一管理。
