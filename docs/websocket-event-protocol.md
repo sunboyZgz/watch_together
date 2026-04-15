@@ -35,6 +35,38 @@
 - 为 Phase 1 的 Android ↔ Android 实现提供最小闭环
 - 为后续 Windows 端复用留出空间
 
+## Encoding Decision
+
+当前阶段的 WebSocket 传输层先使用 JSON 文本协议。
+
+具体约定：
+
+- WebSocket message format: JSON
+- 使用 UTF-8 text frames
+- 所有消息统一 `type + payload`
+- `positionMs` 使用整数毫秒
+- `seq` 使用服务端递增整数
+
+当前不使用二进制编码协议，原因如下：
+
+- `INT-19` 当前目标是先定义最小协议语义，而不是做传输优化
+- 当前消息类型较少，且 payload 很小
+- 当前跨端联调更需要可读性、可抓包性和实现一致性
+- 当前性能关键路径更可能出现在状态抽象、广播逻辑和同步策略，而不是编码格式
+
+## Future Encoding Strategy
+
+后续可以保留引入二进制编码的可能性，但不应在当前阶段提前设计。
+
+只有在以下条件逐步出现后，才值得认真评估：
+
+- 房间人数明显上升
+- 消息频率显著提高
+- 状态对象明显变大
+- profiling 已证明编码与解码成为瓶颈
+
+即使后续切换编码方式，也应保持事件语义模型稳定，不改变 `play`、`pause`、`seek`、`room_state` 等事件本身的含义。
+
 ## Message Envelope
 
 所有消息统一使用 `type + payload` 结构：
