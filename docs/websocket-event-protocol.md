@@ -143,6 +143,51 @@
 - 当前阶段只覆盖 `join_room`、`room_state`、`play`、`pause`、`seek`、`error`
 - `seq` 视为服务端权威顺序号；客户端上报事件时可带上本地已知 `seq`，服务端广播时应使用最新状态序号
 
+## Control Sync Strategy
+
+当前阶段的 `play / pause / seek` 同步建议统一按以下策略实现：
+
+- 出站控制事件优先来自明确的用户操作，而不是直接把播放器底层所有事件都原样上报
+- 服务端维护房间权威状态，并负责推进 `seq`
+- 客户端收到服务端广播事件后，只有当事件 `seq` 新于本地已知状态时才应用
+- 客户端在应用远端事件时，应避免再次把同一变化回传给服务端，防止回环
+
+这意味着当前阶段更推荐：
+
+- 本地用户点击 `Play` 才发送 `play`
+- 本地用户点击 `Pause` 才发送 `pause`
+- 本地用户明确完成一次 seek 操作后才发送 `seek`
+
+而不是：
+
+- 监听到任意播放器状态变化就立即上报
+- 把远端事件应用到播放器后再次触发新的上报
+
+## Server-side Event Rules
+
+围绕 `play / pause / seek`，当前服务端建议遵循以下最小规则：
+
+- 仅允许当前房主发起控制事件
+- 房间不存在时返回 `error`
+- 非房主发送控制事件时返回 `error`
+- 服务端在接受控制事件后更新内存中的房间状态
+- 服务端在更新状态后递增 `seq`
+- 服务端广播的事件应携带最新 `seq`
+
+当前阶段服务端无需引入复杂仲裁，只需要把“谁是权威、状态何时更新、`seq` 何时递增”这几个点保持稳定。
+
+## Client-side Apply Rules
+
+当前阶段客户端处理服务端广播事件时，建议统一遵循以下规则：
+
+- 若收到的 `seq` 小于或等于本地已知 `seq`，则忽略该事件
+- `play`：先把本地基线位置对齐到事件 `positionMs`，再执行播放
+- `pause`：先把本地基线位置对齐到事件 `positionMs`，再执行暂停
+- `seek`：先执行 seek 到事件 `positionMs`，再根据当前房间暂停状态决定是否保持暂停
+- 应用成功后更新本地 `RoomSyncState`
+
+这几条规则的目标是先保证“控制语义一致 + 新旧顺序清楚”，而不是一次解决所有漂移修正问题。
+
 ## Event Definitions
 
 ### `join_room`
@@ -187,6 +232,8 @@
 
 - 方向：client -> server / server -> clients
 - 作用：房主发起播放，服务端确认后广播
+- 当前阶段建议仅由显式用户点击 `Play` 触发上报
+- 服务端广播时应使用最新 `seq`
 
 ```json
 {
@@ -204,6 +251,8 @@
 
 - 方向：client -> server / server -> clients
 - 作用：房主发起暂停，服务端确认后广播
+- 当前阶段建议仅由显式用户点击 `Pause` 触发上报
+- 服务端广播时应使用最新 `seq`
 
 ```json
 {
@@ -221,6 +270,8 @@
 
 - 方向：client -> server / server -> clients
 - 作用：房主发起拖动，服务端确认后广播
+- 当前阶段建议在一次明确 seek 动作完成后再上报，而不是高频连续上报拖动过程
+- 服务端广播时应使用最新 `seq`
 
 ```json
 {
@@ -259,6 +310,19 @@
 | `pause` | client -> server, server -> clients |
 | `seek` | client -> server, server -> clients |
 | `error` | server -> client |
+
+## Recommended Phase 1 Execution Order
+
+围绕控制事件同步，当前最推荐的实现顺序是：
+
+1. 先完成 `INT-20 play sync`
+2. 再完成 `INT-21 pause sync`
+3. 最后完成 `INT-22 seek sync`
+
+原因：
+
+- `play` 和 `pause` 的状态语义最简单，最适合先验证“客户端发事件 -> 服务端更新状态 -> 广播 -> 另一端应用”这条主链路
+- `seek` 对本地播放器位置、状态收敛和回环控制更敏感，适合放在前两项稳定后再实现
 
 ## Current Implementation Guidance
 

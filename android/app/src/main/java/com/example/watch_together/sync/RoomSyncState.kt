@@ -12,6 +12,10 @@ data class RoomSyncState(
     val seq: Long
 )
 
+fun RoomSyncState.isNewerThan(previous: RoomSyncState?): Boolean {
+    return previous == null || seq > previous.seq
+}
+
 fun RoomStatePayload.toRoomSyncState(): RoomSyncState {
     return RoomSyncState(
         roomId = roomId,

@@ -99,6 +99,12 @@ func (h *WebSocketHandler) handleMessage(
 	switch envelope.Type {
 	case protocol.TypeJoinRoom:
 		return h.handleJoinRoom(ctx, client, envelope)
+	case protocol.TypePlay:
+		return h.handlePlay(ctx, client, envelope)
+	case protocol.TypePause:
+		return h.handlePause(ctx, client, envelope)
+	case protocol.TypeSeek:
+		return h.handleSeek(ctx, client, envelope)
 	default:
 		return protocol.ErrUnsupportedMessageType
 	}
@@ -140,6 +146,138 @@ func (h *WebSocketHandler) handleJoinRoom(
 			Seq:          state.Seq,
 		}),
 	})
+}
+
+// handlePlay validates one play control event, applies it to the room authority state,
+// and broadcasts the authoritative play payload to all joined clients.
+func (h *WebSocketHandler) handlePlay(
+	ctx context.Context,
+	_ *room.ClientConnection,
+	envelope protocol.Envelope,
+) error {
+	payload, err := protocol.DecodePlay(envelope)
+	if err != nil {
+		return err
+	}
+	return h.handleControlEvent(
+		ctx,
+		payload.RoomID,
+		func(existingRoom *room.Room) (room.State, []*room.ClientConnection, error) {
+			return existingRoom.ApplyPlay(payload.UserID, payload.PositionMs)
+		},
+		func(state room.State) protocol.Envelope {
+			return protocol.Envelope{
+				Type: protocol.TypePlay,
+				Payload: mustJSONRaw(protocol.PlayPayload{
+					RoomID:     state.RoomID,
+					UserID:     state.HostUserID,
+					PositionMs: state.PositionMs,
+					Seq:        state.Seq,
+				}),
+			}
+		},
+	)
+}
+
+// handlePause validates one pause control event and broadcasts the authoritative pause.
+func (h *WebSocketHandler) handlePause(
+	ctx context.Context,
+	_ *room.ClientConnection,
+	envelope protocol.Envelope,
+) error {
+	payload, err := protocol.DecodePause(envelope)
+	if err != nil {
+		return err
+	}
+	return h.handleControlEvent(
+		ctx,
+		payload.RoomID,
+		func(existingRoom *room.Room) (room.State, []*room.ClientConnection, error) {
+			return existingRoom.ApplyPause(payload.UserID, payload.PositionMs)
+		},
+		func(state room.State) protocol.Envelope {
+			return protocol.Envelope{
+				Type: protocol.TypePause,
+				Payload: mustJSONRaw(protocol.PausePayload{
+					RoomID:     state.RoomID,
+					UserID:     state.HostUserID,
+					PositionMs: state.PositionMs,
+					Seq:        state.Seq,
+				}),
+			}
+		},
+	)
+}
+
+// handleSeek validates one seek control event and broadcasts the authoritative seek.
+func (h *WebSocketHandler) handleSeek(
+	ctx context.Context,
+	_ *room.ClientConnection,
+	envelope protocol.Envelope,
+) error {
+	payload, err := protocol.DecodeSeek(envelope)
+	if err != nil {
+		return err
+	}
+	return h.handleControlEvent(
+		ctx,
+		payload.RoomID,
+		func(existingRoom *room.Room) (room.State, []*room.ClientConnection, error) {
+			return existingRoom.ApplySeek(payload.UserID, payload.PositionMs)
+		},
+		func(state room.State) protocol.Envelope {
+			return protocol.Envelope{
+				Type: protocol.TypeSeek,
+				Payload: mustJSONRaw(protocol.SeekPayload{
+					RoomID:     state.RoomID,
+					UserID:     state.HostUserID,
+					PositionMs: state.PositionMs,
+					Seq:        state.Seq,
+				}),
+			}
+		},
+	)
+}
+
+func (h *WebSocketHandler) handleControlEvent(
+	ctx context.Context,
+	roomID string,
+	apply func(existingRoom *room.Room) (room.State, []*room.ClientConnection, error),
+	buildEnvelope func(state room.State) protocol.Envelope,
+) error {
+	existingRoom, ok := h.roomManager.Get(roomID)
+	if !ok {
+		return protocolMessageError{
+			roomID:  roomID,
+			message: "room not found",
+		}
+	}
+
+	state, clients, err := apply(existingRoom)
+	if err != nil {
+		if errors.Is(err, room.ErrNotHost) {
+			return protocolMessageError{
+				roomID:  roomID,
+				message: "only host can control playback",
+			}
+		}
+		return err
+	}
+
+	return broadcastEnvelope(ctx, clients, buildEnvelope(state))
+}
+
+func broadcastEnvelope(
+	ctx context.Context,
+	clients []*room.ClientConnection,
+	envelope protocol.Envelope,
+) error {
+	for _, client := range clients {
+		if err := client.WriteJSON(ctx, envelope); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // mustJSONRaw is used for small internal protocol responses that should never fail to marshal.

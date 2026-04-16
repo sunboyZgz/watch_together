@@ -1,6 +1,9 @@
 package com.example.watch_together.sync
 
 import com.example.watch_together.config.AppConfig
+import com.example.watch_together.sync.protocol.PausePayload
+import com.example.watch_together.sync.protocol.PlayPayload
+import com.example.watch_together.sync.protocol.SeekPayload
 import com.example.watch_together.ui.player.PlayerAdapter
 
 class RoomSyncCoordinator(
@@ -22,5 +25,44 @@ class RoomSyncCoordinator(
         }
 
         return roomState
+    }
+
+    // applyPlayEvent updates the local baseline from an authoritative play broadcast.
+    fun applyPlayEvent(previous: RoomSyncState, payload: PlayPayload): RoomSyncState {
+        playerAdapter.seekTo(payload.positionMs)
+        playerAdapter.play()
+
+        return previous.copy(
+            positionMs = payload.positionMs,
+            paused = false,
+            seq = payload.seq
+        )
+    }
+
+    // applyPauseEvent updates the local baseline from an authoritative pause broadcast.
+    fun applyPauseEvent(previous: RoomSyncState, payload: PausePayload): RoomSyncState {
+        playerAdapter.seekTo(payload.positionMs)
+        playerAdapter.pause()
+
+        return previous.copy(
+            positionMs = payload.positionMs,
+            paused = true,
+            seq = payload.seq
+        )
+    }
+
+    // applySeekEvent keeps the local paused flag aligned while moving to the new position.
+    fun applySeekEvent(previous: RoomSyncState, payload: SeekPayload): RoomSyncState {
+        playerAdapter.seekTo(payload.positionMs)
+        if (previous.paused) {
+            playerAdapter.pause()
+        } else {
+            playerAdapter.play()
+        }
+
+        return previous.copy(
+            positionMs = payload.positionMs,
+            seq = payload.seq
+        )
     }
 }

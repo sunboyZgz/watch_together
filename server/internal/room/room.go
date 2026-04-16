@@ -1,6 +1,11 @@
 package room
 
-import "sync"
+import (
+	"errors"
+	"sync"
+)
+
+var ErrNotHost = errors.New("only host can control playback")
 
 type State struct {
 	RoomID       string
@@ -91,4 +96,55 @@ func (r *Room) ClientCount() int {
 	defer r.mu.RUnlock()
 
 	return len(r.clients)
+}
+
+// ApplyPlay updates the room's authority state for a play action and snapshots the
+// active clients so the transport layer can broadcast without holding the room lock.
+func (r *Room) ApplyPlay(userID string, positionMs int64) (State, []*ClientConnection, error) {
+	return r.applyControl(userID, positionMs, false)
+}
+
+// ApplyPause updates the room's authority state for a pause action.
+func (r *Room) ApplyPause(userID string, positionMs int64) (State, []*ClientConnection, error) {
+	return r.applyControl(userID, positionMs, true)
+}
+
+// ApplySeek updates the room position while preserving the current paused flag.
+func (r *Room) ApplySeek(userID string, positionMs int64) (State, []*ClientConnection, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.state.HostUserID != userID {
+		return State{}, nil, ErrNotHost
+	}
+
+	r.state.PositionMs = positionMs
+	r.state.Seq++
+	return r.state, r.clientsSnapshotLocked(), nil
+}
+
+func (r *Room) applyControl(
+	userID string,
+	positionMs int64,
+	paused bool,
+) (State, []*ClientConnection, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.state.HostUserID != userID {
+		return State{}, nil, ErrNotHost
+	}
+
+	r.state.Paused = paused
+	r.state.PositionMs = positionMs
+	r.state.Seq++
+	return r.state, r.clientsSnapshotLocked(), nil
+}
+
+func (r *Room) clientsSnapshotLocked() []*ClientConnection {
+	clients := make([]*ClientConnection, 0, len(r.clients))
+	for client := range r.clients {
+		clients = append(clients, client)
+	}
+	return clients
 }

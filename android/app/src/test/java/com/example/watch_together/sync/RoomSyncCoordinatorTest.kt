@@ -1,6 +1,9 @@
 package com.example.watch_together.sync
 
 import androidx.media3.ui.PlayerView
+import com.example.watch_together.sync.protocol.PausePayload
+import com.example.watch_together.sync.protocol.PlayPayload
+import com.example.watch_together.sync.protocol.SeekPayload
 import com.example.watch_together.ui.player.PlayerAdapter
 import com.example.watch_together.ui.player.PlayerEvent
 import org.junit.Assert.assertEquals
@@ -31,6 +34,58 @@ class RoomSyncCoordinatorTest {
         assertEquals(1.25f, fakePlayerAdapter.speed, 0.0f)
         assertTrue(fakePlayerAdapter.playCalled)
         assertFalse(fakePlayerAdapter.pauseCalled)
+    }
+
+    @Test
+    fun `applyPlayEvent seeks then plays and advances seq`() {
+        val fakePlayerAdapter = FakePlayerAdapter()
+        val coordinator = RoomSyncCoordinator(fakePlayerAdapter)
+        val previous = RoomSyncState("ROOM01", "sample_001", "user_a", true, 10_000L, 1.0, 1L)
+
+        val next = coordinator.applyPlayEvent(
+            previous,
+            PlayPayload("ROOM01", "user_a", 12_000L, 2L)
+        )
+
+        assertEquals(12_000L, fakePlayerAdapter.seekPositionMs)
+        assertTrue(fakePlayerAdapter.playCalled)
+        assertFalse(next.paused)
+        assertEquals(2L, next.seq)
+    }
+
+    @Test
+    fun `applyPauseEvent seeks then pauses and advances seq`() {
+        val fakePlayerAdapter = FakePlayerAdapter()
+        val coordinator = RoomSyncCoordinator(fakePlayerAdapter)
+        val previous = RoomSyncState("ROOM01", "sample_001", "user_a", false, 10_000L, 1.0, 2L)
+
+        val next = coordinator.applyPauseEvent(
+            previous,
+            PausePayload("ROOM01", "user_a", 15_000L, 3L)
+        )
+
+        assertEquals(15_000L, fakePlayerAdapter.seekPositionMs)
+        assertTrue(fakePlayerAdapter.pauseCalled)
+        assertTrue(next.paused)
+        assertEquals(3L, next.seq)
+    }
+
+    @Test
+    fun `applySeekEvent preserves paused flag while moving position`() {
+        val fakePlayerAdapter = FakePlayerAdapter()
+        val coordinator = RoomSyncCoordinator(fakePlayerAdapter)
+        val previous = RoomSyncState("ROOM01", "sample_001", "user_a", true, 15_000L, 1.0, 3L)
+
+        val next = coordinator.applySeekEvent(
+            previous,
+            SeekPayload("ROOM01", "user_a", 42_000L, 4L)
+        )
+
+        assertEquals(42_000L, fakePlayerAdapter.seekPositionMs)
+        assertTrue(fakePlayerAdapter.pauseCalled)
+        assertTrue(next.paused)
+        assertEquals(42_000L, next.positionMs)
+        assertEquals(4L, next.seq)
     }
 }
 

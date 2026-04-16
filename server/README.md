@@ -7,6 +7,7 @@
 - 可启动的 Go HTTP / WebSocket 服务入口
 - `POST /rooms` 的最小 create room 能力
 - `/ws` WebSocket 接入路由与正式 join room 语义
+- `play / pause / seek` 的最小控制事件处理与广播
 - 最小 `Room / ClientConnection / RoomManager` 内存结构
 - 基于 `INT-19` 协议草案的最小消息解析层
 - `join_room` 的已存在房间接入流程
@@ -61,8 +62,8 @@ server/
 - `cmd/roomserver/`: 服务端启动入口
 - `internal/app/`: 应用组装层，负责配置和 HTTP server 初始化
 - `internal/protocol/`: 与 `INT-19` 对齐的最小协议结构，包含 create room 请求 / 响应和 WebSocket 事件模型
-- `internal/room/`: 房间、连接、房间管理器，以及房间创建逻辑的内存模型
-- `internal/transport/`: `POST /rooms` 和 `/ws` 的接入层与最小 HTTP / WebSocket 处理
+- `internal/room/`: 房间、连接、房间管理器，以及房间创建与控制状态更新的内存模型
+- `internal/transport/`: `POST /rooms`、`/ws`、join room 与 `play / pause / seek` 的接入层和测试
 
 当前关键文件对应关系：
 
@@ -71,7 +72,7 @@ server/
 - `internal/protocol/events.go`: create room、join room、room_state、error 等最小结构
 - `internal/room/manager.go`: 房间创建、查询、唯一 `roomId` 生成和客户端清理
 - `internal/transport/room_http_handler.go`: create room HTTP 入口
-- `internal/transport/websocket_handler.go`: join room 和最小协议消息处理
+- `internal/transport/websocket_handler.go`: join room、host 校验、控制事件处理和广播
 
 ## Current Validation
 
@@ -81,5 +82,7 @@ server/
 - `go run ./cmd/roomserver`
 - `POST /rooms` 返回 `201 Created` 与初始 `room_state`
 - `join_room` 仅允许加入已存在房间，不存在房间时返回 `error`
+- host 发出的 `play / pause / seek` 会更新房间状态并广播
+- 非 host 发出的控制事件会返回 `error`
 
-其中 `POST /rooms` 和 `/ws` 的最小 `create room -> join_room -> room_state` 路径已通过基础测试验证。
+其中 `POST /rooms`、`join_room` 以及 `play / pause / seek` 的最小控制同步路径已通过基础测试验证。

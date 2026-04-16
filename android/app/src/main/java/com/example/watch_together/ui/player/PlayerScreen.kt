@@ -17,6 +17,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -44,6 +45,8 @@ import com.example.watch_together.sync.RoomSyncCoordinator
 import com.example.watch_together.sync.RoomSyncState
 import com.example.watch_together.sync.RoomWebSocketClient
 import com.example.watch_together.sync.RoomWebSocketListener
+import com.example.watch_together.sync.SyncMessage
+import com.example.watch_together.sync.isNewerThan
 import com.example.watch_together.ui.theme.Watch_togetherTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -67,6 +70,8 @@ fun PlayerScreen(modifier: Modifier = Modifier) {
     val playerEventLogs = remember { mutableStateListOf<String>() }
     val syncLogs = remember { mutableStateListOf<String>() }
 
+    var joinRoomInput by remember { mutableStateOf("") }
+    var activeUserId by remember { mutableStateOf<String?>(null) }
     var currentRoomId by remember { mutableStateOf<String?>(null) }
     var latestSyncState by remember { mutableStateOf<RoomSyncState?>(null) }
     var syncStatus by remember { mutableStateOf("Idle") }
@@ -75,13 +80,13 @@ fun PlayerScreen(modifier: Modifier = Modifier) {
     var isPlaying by remember { mutableStateOf(false) }
     var playbackSpeed by remember { mutableFloatStateOf(1f) }
 
+    val isHostController = remember(activeUserId, latestSyncState) {
+        activeUserId != null && latestSyncState?.hostUserId == activeUserId
+    }
+
     DisposableEffect(adapter) {
         adapter.setEventListener { event ->
-            appendLog(
-                logs = playerEventLogs,
-                line = event.toDebugLabel(),
-                maxSize = 8
-            )
+            appendLog(playerEventLogs, event.toDebugLabel(), maxSize = 8)
         }
         onDispose {
             adapter.setEventListener(null)
@@ -103,7 +108,21 @@ fun PlayerScreen(modifier: Modifier = Modifier) {
         }
     }
 
-    val syncListener = remember(roomSyncCoordinator, coroutineScope) {
+    fun applyAuthoritativeState(newState: RoomSyncState, reason: String) {
+        if (!newState.isNewerThan(latestSyncState)) {
+            appendLog(syncLogs, "Ignored stale $reason seq=${newState.seq}")
+            return
+        }
+
+        latestSyncState = newState
+        currentRoomId = newState.roomId
+        joinRoomInput = newState.roomId
+        playbackSpeed = newState.playbackRate.toFloat()
+        syncStatus = "$reason applied"
+        appendLog(syncLogs, "Applied $reason seq=${newState.seq} roomId=${newState.roomId}")
+    }
+
+    val syncListener = remember(roomSyncCoordinator, latestSyncState) {
         object : RoomWebSocketListener {
             override fun onLog(message: String) {
                 coroutineScope.launch {
@@ -113,14 +132,53 @@ fun PlayerScreen(modifier: Modifier = Modifier) {
 
             override fun onRoomState(payload: RoomSyncState) {
                 coroutineScope.launch {
-                    latestSyncState = roomSyncCoordinator.applyInitialState(payload)
-                    currentRoomId = payload.roomId
-                    playbackSpeed = payload.playbackRate.toFloat()
-                    syncStatus = "room_state applied"
-                    appendLog(
-                        logs = syncLogs,
-                        line = "Applied room_state seq=${payload.seq} roomId=${payload.roomId}"
-                    )
+                    val appliedState = roomSyncCoordinator.applyInitialState(payload)
+                    applyAuthoritativeState(appliedState, "room_state")
+                }
+            }
+
+            override fun onPlay(payload: com.example.watch_together.sync.protocol.PlayPayload) {
+                coroutineScope.launch {
+                    val previous = latestSyncState ?: run {
+                        appendLog(syncLogs, "Ignored play before room_state")
+                        return@launch
+                    }
+                    if (payload.seq <= previous.seq) {
+                        appendLog(syncLogs, "Ignored stale play seq=${payload.seq}")
+                        return@launch
+                    }
+                    val appliedState = roomSyncCoordinator.applyPlayEvent(previous, payload)
+                    applyAuthoritativeState(appliedState, "play")
+                }
+            }
+
+            override fun onPause(payload: com.example.watch_together.sync.protocol.PausePayload) {
+                coroutineScope.launch {
+                    val previous = latestSyncState ?: run {
+                        appendLog(syncLogs, "Ignored pause before room_state")
+                        return@launch
+                    }
+                    if (payload.seq <= previous.seq) {
+                        appendLog(syncLogs, "Ignored stale pause seq=${payload.seq}")
+                        return@launch
+                    }
+                    val appliedState = roomSyncCoordinator.applyPauseEvent(previous, payload)
+                    applyAuthoritativeState(appliedState, "pause")
+                }
+            }
+
+            override fun onSeek(payload: com.example.watch_together.sync.protocol.SeekPayload) {
+                coroutineScope.launch {
+                    val previous = latestSyncState ?: run {
+                        appendLog(syncLogs, "Ignored seek before room_state")
+                        return@launch
+                    }
+                    if (payload.seq <= previous.seq) {
+                        appendLog(syncLogs, "Ignored stale seek seq=${payload.seq}")
+                        return@launch
+                    }
+                    val appliedState = roomSyncCoordinator.applySeekEvent(previous, payload)
+                    applyAuthoritativeState(appliedState, "seek")
                 }
             }
 
@@ -133,6 +191,86 @@ fun PlayerScreen(modifier: Modifier = Modifier) {
         }
     }
 
+    fun createAndJoinAsHost() {
+        coroutineScope.launch {
+            runCatching {
+                syncStatus = "Creating room"
+                appendLog(syncLogs, "POST /rooms for hostUserId=$hostUserId")
+                val createResult = withContext(Dispatchers.IO) {
+                    roomHttpClient.createRoom(
+                        userId = hostUserId,
+                        mediaId = AppConfig.defaultMediaIdForRoom()
+                    )
+                }
+
+                currentRoomId = createResult.roomId
+                joinRoomInput = createResult.roomId
+                activeUserId = hostUserId
+                syncStatus = "Joining as host"
+                appendLog(
+                    syncLogs,
+                    "Created roomId=${createResult.roomId} mediaId=${createResult.roomState.mediaId}"
+                )
+
+                roomWebSocketClient.joinRoom(
+                    wsUrl = AppConfig.wsBaseUrl,
+                    roomId = createResult.roomId,
+                    userId = hostUserId,
+                    listener = syncListener
+                )
+            }.onFailure { error ->
+                syncStatus = "Create and join failed"
+                appendLog(syncLogs, "Create and join failed: ${error.message}")
+            }
+        }
+    }
+
+    fun joinAsViewer() {
+        val roomId = joinRoomInput.trim()
+        if (roomId.isBlank()) {
+            appendLog(syncLogs, "Join aborted: roomId is empty")
+            return
+        }
+
+        activeUserId = viewerUserId
+        currentRoomId = roomId
+        syncStatus = "Joining as viewer"
+        appendLog(syncLogs, "Joining roomId=$roomId as $viewerUserId")
+        roomWebSocketClient.joinRoom(
+            wsUrl = AppConfig.wsBaseUrl,
+            roomId = roomId,
+            userId = viewerUserId,
+            listener = syncListener
+        )
+    }
+
+    fun sendPlay() {
+        val currentState = latestSyncState ?: return
+        val sent = roomWebSocketClient.sendPlay(
+            positionMs = currentPosition,
+            seq = currentState.seq
+        )
+        appendLog(syncLogs, "play sent=$sent at ${currentPosition}ms")
+    }
+
+    fun sendPause() {
+        val currentState = latestSyncState ?: return
+        val sent = roomWebSocketClient.sendPause(
+            positionMs = currentPosition,
+            seq = currentState.seq
+        )
+        appendLog(syncLogs, "pause sent=$sent at ${currentPosition}ms")
+    }
+
+    fun sendSeek(targetPositionMs: Long) {
+        val currentState = latestSyncState ?: return
+        val sent = roomWebSocketClient.sendSeek(
+            positionMs = targetPositionMs,
+            seq = currentState.seq
+        )
+        appendLog(syncLogs, "seek sent=$sent to ${targetPositionMs}ms")
+    }
+
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -143,55 +281,19 @@ fun PlayerScreen(modifier: Modifier = Modifier) {
         PlayerStatusHeader(
             sampleUrl = sampleUrl,
             currentRoomId = currentRoomId,
-            syncStatus = syncStatus
+            syncStatus = syncStatus,
+            activeUserId = activeUserId,
+            isHostController = isHostController
         )
         JoinSyncActionsCard(
             hostUserId = hostUserId,
             viewerUserId = viewerUserId,
             currentRoomId = currentRoomId,
             syncStatus = syncStatus,
-            onCreateAndJoin = {
-                coroutineScope.launch {
-                    runCatching {
-                        syncStatus = "Creating room"
-                        appendLog(syncLogs, "POST /rooms for hostUserId=$hostUserId")
-                        val createResult = withContext(Dispatchers.IO) {
-                            roomHttpClient.createRoom(
-                                userId = hostUserId,
-                                mediaId = AppConfig.defaultMediaIdForRoom()
-                            )
-                        }
-
-                        currentRoomId = createResult.roomId
-                        syncStatus = "Joining room"
-                        appendLog(
-                            syncLogs,
-                            "Created roomId=${createResult.roomId} mediaId=${createResult.roomState.mediaId}"
-                        )
-
-                        roomWebSocketClient.joinRoom(
-                            wsUrl = AppConfig.wsBaseUrl,
-                            roomId = createResult.roomId,
-                            userId = viewerUserId,
-                            listener = syncListener
-                        )
-                    }.onFailure { error ->
-                        syncStatus = "Create and join failed"
-                        appendLog(syncLogs, "Create and join failed: ${error.message}")
-                    }
-                }
-            },
-            onRejoin = {
-                val roomId = currentRoomId ?: return@JoinSyncActionsCard
-                syncStatus = "Rejoining room"
-                appendLog(syncLogs, "Rejoining roomId=$roomId as $viewerUserId")
-                roomWebSocketClient.joinRoom(
-                    wsUrl = AppConfig.wsBaseUrl,
-                    roomId = roomId,
-                    userId = viewerUserId,
-                    listener = syncListener
-                )
-            }
+            joinRoomInput = joinRoomInput,
+            onJoinRoomInputChange = { joinRoomInput = it },
+            onCreateAndJoinAsHost = ::createAndJoinAsHost,
+            onJoinAsViewer = ::joinAsViewer
         )
         PlayerViewport(adapter = adapter)
         PlayerControls(
@@ -201,6 +303,11 @@ fun PlayerScreen(modifier: Modifier = Modifier) {
             duration = duration,
             isPlaying = isPlaying,
             playbackSpeed = playbackSpeed,
+            isHostController = isHostController,
+            isJoinedToRoom = latestSyncState != null,
+            onPlaySync = ::sendPlay,
+            onPauseSync = ::sendPause,
+            onSeekSync = ::sendSeek,
             onPlaybackSpeedChange = { speed ->
                 playbackSpeed = speed
                 adapter.setPlaybackSpeed(speed)
@@ -231,7 +338,9 @@ private fun rememberPlayerAdapter(): PlayerAdapter {
 private fun PlayerStatusHeader(
     sampleUrl: String,
     currentRoomId: String?,
-    syncStatus: String
+    syncStatus: String,
+    activeUserId: String?,
+    isHostController: Boolean
 ) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp)) {
@@ -242,7 +351,7 @@ private fun PlayerStatusHeader(
             )
             Spacer(modifier = Modifier.height(4.dp))
             Text(
-                text = "Android initial state sync on join validation",
+                text = "Android control sync validation",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -253,7 +362,17 @@ private fun PlayerStatusHeader(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             Text(
-                text = "Current room: ${currentRoomId ?: "(not created yet)"}",
+                text = "Current room: ${currentRoomId ?: "(not joined yet)"}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+                text = "Active user: ${activeUserId ?: "(none)"}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+                text = "Control mode: ${if (isHostController) "host sync" else "local / viewer"}",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -272,8 +391,10 @@ private fun JoinSyncActionsCard(
     viewerUserId: String,
     currentRoomId: String?,
     syncStatus: String,
-    onCreateAndJoin: () -> Unit,
-    onRejoin: () -> Unit
+    joinRoomInput: String,
+    onJoinRoomInputChange: (String) -> Unit,
+    onCreateAndJoinAsHost: () -> Unit,
+    onJoinAsViewer: () -> Unit
 ) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(
@@ -281,7 +402,7 @@ private fun JoinSyncActionsCard(
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             Text(
-                text = "Join-time sync actions",
+                text = "Room sync actions",
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Medium
             )
@@ -300,15 +421,22 @@ private fun JoinSyncActionsCard(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+            OutlinedTextField(
+                value = joinRoomInput,
+                onValueChange = onJoinRoomInputChange,
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("Room ID") },
+                singleLine = true
+            )
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = onCreateAndJoin) {
-                    Text("Create + Join")
+                Button(onClick = onCreateAndJoinAsHost) {
+                    Text("Create + Join as host")
                 }
                 OutlinedButton(
-                    onClick = onRejoin,
-                    enabled = currentRoomId != null
+                    onClick = onJoinAsViewer,
+                    enabled = joinRoomInput.isNotBlank()
                 ) {
-                    Text("Rejoin current room")
+                    Text("Join as viewer")
                 }
             }
         }
@@ -358,6 +486,11 @@ private fun PlayerControls(
     duration: Long,
     isPlaying: Boolean,
     playbackSpeed: Float,
+    isHostController: Boolean,
+    isJoinedToRoom: Boolean,
+    onPlaySync: () -> Unit,
+    onPauseSync: () -> Unit,
+    onSeekSync: (Long) -> Unit,
     onPlaybackSpeedChange: (Float) -> Unit
 ) {
     Card(modifier = Modifier.fillMaxWidth()) {
@@ -379,29 +512,60 @@ private fun PlayerControls(
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+            Text(
+                text = when {
+                    isHostController -> "Buttons will send sync events to the server."
+                    isJoinedToRoom -> "Viewer mode: incoming sync is applied, local control stays local."
+                    else -> "Local-only mode until you join a room."
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Button(onClick = { adapter.load(sampleUrl) }) {
                         Text("Load sample")
                     }
-                    Button(onClick = { adapter.play() }) {
-                        Text("Play")
+                    Button(onClick = {
+                        if (isHostController) {
+                            onPlaySync()
+                        } else {
+                            adapter.play()
+                        }
+                    }) {
+                        Text(if (isHostController) "Play sync" else "Play")
                     }
-                    OutlinedButton(onClick = { adapter.pause() }) {
-                        Text("Pause")
+                    OutlinedButton(onClick = {
+                        if (isHostController) {
+                            onPauseSync()
+                        } else {
+                            adapter.pause()
+                        }
+                    }) {
+                        Text(if (isHostController) "Pause sync" else "Pause")
                     }
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedButton(onClick = {
-                        adapter.seekTo((currentPosition - 10_000L).coerceAtLeast(0L))
+                        val target = (currentPosition - 10_000L).coerceAtLeast(0L)
+                        if (isHostController) {
+                            onSeekSync(target)
+                        } else {
+                            adapter.seekTo(target)
+                        }
                     }) {
-                        Text("-10s")
+                        Text(if (isHostController) "-10s sync" else "-10s")
                     }
                     OutlinedButton(onClick = {
                         val safeDuration = if (duration > 0L) duration else currentPosition + 10_000L
-                        adapter.seekTo((currentPosition + 10_000L).coerceAtMost(safeDuration))
+                        val target = (currentPosition + 10_000L).coerceAtMost(safeDuration)
+                        if (isHostController) {
+                            onSeekSync(target)
+                        } else {
+                            adapter.seekTo(target)
+                        }
                     }) {
-                        Text("+10s")
+                        Text(if (isHostController) "+10s sync" else "+10s")
                     }
                 }
             }
@@ -433,13 +597,13 @@ private fun SyncStatePanel(latestSyncState: RoomSyncState?) {
             verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             Text(
-                text = "Latest room_state",
+                text = "Latest sync state",
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Medium
             )
             if (latestSyncState == null) {
                 Text(
-                    text = "No room_state applied yet.",
+                    text = "No synced state applied yet.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

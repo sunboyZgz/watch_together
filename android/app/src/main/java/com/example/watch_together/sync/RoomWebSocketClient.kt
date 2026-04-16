@@ -1,6 +1,9 @@
 package com.example.watch_together.sync
 
 import com.example.watch_together.sync.protocol.JoinRoomPayload
+import com.example.watch_together.sync.protocol.PausePayload
+import com.example.watch_together.sync.protocol.PlayPayload
+import com.example.watch_together.sync.protocol.SeekPayload
 import com.example.watch_together.sync.protocol.toEnvelope
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -12,6 +15,9 @@ import org.json.JSONObject
 interface RoomWebSocketListener {
     fun onLog(message: String)
     fun onRoomState(payload: RoomSyncState)
+    fun onPlay(payload: PlayPayload)
+    fun onPause(payload: PausePayload)
+    fun onSeek(payload: SeekPayload)
     fun onError(message: String)
 }
 
@@ -20,11 +26,15 @@ class RoomWebSocketClient(
     private val decoder: SyncMessageDecoder = SyncMessageDecoder()
 ) {
     private var webSocket: WebSocket? = null
+    private var activeRoomId: String? = null
+    private var activeUserId: String? = null
 
     // joinRoom opens the shared /ws endpoint, sends join_room, and forwards the
     // first protocol messages back to the UI layer.
     fun joinRoom(wsUrl: String, roomId: String, userId: String, listener: RoomWebSocketListener) {
         close()
+        activeRoomId = roomId
+        activeUserId = userId
 
         val request = Request.Builder()
             .url(wsUrl)
@@ -54,9 +64,16 @@ class RoomWebSocketClient(
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) {
-                when (val message = decoder.decode(text)) {
-                    is SyncMessage.RoomState -> listener.onRoomState(message.payload.toRoomSyncState())
-                    is SyncMessage.Error -> listener.onError(message.payload.message)
+                try {
+                    when (val message = decoder.decode(text)) {
+                        is SyncMessage.RoomState -> listener.onRoomState(message.payload.toRoomSyncState())
+                        is SyncMessage.Play -> listener.onPlay(message.payload)
+                        is SyncMessage.Pause -> listener.onPause(message.payload)
+                        is SyncMessage.Seek -> listener.onSeek(message.payload)
+                        is SyncMessage.Error -> listener.onError(message.payload.message)
+                    }
+                } catch (error: Throwable) {
+                    listener.onError(error.message ?: "Failed to handle WebSocket message")
                 }
             }
 
@@ -67,11 +84,101 @@ class RoomWebSocketClient(
             override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
                 listener.onLog("WebSocket closing: $code / $reason")
             }
+
+            override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+                listener.onLog("WebSocket closed: $code / $reason")
+            }
         })
+    }
+
+    fun sendPlay(positionMs: Long, seq: Long): Boolean {
+        return sendControl(
+            PlayPayload(
+                roomId = activeRoomId ?: return false,
+                userId = activeUserId ?: return false,
+                positionMs = positionMs,
+                seq = seq
+            ).toEnvelope()
+        )
+    }
+
+    fun sendPause(positionMs: Long, seq: Long): Boolean {
+        return sendControl(
+            PausePayload(
+                roomId = activeRoomId ?: return false,
+                userId = activeUserId ?: return false,
+                positionMs = positionMs,
+                seq = seq
+            ).toEnvelope()
+        )
+    }
+
+    fun sendSeek(positionMs: Long, seq: Long): Boolean {
+        return sendControl(
+            SeekPayload(
+                roomId = activeRoomId ?: return false,
+                userId = activeUserId ?: return false,
+                positionMs = positionMs,
+                seq = seq
+            ).toEnvelope()
+        )
     }
 
     fun close() {
         webSocket?.close(1000, "client closed")
         webSocket = null
+        activeRoomId = null
+        activeUserId = null
+    }
+
+    private fun sendControl(envelope: Any): Boolean {
+        val webSocket = webSocket ?: return false
+        val rawMessage = envelopeToJson(envelope)
+        return webSocket.send(rawMessage)
+    }
+
+    private fun envelopeToJson(envelope: Any): String {
+        return when (envelope) {
+            is com.example.watch_together.sync.protocol.ProtocolEnvelope<*> -> {
+                JSONObject()
+                    .put("type", envelope.type)
+                    .put("payload", JSONObject(envelope.payloadAsMap()))
+                    .toString()
+            }
+
+            else -> error("Unsupported envelope type: ${envelope::class.java.simpleName}")
+        }
+    }
+
+    private fun com.example.watch_together.sync.protocol.ProtocolEnvelope<*>.payloadAsMap(): Map<String, Any> {
+        return when (val payload = payload) {
+            is JoinRoomPayload -> mapOf(
+                "roomId" to payload.roomId,
+                "userId" to payload.userId
+            )
+
+            is PlayPayload -> mapOf(
+                "roomId" to payload.roomId,
+                "userId" to payload.userId,
+                "positionMs" to payload.positionMs,
+                "seq" to payload.seq
+            )
+
+            is PausePayload -> mapOf(
+                "roomId" to payload.roomId,
+                "userId" to payload.userId,
+                "positionMs" to payload.positionMs,
+                "seq" to payload.seq
+            )
+
+            is SeekPayload -> mapOf(
+                "roomId" to payload.roomId,
+                "userId" to payload.userId,
+                "positionMs" to payload.positionMs,
+                "seq" to payload.seq
+            )
+
+            else -> error("Unsupported payload type: ${payload::class.java.simpleName}")
+        }
     }
 }

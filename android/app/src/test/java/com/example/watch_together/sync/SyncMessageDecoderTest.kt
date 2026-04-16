@@ -79,4 +79,57 @@ class SyncMessageDecoderTest {
         assertEquals("host_a", roomSyncState.hostUserId)
         assertTrue(roomSyncState.paused)
     }
+
+    @Test
+    fun `control events decode with shared room id position and seq fields`() {
+        val play = decoder.decode(
+            """
+                {
+                  "type": "play",
+                  "payload": {
+                    "roomId": "ROOM42",
+                    "userId": "host_a",
+                    "positionMs": 12000,
+                    "seq": 2
+                  }
+                }
+            """.trimIndent()
+        ) as SyncMessage.Play
+
+        val pause = decoder.decode(
+            """
+                {
+                  "type": "pause",
+                  "payload": {
+                    "roomId": "ROOM42",
+                    "userId": "host_a",
+                    "positionMs": 15000,
+                    "seq": 3
+                  }
+                }
+            """.trimIndent()
+        ) as SyncMessage.Pause
+
+        val seek = decoder.decode(
+            """
+                {
+                  "type": "seek",
+                  "payload": {
+                    "roomId": "ROOM42",
+                    "userId": "host_a",
+                    "positionMs": 42000,
+                    "seq": 4
+                  }
+                }
+            """.trimIndent()
+        ) as SyncMessage.Seek
+
+        assertEquals("ROOM42", play.payload.roomId)
+        assertEquals(12_000L, play.payload.positionMs)
+        assertEquals(2L, play.payload.seq)
+        assertEquals(15_000L, pause.payload.positionMs)
+        assertEquals(3L, pause.payload.seq)
+        assertEquals(42_000L, seek.payload.positionMs)
+        assertEquals(4L, seek.payload.seq)
+    }
 }
