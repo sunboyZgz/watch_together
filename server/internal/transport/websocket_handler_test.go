@@ -256,6 +256,71 @@ func TestWebSocketControlSyncRejectsNonHost(t *testing.T) {
 	}
 }
 
+func TestWebSocketHostTransferOnDisconnect(t *testing.T) {
+	roomManager := room.NewManager()
+	createdRoom, err := roomManager.CreateRoom("user_a", "sample_001")
+	if err != nil {
+		t.Fatalf("create room: %v", err)
+	}
+	mux := http.NewServeMux()
+	mux.Handle("/ws", NewWebSocketHandler(roomManager, true))
+
+	httpServer := httptest.NewServer(mux)
+	defer httpServer.Close()
+
+	wsURL := "ws" + httpServer.URL[len("http"):] + "/ws"
+	ctx := context.Background()
+
+	hostConn := mustDialWebSocket(t, ctx, wsURL)
+	viewerConn := mustDialWebSocket(t, ctx, wsURL)
+	defer viewerConn.Close(websocket.StatusNormalClosure, "test done")
+
+	mustJoinRoom(t, ctx, hostConn, createdRoom.ID(), "user_a")
+	mustReadEnvelope(t, ctx, hostConn)
+	mustJoinRoom(t, ctx, viewerConn, createdRoom.ID(), "user_b")
+	mustReadEnvelope(t, ctx, viewerConn)
+
+	if err := hostConn.Close(websocket.StatusNormalClosure, "host leaves"); err != nil {
+		t.Fatalf("close host websocket: %v", err)
+	}
+
+	roomStateEnvelope := mustReadEnvelope(t, ctx, viewerConn)
+	if roomStateEnvelope.Type != protocol.TypeRoomState {
+		t.Fatalf("expected room_state broadcast, got %s", roomStateEnvelope.Type)
+	}
+
+	var payload protocol.RoomStatePayload
+	if err := json.Unmarshal(roomStateEnvelope.Payload, &payload); err != nil {
+		t.Fatalf("unmarshal room_state payload: %v", err)
+	}
+	if payload.HostUserID != "user_b" {
+		t.Fatalf("expected host transfer to user_b, got %s", payload.HostUserID)
+	}
+	if payload.Seq != 2 {
+		t.Fatalf("expected seq 2 after host transfer, got %d", payload.Seq)
+	}
+
+	mustSendEnvelope(t, ctx, viewerConn, protocol.Envelope{
+		Type: protocol.TypePlay,
+		Payload: mustJSONRaw(protocol.PlayPayload{
+			RoomID:     createdRoom.ID(),
+			UserID:     "user_b",
+			PositionMs: 9_000,
+			Seq:        payload.Seq,
+		}),
+	})
+
+	assertControlBroadcast(t, ctx, viewerConn, protocol.TypePlay, 9_000, 3)
+
+	state := createdRoom.StateSnapshot()
+	if state.HostUserID != "user_b" {
+		t.Fatalf("expected room host user_b after disconnect, got %s", state.HostUserID)
+	}
+	if state.Seq != 3 {
+		t.Fatalf("expected seq 3 after transferred host play, got %d", state.Seq)
+	}
+}
+
 func mustDialWebSocket(t *testing.T, ctx context.Context, wsURL string) *websocket.Conn {
 	t.Helper()
 	conn, _, err := websocket.Dial(ctx, wsURL, nil)

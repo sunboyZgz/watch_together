@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	"time"
 
 	"github.com/coder/websocket"
 
@@ -48,7 +49,10 @@ func (h *WebSocketHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	defer func() {
 		// Connection cleanup always flows through the room manager so empty rooms can be removed.
-		h.roomManager.RemoveClient(client)
+		removeResult := h.roomManager.RemoveClient(client)
+		if removeResult.HostTransferred {
+			h.broadcastRoomState(removeResult)
+		}
 		_ = client.Close(websocket.StatusNormalClosure, "connection closed")
 	}()
 
@@ -278,6 +282,27 @@ func broadcastEnvelope(
 		}
 	}
 	return nil
+}
+
+// broadcastRoomState pushes the latest authority snapshot after membership changes such
+// as host transfer. Disconnect cleanup uses a fresh context because the request context
+// may already be canceled when the websocket loop exits.
+func (h *WebSocketHandler) broadcastRoomState(result room.RemoveClientResult) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	_ = broadcastEnvelope(ctx, result.Remaining, protocol.Envelope{
+		Type: protocol.TypeRoomState,
+		Payload: mustJSONRaw(protocol.RoomStatePayload{
+			RoomID:       result.State.RoomID,
+			MediaID:      result.State.MediaID,
+			HostUserID:   result.State.HostUserID,
+			Paused:       result.State.Paused,
+			PositionMs:   result.State.PositionMs,
+			PlaybackRate: result.State.PlaybackRate,
+			Seq:          result.State.Seq,
+		}),
+	})
 }
 
 // mustJSONRaw is used for small internal protocol responses that should never fail to marshal.

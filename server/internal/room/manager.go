@@ -13,6 +13,13 @@ type Manager struct {
 	rooms map[string]*Room
 }
 
+type RemoveClientResult struct {
+	State           State
+	Remaining       []*ClientConnection
+	HostTransferred bool
+	RoomRemoved     bool
+}
+
 // NewManager creates the top-level in-memory registry for all active rooms.
 func NewManager() *Manager {
 	return &Manager{
@@ -56,11 +63,12 @@ func (m *Manager) GetOrCreate(roomID string) *Room {
 	return room
 }
 
-// RemoveClient removes a client from its room and prunes empty rooms.
-func (m *Manager) RemoveClient(client *ClientConnection) {
+// RemoveClient removes a client from its room, prunes empty rooms, and reports
+// whether the disconnect immediately transferred host ownership.
+func (m *Manager) RemoveClient(client *ClientConnection) RemoveClientResult {
 	roomID := client.RoomID()
 	if roomID == "" {
-		return
+		return RemoveClientResult{}
 	}
 
 	m.mu.Lock()
@@ -68,13 +76,20 @@ func (m *Manager) RemoveClient(client *ClientConnection) {
 
 	room, ok := m.rooms[roomID]
 	if !ok {
-		return
+		return RemoveClientResult{}
 	}
 
-	room.Leave(client)
-	if room.ClientCount() == 0 {
-		delete(m.rooms, roomID)
+	leaveResult := room.Leave(client)
+	result := RemoveClientResult{
+		State:           leaveResult.State,
+		Remaining:       leaveResult.Remaining,
+		HostTransferred: leaveResult.HostTransferred,
 	}
+	if leaveResult.RoomEmpty {
+		delete(m.rooms, roomID)
+		result.RoomRemoved = true
+	}
+	return result
 }
 
 // RoomCount exposes the current number of active rooms for tests and diagnostics.

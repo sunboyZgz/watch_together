@@ -8,6 +8,7 @@
 - `POST /rooms` 的最小 create room 能力
 - `/ws` WebSocket 接入路由与正式 join room 语义
 - `play / pause / seek` 的最小控制事件处理与广播
+- host disconnect 后的 immediate host transfer
 - 最小 `Room / ClientConnection / RoomManager` 内存结构
 - 基于 `INT-19` 协议草案的最小消息解析层
 - `join_room` 的已存在房间接入流程
@@ -84,5 +85,6 @@ server/
 - `join_room` 仅允许加入已存在房间，不存在房间时返回 `error`
 - host 发出的 `play / pause / seek` 会更新房间状态并广播
 - 非 host 发出的控制事件会返回 `error`
+- host 断开连接后，剩余成员会收到新的 `room_state` 且 host 身份立即转移
 
-其中 `POST /rooms`、`join_room` 以及 `play / pause / seek` 的最小控制同步路径已通过基础测试验证。
+其中 `POST /rooms`、`join_room`、`play / pause / seek` 与 host transfer 的最小同步路径已通过基础测试验证。

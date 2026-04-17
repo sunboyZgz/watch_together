@@ -24,6 +24,13 @@ type Room struct {
 	state   State
 }
 
+type LeaveResult struct {
+	State           State
+	Remaining       []*ClientConnection
+	HostTransferred bool
+	RoomEmpty       bool
+}
+
 // New creates a room with a minimal default playback state.
 func New(id string) *Room {
 	return &Room{
@@ -75,19 +82,30 @@ func (r *Room) Join(client *ClientConnection) State {
 	return r.state
 }
 
-// Leave removes a client and transfers host ownership if the host disconnects.
-func (r *Room) Leave(client *ClientConnection) {
+// Leave removes a client and reports whether the disconnect triggered host transfer.
+func (r *Room) Leave(client *ClientConnection) LeaveResult {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	delete(r.clients, client)
+	result := LeaveResult{}
 	if r.state.HostUserID == client.UserID() {
+		previousHost := r.state.HostUserID
 		r.state.HostUserID = ""
 		for candidate := range r.clients {
 			r.state.HostUserID = candidate.UserID()
 			break
 		}
+		if r.state.HostUserID != "" && r.state.HostUserID != previousHost {
+			r.state.Seq++
+			result.HostTransferred = true
+		}
 	}
+
+	result.State = r.state
+	result.Remaining = r.clientsSnapshotLocked()
+	result.RoomEmpty = len(r.clients) == 0
+	return result
 }
 
 // ClientCount reports how many active connections the room currently holds.
