@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/coder/websocket"
 
@@ -321,6 +322,89 @@ func TestWebSocketHostTransferOnDisconnect(t *testing.T) {
 	}
 }
 
+/*
+*
+它验证的是下面这条链路：
+客户端连接 WebSocket
+加入房间
+服务端发送 heartbeat
+客户端返回 heartbeat ack
+服务端认为客户端仍然存活
+连接继续保持
+服务端还能发送下一次 heartbeat
+*/
+func TestWebSocketHeartbeatAckKeepsConnectionAlive(t *testing.T) {
+	roomManager := room.NewManager()
+	createdRoom, err := roomManager.CreateRoom("user_a", "sample_001")
+	if err != nil {
+		t.Fatalf("create room: %v", err)
+	}
+	mux := http.NewServeMux()
+	mux.Handle("/ws", newWebSocketHandler(roomManager, true, 20*time.Millisecond, 80*time.Millisecond))
+
+	httpServer := httptest.NewServer(mux)
+	defer httpServer.Close()
+
+	wsURL := "ws" + httpServer.URL[len("http"):] + "/ws"
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+
+	conn := mustDialWebSocket(t, ctx, wsURL)
+	defer conn.Close(websocket.StatusNormalClosure, "test done")
+
+	mustJoinRoom(t, ctx, conn, createdRoom.ID(), "user_a")
+	mustReadEnvelope(t, ctx, conn)
+
+	firstHeartbeat := mustReadEnvelope(t, ctx, conn)
+	if firstHeartbeat.Type != protocol.TypeHeartbeat {
+		t.Fatalf("expected heartbeat, got %s", firstHeartbeat.Type)
+	}
+	var heartbeat protocol.HeartbeatPayload
+	if err := json.Unmarshal(firstHeartbeat.Payload, &heartbeat); err != nil {
+		t.Fatalf("unmarshal heartbeat payload: %v", err)
+	}
+
+	mustSendEnvelope(t, ctx, conn, protocol.Envelope{
+		Type: protocol.TypeHeartbeatAck,
+		Payload: mustJSONRaw(protocol.HeartbeatAckPayload{
+			ServerTimeMs: heartbeat.ServerTimeMs,
+			ClientTimeMs: heartbeat.ServerTimeMs + 1,
+		}),
+	})
+
+	secondHeartbeat := mustReadEnvelope(t, ctx, conn)
+	if secondHeartbeat.Type != protocol.TypeHeartbeat {
+		t.Fatalf("expected second heartbeat, got %s", secondHeartbeat.Type)
+	}
+}
+
+func TestWebSocketHeartbeatTimeoutRemovesSilentClient(t *testing.T) {
+	roomManager := room.NewManager()
+	createdRoom, err := roomManager.CreateRoom("user_a", "sample_001")
+	if err != nil {
+		t.Fatalf("create room: %v", err)
+	}
+	mux := http.NewServeMux()
+	mux.Handle("/ws", newWebSocketHandler(roomManager, true, 20*time.Millisecond, 60*time.Millisecond))
+
+	httpServer := httptest.NewServer(mux)
+	defer httpServer.Close()
+
+	wsURL := "ws" + httpServer.URL[len("http"):] + "/ws"
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	conn := mustDialWebSocket(t, ctx, wsURL)
+	mustJoinRoom(t, ctx, conn, createdRoom.ID(), "user_a")
+	mustReadEnvelope(t, ctx, conn)
+
+	readUntilClosed(t, ctx, conn)
+
+	waitFor(t, time.Second, func() bool {
+		return roomManager.ClientCount(createdRoom.ID()) == 0
+	})
+}
+
 func mustDialWebSocket(t *testing.T, ctx context.Context, wsURL string) *websocket.Conn {
 	t.Helper()
 	conn, _, err := websocket.Dial(ctx, wsURL, nil)
@@ -422,5 +506,29 @@ func assertControlBroadcast(
 		}
 	default:
 		t.Fatalf("unsupported expected control type %s", expectedType)
+	}
+}
+
+func waitFor(t *testing.T, timeout time.Duration, condition func() bool) {
+	t.Helper()
+
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if condition() {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	t.Fatalf("condition not satisfied within %s", timeout)
+}
+
+func readUntilClosed(t *testing.T, ctx context.Context, conn *websocket.Conn) {
+	t.Helper()
+
+	for {
+		if _, _, err := conn.Read(ctx); err != nil {
+			return
+		}
 	}
 }

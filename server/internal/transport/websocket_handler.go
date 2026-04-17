@@ -14,9 +14,16 @@ import (
 )
 
 type WebSocketHandler struct {
-	roomManager *room.Manager
-	debugSync   bool
+	roomManager       *room.Manager
+	debugSync         bool
+	heartbeatInterval time.Duration
+	heartbeatTimeout  time.Duration
 }
+
+const (
+	defaultHeartbeatInterval = 5 * time.Second
+	defaultHeartbeatTimeout  = 15 * time.Second
+)
 
 type protocolMessageError struct {
 	roomID  string
@@ -29,9 +36,20 @@ func (e protocolMessageError) Error() string {
 
 // NewWebSocketHandler builds the /ws entrypoint around the shared room manager.
 func NewWebSocketHandler(roomManager *room.Manager, debugSync bool) *WebSocketHandler {
+	return newWebSocketHandler(roomManager, debugSync, defaultHeartbeatInterval, defaultHeartbeatTimeout)
+}
+
+func newWebSocketHandler(
+	roomManager *room.Manager,
+	debugSync bool,
+	heartbeatInterval time.Duration,
+	heartbeatTimeout time.Duration,
+) *WebSocketHandler {
 	return &WebSocketHandler{
-		roomManager: roomManager,
-		debugSync:   debugSync,
+		roomManager:       roomManager,
+		debugSync:         debugSync,
+		heartbeatInterval: heartbeatInterval,
+		heartbeatTimeout:  heartbeatTimeout,
 	}
 }
 
@@ -46,8 +64,9 @@ func (h *WebSocketHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	client := room.NewClientConnection(conn)
-	ctx := r.Context()
+	ctx, cancel := context.WithCancel(context.Background())
 	defer func() {
+		cancel()
 		// Connection cleanup always flows through the room manager so empty rooms can be removed.
 		removeResult := h.roomManager.RemoveClient(client)
 		if removeResult.HostTransferred {
@@ -55,6 +74,7 @@ func (h *WebSocketHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		_ = client.Close(websocket.StatusNormalClosure, "connection closed")
 	}()
+	go h.runHeartbeatLoop(ctx, client)
 
 	for {
 		_, data, err := conn.Read(ctx)
@@ -109,9 +129,24 @@ func (h *WebSocketHandler) handleMessage(
 		return h.handlePause(ctx, client, envelope)
 	case protocol.TypeSeek:
 		return h.handleSeek(ctx, client, envelope)
+	case protocol.TypeHeartbeatAck:
+		return h.handleHeartbeatAck(client, envelope)
 	default:
 		return protocol.ErrUnsupportedMessageType
 	}
+}
+
+// handleHeartbeatAck refreshes the last known healthy timestamp for one connection.
+func (h *WebSocketHandler) handleHeartbeatAck(
+	client *room.ClientConnection,
+	envelope protocol.Envelope,
+) error {
+	_, err := protocol.DecodeHeartbeatAck(envelope)
+	if err != nil {
+		return err
+	}
+	client.MarkHeartbeatAck(time.Now())
+	return nil
 }
 
 // handleJoinRoom attaches the client to an existing room and returns the current
@@ -125,6 +160,7 @@ func (h *WebSocketHandler) handleJoinRoom(
 	if err != nil {
 		return err
 	}
+	client.MarkHeartbeatAck(time.Now())
 
 	existingRoom, ok := h.roomManager.Get(payload.RoomID)
 	if !ok {
@@ -156,13 +192,14 @@ func (h *WebSocketHandler) handleJoinRoom(
 // and broadcasts the authoritative play payload to all joined clients.
 func (h *WebSocketHandler) handlePlay(
 	ctx context.Context,
-	_ *room.ClientConnection,
+	client *room.ClientConnection,
 	envelope protocol.Envelope,
 ) error {
 	payload, err := protocol.DecodePlay(envelope)
 	if err != nil {
 		return err
 	}
+	client.MarkHeartbeatAck(time.Now())
 	return h.handleControlEvent(
 		ctx,
 		payload.RoomID,
@@ -186,13 +223,14 @@ func (h *WebSocketHandler) handlePlay(
 // handlePause validates one pause control event and broadcasts the authoritative pause.
 func (h *WebSocketHandler) handlePause(
 	ctx context.Context,
-	_ *room.ClientConnection,
+	client *room.ClientConnection,
 	envelope protocol.Envelope,
 ) error {
 	payload, err := protocol.DecodePause(envelope)
 	if err != nil {
 		return err
 	}
+	client.MarkHeartbeatAck(time.Now())
 	return h.handleControlEvent(
 		ctx,
 		payload.RoomID,
@@ -216,13 +254,14 @@ func (h *WebSocketHandler) handlePause(
 // handleSeek validates one seek control event and broadcasts the authoritative seek.
 func (h *WebSocketHandler) handleSeek(
 	ctx context.Context,
-	_ *room.ClientConnection,
+	client *room.ClientConnection,
 	envelope protocol.Envelope,
 ) error {
 	payload, err := protocol.DecodeSeek(envelope)
 	if err != nil {
 		return err
 	}
+	client.MarkHeartbeatAck(time.Now())
 	return h.handleControlEvent(
 		ctx,
 		payload.RoomID,
@@ -303,6 +342,40 @@ func (h *WebSocketHandler) broadcastRoomState(result room.RemoveClientResult) {
 			Seq:          result.State.Seq,
 		}),
 	})
+}
+
+// runHeartbeatLoop keeps every websocket connection on a simple liveness contract:
+// the server emits heartbeat events and closes the socket if the client stops acking.
+func (h *WebSocketHandler) runHeartbeatLoop(ctx context.Context, client *room.ClientConnection) {
+	ticker := time.NewTicker(h.heartbeatInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			now := time.Now()
+			if client.HeartbeatTimedOut(now, h.heartbeatTimeout) {
+				_ = client.Close(websocket.StatusPolicyViolation, "heartbeat timeout")
+				return
+			}
+
+			client.MarkHeartbeatSent(now)
+			if err := client.WriteJSON(ctx, protocol.Envelope{
+				Type: protocol.TypeHeartbeat,
+				Payload: mustJSONRaw(protocol.HeartbeatPayload{
+					ServerTimeMs: now.UnixMilli(),
+				}),
+			}); err != nil {
+				if h.debugSync && !errors.Is(err, context.Canceled) {
+					log.Printf("heartbeat write stopped: %v", err)
+				}
+				_ = client.Close(websocket.StatusPolicyViolation, "heartbeat write failed")
+				return
+			}
+		}
+	}
 }
 
 // mustJSONRaw is used for small internal protocol responses that should never fail to marshal.

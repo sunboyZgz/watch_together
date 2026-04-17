@@ -63,6 +63,25 @@ func DecodeSeek(envelope Envelope) (SeekPayload, error) {
 	return decodeControlPayload[SeekPayload](envelope)
 }
 
+// DecodeHeartbeatAck validates and decodes one heartbeat_ack event.
+func DecodeHeartbeatAck(envelope Envelope) (HeartbeatAckPayload, error) {
+	if envelope.Type != TypeHeartbeatAck {
+		return HeartbeatAckPayload{}, fmt.Errorf("%w: %s", ErrUnsupportedMessageType, envelope.Type)
+	}
+
+	var payload HeartbeatAckPayload
+	if err := json.Unmarshal(envelope.Payload, &payload); err != nil {
+		return HeartbeatAckPayload{}, err
+	}
+	if payload.ServerTimeMs == 0 {
+		return HeartbeatAckPayload{}, errors.New("missing serverTimeMs")
+	}
+	if payload.ClientTimeMs == 0 {
+		return HeartbeatAckPayload{}, errors.New("missing clientTimeMs")
+	}
+	return payload, nil
+}
+
 func decodeControlPayload[T interface {
 	GetRoomID() string
 	GetUserID() string

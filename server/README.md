@@ -8,6 +8,7 @@
 - `POST /rooms` 的最小 create room 能力
 - `/ws` WebSocket 接入路由与正式 join room 语义
 - `play / pause / seek` 的最小控制事件处理与广播
+- 应用层 heartbeat 与静默连接超时清理
 - host disconnect 后的 immediate host transfer
 - 最小 `Room / ClientConnection / RoomManager` 内存结构
 - 基于 `INT-19` 协议草案的最小消息解析层
@@ -70,10 +71,10 @@ server/
 
 - `cmd/roomserver/main.go`: 读取配置并启动服务
 - `internal/app/server.go`: 注册 `/healthz`、`POST /rooms` 和 `/ws`
-- `internal/protocol/events.go`: create room、join room、room_state、error 等最小结构
+- `internal/protocol/events.go`: create room、join room、room_state、heartbeat、error 等最小结构
 - `internal/room/manager.go`: 房间创建、查询、唯一 `roomId` 生成和客户端清理
 - `internal/transport/room_http_handler.go`: create room HTTP 入口
-- `internal/transport/websocket_handler.go`: join room、host 校验、控制事件处理和广播
+- `internal/transport/websocket_handler.go`: join room、heartbeat、host 校验、控制事件处理和广播
 
 ## Current Validation
 
@@ -85,6 +86,8 @@ server/
 - `join_room` 仅允许加入已存在房间，不存在房间时返回 `error`
 - host 发出的 `play / pause / seek` 会更新房间状态并广播
 - 非 host 发出的控制事件会返回 `error`
+- 服务端会周期性发送 `heartbeat`，客户端需返回 `heartbeat_ack`
+- 超时未 ack 的连接会进入现有断连清理流程
 - host 断开连接后，剩余成员会收到新的 `room_state` 且 host 身份立即转移
 
 其中 `POST /rooms`、`join_room`、`play / pause / seek` 与 host transfer 的最小同步路径已通过基础测试验证。

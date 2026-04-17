@@ -36,6 +36,15 @@ type SeekPayload struct {
 	Seq        int64  `json:"seq"`
 }
 
+type HeartbeatPayload struct {
+	ServerTimeMs int64 `json:"serverTimeMs"`
+}
+
+type HeartbeatAckPayload struct {
+	ServerTimeMs int64 `json:"serverTimeMs"`
+	ClientTimeMs int64 `json:"clientTimeMs"`
+}
+
 type RoomStatePayload struct {
 	RoomID       string  `json:"roomId"`
 	MediaID      string  `json:"mediaId"`

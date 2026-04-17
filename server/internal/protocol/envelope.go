@@ -8,6 +8,8 @@ const (
 	TypePlay      = "play"
 	TypePause     = "pause"
 	TypeSeek      = "seek"
+	TypeHeartbeat = "heartbeat"
+	TypeHeartbeatAck = "heartbeat_ack"
 	TypeError     = "error"
 )
 
