@@ -495,6 +495,71 @@ func TestWebSocketRepeatedJoinKeepsHostIdentityStable(t *testing.T) {
 	}
 }
 
+func TestWebSocketRepeatedJoinReturnsCurrentEffectiveRoomState(t *testing.T) {
+	roomManager := room.NewManager()
+	createdRoom, err := roomManager.CreateRoom("user_a", "sample_001")
+	if err != nil {
+		t.Fatalf("create room: %v", err)
+	}
+	mux := http.NewServeMux()
+	mux.Handle("/ws", NewWebSocketHandler(roomManager, true))
+
+	httpServer := httptest.NewServer(mux)
+	defer httpServer.Close()
+
+	wsURL := "ws" + httpServer.URL[len("http"):] + "/ws"
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	hostConn := mustDialWebSocket(t, ctx, wsURL)
+	defer hostConn.Close(websocket.StatusNormalClosure, "test done")
+	viewerConn1 := mustDialWebSocket(t, ctx, wsURL)
+	viewerConn2 := mustDialWebSocket(t, ctx, wsURL)
+	defer viewerConn2.Close(websocket.StatusNormalClosure, "test done")
+
+	mustJoinRoom(t, ctx, hostConn, createdRoom.ID(), "user_a")
+	mustReadEnvelope(t, ctx, hostConn)
+	mustJoinRoom(t, ctx, viewerConn1, createdRoom.ID(), "user_b")
+	mustReadEnvelope(t, ctx, viewerConn1)
+
+	mustSendEnvelope(t, ctx, hostConn, protocol.Envelope{
+		Type: protocol.TypePlay,
+		Payload: mustJSONRaw(protocol.PlayPayload{
+			RoomID:     createdRoom.ID(),
+			UserID:     "user_a",
+			PositionMs: 0,
+			Seq:        1,
+		}),
+	})
+
+	assertControlBroadcast(t, ctx, hostConn, protocol.TypePlay, 0, 2)
+	assertControlBroadcast(t, ctx, viewerConn1, protocol.TypePlay, 0, 2)
+
+	time.Sleep(40 * time.Millisecond)
+
+	mustJoinRoom(t, ctx, viewerConn2, createdRoom.ID(), "user_b")
+	rejoinEnvelope := mustReadEnvelope(t, ctx, viewerConn2)
+	if rejoinEnvelope.Type != protocol.TypeRoomState {
+		t.Fatalf("expected room_state on repeated join, got %s", rejoinEnvelope.Type)
+	}
+
+	readUntilClosed(t, ctx, viewerConn1)
+
+	var payload protocol.RoomStatePayload
+	if err := json.Unmarshal(rejoinEnvelope.Payload, &payload); err != nil {
+		t.Fatalf("unmarshal room_state payload: %v", err)
+	}
+	if payload.Paused {
+		t.Fatalf("expected rejoin room_state to stay in playing state")
+	}
+	if payload.PositionMs <= 0 {
+		t.Fatalf("expected repeated join to receive advanced effective position, got %d", payload.PositionMs)
+	}
+	if payload.Seq != 2 {
+		t.Fatalf("expected repeated join room_state seq 2, got %d", payload.Seq)
+	}
+}
+
 func mustDialWebSocket(t *testing.T, ctx context.Context, wsURL string) *websocket.Conn {
 	t.Helper()
 	conn, _, err := websocket.Dial(ctx, wsURL, nil)

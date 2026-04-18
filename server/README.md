@@ -91,6 +91,6 @@ server/
 - 服务端会周期性发送 `heartbeat`，客户端需返回 `heartbeat_ack`
 - 超时未 ack 的连接会进入现有断连清理流程
 - host 断开连接后，剩余成员会收到新的 `room_state` 且 host 身份立即转移
-- 同一 `userId` repeated join 同一房间时，新连接会替换旧连接并重新收到最新 `room_state`
+- 同一 `userId` repeated join 同一房间时，新连接会替换旧连接并重新收到基于 authority timeline 结算后的最新 `room_state`
 
 其中 `POST /rooms`、`join_room`、`play / pause / seek` 与 host transfer 的最小同步路径已通过基础测试验证。

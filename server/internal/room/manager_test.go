@@ -3,6 +3,7 @@ package room
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestManagerRemoveClientDeletesEmptyRoom(t *testing.T) {
@@ -94,5 +95,27 @@ func TestRoomJoinReplacesPreviousConnectionForSameUser(t *testing.T) {
 	}
 	if secondJoin.State.HostUserID != "user_a" {
 		t.Fatalf("expected host to stay user_a, got %s", secondJoin.State.HostUserID)
+	}
+}
+
+func TestRoomStateSnapshotExtrapolatesCurrentPositionWhilePlaying(t *testing.T) {
+	currentTime := time.UnixMilli(1_000)
+	room := newWithClock("ROOM01", func() time.Time {
+		return currentTime
+	})
+	room.state.MediaID = "sample_001"
+	room.state.HostUserID = "user_a"
+
+	if _, _, err := room.ApplyPlay("user_a", 5_000); err != nil {
+		t.Fatalf("apply play: %v", err)
+	}
+
+	currentTime = currentTime.Add(3 * time.Second)
+	state := room.StateSnapshot()
+	if state.PositionMs != 8_000 {
+		t.Fatalf("expected extrapolated position 8000, got %d", state.PositionMs)
+	}
+	if state.Seq != 2 {
+		t.Fatalf("expected seq 2 after play, got %d", state.Seq)
 	}
 }

@@ -2,7 +2,9 @@ package room
 
 import (
 	"errors"
+	"math"
 	"sync"
+	"time"
 )
 
 var ErrNotHost = errors.New("only host can control playback")
@@ -23,6 +25,8 @@ type Room struct {
 	clients       map[*ClientConnection]struct{}
 	clientsByUser map[string]*ClientConnection
 	state         State
+	authorityAt   time.Time
+	now           func() time.Time
 }
 
 type LeaveResult struct {
@@ -39,6 +43,10 @@ type JoinResult struct {
 
 // New creates a room with a minimal default playback state.
 func New(id string) *Room {
+	return newWithClock(id, time.Now)
+}
+
+func newWithClock(id string, now func() time.Time) *Room {
 	return &Room{
 		id:            id,
 		clients:       make(map[*ClientConnection]struct{}),
@@ -52,6 +60,8 @@ func New(id string) *Room {
 			PlaybackRate: 1.0,
 			Seq:          1,
 		},
+		authorityAt: now(),
+		now:         now,
 	}
 }
 
@@ -73,7 +83,7 @@ func (r *Room) StateSnapshot() State {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	return r.state
+	return r.currentStateLocked(r.now())
 }
 
 // Join registers a client in the room and replaces any previous connection from the same user.
@@ -94,7 +104,7 @@ func (r *Room) Join(client *ClientConnection) JoinResult {
 		r.state.HostUserID = client.UserID()
 	}
 	return JoinResult{
-		State:          r.state,
+		State:          r.currentStateLocked(r.now()),
 		ReplacedClient: replacedClient,
 	}
 }
@@ -122,7 +132,7 @@ func (r *Room) Leave(client *ClientConnection) LeaveResult {
 		}
 	}
 
-	result.State = r.state
+	result.State = r.currentStateLocked(r.now())
 	result.Remaining = r.clientsSnapshotLocked()
 	result.RoomEmpty = len(r.clients) == 0
 	return result
@@ -157,8 +167,9 @@ func (r *Room) ApplySeek(userID string, positionMs int64) (State, []*ClientConne
 	}
 
 	r.state.PositionMs = positionMs
+	r.authorityAt = r.now()
 	r.state.Seq++
-	return r.state, r.clientsSnapshotLocked(), nil
+	return r.currentStateLocked(r.authorityAt), r.clientsSnapshotLocked(), nil
 }
 
 func (r *Room) applyControl(
@@ -175,8 +186,9 @@ func (r *Room) applyControl(
 
 	r.state.Paused = paused
 	r.state.PositionMs = positionMs
+	r.authorityAt = r.now()
 	r.state.Seq++
-	return r.state, r.clientsSnapshotLocked(), nil
+	return r.currentStateLocked(r.authorityAt), r.clientsSnapshotLocked(), nil
 }
 
 func (r *Room) clientsSnapshotLocked() []*ClientConnection {
@@ -185,4 +197,24 @@ func (r *Room) clientsSnapshotLocked() []*ClientConnection {
 		clients = append(clients, client)
 	}
 	return clients
+}
+
+func (r *Room) currentStateLocked(now time.Time) State {
+	snapshot := r.state
+	if snapshot.Paused || r.authorityAt.IsZero() {
+		return snapshot
+	}
+
+	elapsedMs := now.Sub(r.authorityAt).Milliseconds()
+	if elapsedMs <= 0 {
+		return snapshot
+	}
+
+	progressedMs := int64(math.Round(float64(elapsedMs) * snapshot.PlaybackRate))
+	if progressedMs < 0 {
+		return snapshot
+	}
+
+	snapshot.PositionMs += progressedMs
+	return snapshot
 }
