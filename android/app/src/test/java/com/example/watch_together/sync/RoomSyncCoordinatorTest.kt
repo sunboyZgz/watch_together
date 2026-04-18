@@ -27,13 +27,14 @@ class RoomSyncCoordinatorTest {
             seq = 2L
         )
 
-        coordinator.applyInitialState(roomState)
+        val applied = coordinator.applyInitialState(roomState, appliedAtMs = 1_000L)
 
         assertTrue(fakePlayerAdapter.loadedUrl.endsWith("/custom_media/index.m3u8"))
         assertEquals(42_000L, fakePlayerAdapter.seekPositionMs)
         assertEquals(1.25f, fakePlayerAdapter.speed, 0.0f)
         assertTrue(fakePlayerAdapter.playCalled)
         assertFalse(fakePlayerAdapter.pauseCalled)
+        assertEquals(1_000L, applied.authorityAppliedAtMs)
     }
 
     @Test
@@ -44,13 +45,15 @@ class RoomSyncCoordinatorTest {
 
         val next = coordinator.applyPlayEvent(
             previous,
-            PlayPayload("ROOM01", "user_a", 12_000L, 2L)
+            PlayPayload("ROOM01", "user_a", 12_000L, 2L),
+            appliedAtMs = 2_000L
         )
 
         assertEquals(12_000L, fakePlayerAdapter.seekPositionMs)
         assertTrue(fakePlayerAdapter.playCalled)
         assertFalse(next.paused)
         assertEquals(2L, next.seq)
+        assertEquals(2_000L, next.authorityAppliedAtMs)
     }
 
     @Test
@@ -61,13 +64,15 @@ class RoomSyncCoordinatorTest {
 
         val next = coordinator.applyPauseEvent(
             previous,
-            PausePayload("ROOM01", "user_a", 15_000L, 3L)
+            PausePayload("ROOM01", "user_a", 15_000L, 3L),
+            appliedAtMs = 3_000L
         )
 
         assertEquals(15_000L, fakePlayerAdapter.seekPositionMs)
         assertTrue(fakePlayerAdapter.pauseCalled)
         assertTrue(next.paused)
         assertEquals(3L, next.seq)
+        assertEquals(3_000L, next.authorityAppliedAtMs)
     }
 
     @Test
@@ -78,7 +83,8 @@ class RoomSyncCoordinatorTest {
 
         val next = coordinator.applySeekEvent(
             previous,
-            SeekPayload("ROOM01", "user_a", 42_000L, 4L)
+            SeekPayload("ROOM01", "user_a", 42_000L, 4L),
+            appliedAtMs = 4_000L
         )
 
         assertEquals(42_000L, fakePlayerAdapter.seekPositionMs)
@@ -86,6 +92,85 @@ class RoomSyncCoordinatorTest {
         assertTrue(next.paused)
         assertEquals(42_000L, next.positionMs)
         assertEquals(4L, next.seq)
+        assertEquals(4_000L, next.authorityAppliedAtMs)
+    }
+
+    @Test
+    fun `estimateExpectedPositionMs extrapolates from authority baseline`() {
+        val fakePlayerAdapter = FakePlayerAdapter()
+        val coordinator = RoomSyncCoordinator(fakePlayerAdapter)
+        val authority = RoomSyncState(
+            roomId = "ROOM01",
+            mediaId = "sample_001",
+            hostUserId = "user_a",
+            paused = false,
+            positionMs = 10_000L,
+            playbackRate = 1.0,
+            seq = 5L,
+            authorityAppliedAtMs = 2_000L
+        )
+
+        val expected = coordinator.estimateExpectedPositionMs(authority, nowMs = 5_000L)
+
+        assertEquals(13_000L, expected)
+    }
+
+    @Test
+    fun `evaluateDrift requests correction when drift exceeds threshold`() {
+        val fakePlayerAdapter = FakePlayerAdapter().apply {
+            currentPositionMs = 15_000L
+        }
+        val coordinator = RoomSyncCoordinator(fakePlayerAdapter)
+        val authority = RoomSyncState(
+            roomId = "ROOM01",
+            mediaId = "sample_001",
+            hostUserId = "user_a",
+            paused = false,
+            positionMs = 10_000L,
+            playbackRate = 1.0,
+            seq = 5L,
+            authorityAppliedAtMs = 2_000L
+        )
+
+        val check = coordinator.evaluateDrift(
+            authorityState = authority,
+            nowMs = 5_000L,
+            lastCorrectionAtMs = 0L,
+            thresholdMs = 750L,
+            correctionIntervalMs = 1_000L
+        )
+
+        assertEquals(15_000L, check.localPositionMs)
+        assertEquals(13_000L, check.expectedPositionMs)
+        assertEquals(2_000L, check.driftMs)
+        assertTrue(check.shouldCorrect)
+    }
+
+    @Test
+    fun `applyDriftCorrection seeks to expected position without changing authority seq`() {
+        val fakePlayerAdapter = FakePlayerAdapter()
+        val coordinator = RoomSyncCoordinator(fakePlayerAdapter)
+        val authority = RoomSyncState(
+            roomId = "ROOM01",
+            mediaId = "sample_001",
+            hostUserId = "user_a",
+            paused = false,
+            positionMs = 10_000L,
+            playbackRate = 1.0,
+            seq = 5L,
+            authorityAppliedAtMs = 2_000L
+        )
+        val check = DriftCheck(
+            localPositionMs = 15_000L,
+            expectedPositionMs = 13_000L,
+            driftMs = 2_000L,
+            shouldCorrect = true
+        )
+
+        coordinator.applyDriftCorrection(check, authority)
+
+        assertEquals(13_000L, fakePlayerAdapter.seekPositionMs)
+        assertTrue(fakePlayerAdapter.playCalled)
     }
 }
 
@@ -95,6 +180,7 @@ private class FakePlayerAdapter : PlayerAdapter {
     var speed: Float = 1f
     var playCalled: Boolean = false
     var pauseCalled: Boolean = false
+    var currentPositionMs: Long = 0L
 
     override fun attach(playerView: PlayerView) = Unit
 
@@ -118,7 +204,7 @@ private class FakePlayerAdapter : PlayerAdapter {
         seekPositionMs = positionMs
     }
 
-    override fun getCurrentPosition(): Long = 0L
+    override fun getCurrentPosition(): Long = currentPositionMs
 
     override fun getDuration(): Long = 0L
 

@@ -93,6 +93,7 @@ fun PlayerScreen(modifier: Modifier = Modifier) {
     var duration by remember { mutableLongStateOf(0L) }
     var isPlaying by remember { mutableStateOf(false) }
     var playbackSpeed by remember { mutableFloatStateOf(1f) }
+    var lastDriftCorrectionAtMs by remember { mutableLongStateOf(0L) }
 
     val isHostController = remember(activeUserId, latestSyncState) {
         activeUserId != null && latestSyncState?.hostUserId == activeUserId
@@ -119,6 +120,31 @@ fun PlayerScreen(modifier: Modifier = Modifier) {
             duration = adapter.getDuration().coerceAtLeast(0L)
             isPlaying = adapter.isPlaying()
             delay(500)
+        }
+    }
+
+    LaunchedEffect(adapter, roomSyncCoordinator) {
+        while (isActive) {
+            delay(RoomSyncCoordinator.DEFAULT_CORRECTION_INTERVAL_MS)
+
+            val authorityState = latestSyncState ?: continue
+            val nowMs = System.currentTimeMillis()
+            val driftCheck = roomSyncCoordinator.evaluateDrift(
+                authorityState = authorityState,
+                nowMs = nowMs,
+                lastCorrectionAtMs = lastDriftCorrectionAtMs
+            )
+
+            if (!driftCheck.shouldCorrect) {
+                continue
+            }
+
+            roomSyncCoordinator.applyDriftCorrection(driftCheck, authorityState)
+            lastDriftCorrectionAtMs = nowMs
+            appendLog(
+                syncLogs,
+                "drift correction local=${driftCheck.localPositionMs} expected=${driftCheck.expectedPositionMs} drift=${driftCheck.driftMs}"
+            )
         }
     }
 

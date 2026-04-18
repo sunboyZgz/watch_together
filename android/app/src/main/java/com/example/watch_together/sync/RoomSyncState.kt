@@ -9,14 +9,15 @@ data class RoomSyncState(
     val paused: Boolean,
     val positionMs: Long,
     val playbackRate: Double,
-    val seq: Long
+    val seq: Long,
+    val authorityAppliedAtMs: Long = 0L
 )
 
 fun RoomSyncState.isNewerThan(previous: RoomSyncState?): Boolean {
     return previous == null || seq > previous.seq
 }
 
-fun RoomStatePayload.toRoomSyncState(): RoomSyncState {
+fun RoomStatePayload.toRoomSyncState(appliedAtMs: Long = System.currentTimeMillis()): RoomSyncState {
     return RoomSyncState(
         roomId = roomId,
         mediaId = mediaId,
@@ -24,6 +25,7 @@ fun RoomStatePayload.toRoomSyncState(): RoomSyncState {
         paused = paused,
         positionMs = positionMs,
         playbackRate = playbackRate,
-        seq = seq
+        seq = seq,
+        authorityAppliedAtMs = appliedAtMs
     )
 }

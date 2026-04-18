@@ -125,10 +125,74 @@ drift correction 是当前最值得持续跟踪的核心技术点之一。
 - 偏差超过阈值时执行本地 correction seek
 - correction 只影响本地播放器，不回传 sync 事件
 
+当前实现里的 authority baseline 至少包含：
+
+- `positionMs`
+- `paused`
+- `playbackRate`
+- `seq`
+- `authorityAppliedAtMs`
+
 当前建议的初始参数：
 
 - correction interval: `1s`
 - drift threshold: `750ms`
+
+#### Current Algorithm
+
+当前阶段采用的是“基于本地 wall-clock 的 baseline 外推”。
+
+算法分 3 步：
+
+1. 记录 authority baseline  
+   当客户端应用 `room_state / play / pause / seek` 时，保存：
+   - 当时的权威位置 `authority.positionMs`
+   - 当时的暂停状态 `authority.paused`
+   - 当时的倍速 `authority.playbackRate`
+   - 本地应用该权威状态的时刻 `authorityAppliedAtMs`
+
+2. 推导 expected position  
+   每次做 drift check 时，根据当前时间 `nowMs` 估算“此刻理论上应该播放到哪里”：
+
+   - 如果 `authority.paused == true`
+     - `expectedPositionMs = authority.positionMs`
+   - 如果 `authority.paused == false`
+     - `elapsedMs = max(0, nowMs - authorityAppliedAtMs)`
+     - `progressedMs = elapsedMs * authority.playbackRate`
+     - `expectedPositionMs = authority.positionMs + progressedMs`
+
+   也就是说，当前并不是依赖服务端持续推位置，而是本地从最近一次权威基线向前做时间外推。
+
+3. 判断是否需要 correction  
+   取：
+
+   - `localPositionMs = player.currentPosition`
+   - `driftMs = localPositionMs - expectedPositionMs`
+
+   当满足下面条件时，执行一次本地 correction seek：
+
+   - 当前不是暂停态
+   - 已经拿到有效 authority baseline
+   - 距离上次 authority baseline 应用已有一个最小检查窗口
+   - 距离上一次 correction 已经超过 cooldown
+   - `abs(driftMs) >= driftThresholdMs`
+
+#### Why This Works In Phase 1
+
+这个算法的优点是：
+
+- 实现简单
+- 不需要服务端高频广播位置
+- 足够解决“越播越偏”的明显问题
+- 适合当前 2 人房间、小规模事件频率的阶段
+
+它的限制也很明确：
+
+- 使用的是本地 wall-clock 外推，不是精确时钟同步
+- correction 仍然是 seek，观感上可能比速度微调更硬
+- 网络抖动、后台恢复、设备性能差异仍会影响误差大小
+
+所以它是当前阶段“足够好”的最小方案，而不是最终极方案。
 
 后续优化方向：
 
@@ -164,8 +228,10 @@ drift correction 是当前最值得持续跟踪的核心技术点之一。
 
 - WebSocket 消息处理与主线程切换
 - 播放器状态采样频率
+- authority baseline 到本地应用的延迟
 - drift check 频率与阈值
 - correction 触发次数
+- correction 后再次偏离的速度
 - heartbeat 周期与 timeout
 - 房间状态广播后的客户端应用耗时
 
