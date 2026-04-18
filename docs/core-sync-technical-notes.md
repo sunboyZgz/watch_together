@@ -42,9 +42,48 @@
 关键点：
 
 - 服务端维护 `room_state`
+- 服务端维护 authority baseline 的服务端时间基线
 - 服务端推进 `seq`
 - 客户端只应用新于本地已知状态的事件
 - 房主控制事件最终都要回到服务端确认和广播
+
+当前服务端除了保存协议层可见的：
+
+- `positionMs`
+- `paused`
+- `playbackRate`
+- `seq`
+
+还需要在运行时保存一个内部时间基线：
+
+- `authorityUpdatedAtMs`
+
+它不需要直接暴露进协议，但它决定了服务端在任意时刻如何推导“当前有效播放位置”。
+
+#### Server-side Effective Position
+
+这个时间基线最直接的用途，是在 `join_room`、host transfer 这类需要返回 `room_state` 的时刻，给出“此刻房间真正应该播放到哪里”，而不是“最后一次控制事件发生时播放到哪里”。
+
+服务端算法思路：
+
+1. 维护冻结基线
+   每次收到权威控制事件时，更新：
+   - `positionMs`
+   - `paused`
+   - `playbackRate`
+   - `authorityUpdatedAtMs = serverNow`
+
+2. 对外生成当前有效状态
+   当需要返回 `room_state` 时：
+   - 如果 `paused == true`
+     - `effectivePositionMs = positionMs`
+   - 如果 `paused == false`
+     - `elapsedMs = max(0, nowMs - authorityUpdatedAtMs)`
+     - `progressedMs = elapsedMs * playbackRate`
+     - `effectivePositionMs = positionMs + progressedMs`
+
+3. 作为新的 authority snapshot 返回给客户端
+   这样 repeated join、host transfer 后收到的 `room_state` 就能代表“当前时刻的房间位置”，而不是过期快照。
 
 优化方向：
 
@@ -137,6 +176,7 @@ drift correction 是当前最值得持续跟踪的核心技术点之一。
 
 - correction interval: `1s`
 - drift threshold: `750ms`
+- local ended guard: enabled
 
 #### Current Algorithm
 
@@ -172,10 +212,24 @@ drift correction 是当前最值得持续跟踪的核心技术点之一。
    当满足下面条件时，执行一次本地 correction seek：
 
    - 当前不是暂停态
+   - 本地播放器还没有进入 ended 状态
    - 已经拿到有效 authority baseline
    - 距离上次 authority baseline 应用已有一个最小检查窗口
    - 距离上一次 correction 已经超过 cooldown
    - `abs(driftMs) >= driftThresholdMs`
+
+4. 处理 media ended 边界  
+   如果本地播放器已经进入 ended：
+
+   - 停止继续做 drift correction
+   - 不再执行额外的 `seek + play`
+   - 若已知媒体时长，则把 `expectedPositionMs` 截断到 `durationMs`
+
+   这样可以避免视频结尾处因为 authority baseline 仍被视为“播放中”而产生：
+
+   - play / pause 抖动
+   - 结尾附近的反复 correction seek
+   - sync log 被 drift correction 持续刷屏
 
 #### Why This Works In Phase 1
 

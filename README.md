@@ -74,7 +74,7 @@ watch_together/
 
 各目录职责：
 
-- `android/`: Android 客户端工程，当前已包含播放器适配层、协议草案、join-time initial state sync、heartbeat ack、最小 drift correction 和最小控制事件同步能力
+- `android/`: Android 客户端工程，当前已包含播放器适配层、协议草案、join-time initial state sync、heartbeat ack、最小 drift correction、repeated join resync 和最小控制事件同步能力
 - `media/`: 本地开发和联调使用的样例媒体资源
 - `windows/`: Windows 客户端工程与跨平台同步能力
 - `server/`: 基于 Go 的房间服务骨架，当前已包含 `POST /rooms`、`/ws`、协议解析、应用层 heartbeat、最小房间管理结构和 `play / pause / seek` 控制广播

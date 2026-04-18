@@ -147,6 +147,67 @@ class RoomSyncCoordinatorTest {
     }
 
     @Test
+    fun `evaluateDrift skips correction after playback ended`() {
+        val fakePlayerAdapter = FakePlayerAdapter().apply {
+            currentPositionMs = 15_000L
+        }
+        val coordinator = RoomSyncCoordinator(fakePlayerAdapter)
+        val authority = RoomSyncState(
+            roomId = "ROOM01",
+            mediaId = "sample_001",
+            hostUserId = "user_a",
+            paused = false,
+            positionMs = 10_000L,
+            playbackRate = 1.0,
+            seq = 5L,
+            authorityAppliedAtMs = 2_000L
+        )
+
+        val check = coordinator.evaluateDrift(
+            authorityState = authority,
+            nowMs = 5_000L,
+            lastCorrectionAtMs = 0L,
+            durationMs = 15_000L,
+            playbackEnded = true,
+            thresholdMs = 750L,
+            correctionIntervalMs = 1_000L
+        )
+
+        assertFalse(check.shouldCorrect)
+    }
+
+    @Test
+    fun `evaluateDrift caps expected position to duration`() {
+        val fakePlayerAdapter = FakePlayerAdapter().apply {
+            currentPositionMs = 10_000L
+        }
+        val coordinator = RoomSyncCoordinator(fakePlayerAdapter)
+        val authority = RoomSyncState(
+            roomId = "ROOM01",
+            mediaId = "sample_001",
+            hostUserId = "user_a",
+            paused = false,
+            positionMs = 9_000L,
+            playbackRate = 1.0,
+            seq = 5L,
+            authorityAppliedAtMs = 2_000L
+        )
+
+        val check = coordinator.evaluateDrift(
+            authorityState = authority,
+            nowMs = 5_000L,
+            lastCorrectionAtMs = 0L,
+            durationMs = 10_000L,
+            playbackEnded = false,
+            thresholdMs = 750L,
+            correctionIntervalMs = 1_000L
+        )
+
+        assertEquals(10_000L, check.expectedPositionMs)
+        assertFalse(check.shouldCorrect)
+    }
+
+    @Test
     fun `applyDriftCorrection seeks to expected position without changing authority seq`() {
         val fakePlayerAdapter = FakePlayerAdapter()
         val coordinator = RoomSyncCoordinator(fakePlayerAdapter)

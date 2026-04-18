@@ -30,11 +30,13 @@ class RoomWebSocketClient(
     private var webSocket: WebSocket? = null
     private var activeRoomId: String? = null
     private var activeUserId: String? = null
+    private var sessionGeneration: Long = 0L
 
     // joinRoom opens the shared /ws endpoint, sends join_room, and forwards the
     // first protocol messages back to the UI layer.
     fun joinRoom(wsUrl: String, roomId: String, userId: String, listener: RoomWebSocketListener) {
         close()
+        val generation = ++sessionGeneration
         activeRoomId = roomId
         activeUserId = userId
 
@@ -44,6 +46,7 @@ class RoomWebSocketClient(
 
         webSocket = okHttpClient.newWebSocket(request, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
+                if (!isCurrentSession(generation, webSocket)) return
                 listener.onLog("WebSocket connected to $wsUrl")
 
                 val joinPayload = JoinRoomPayload(
@@ -66,6 +69,7 @@ class RoomWebSocketClient(
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) {
+                if (!isCurrentSession(generation, webSocket)) return
                 try {
                     when (val message = decoder.decode(text)) {
                         is SyncMessage.RoomState -> listener.onRoomState(message.payload.toRoomSyncState())
@@ -73,7 +77,7 @@ class RoomWebSocketClient(
                         is SyncMessage.Pause -> listener.onPause(message.payload)
                         is SyncMessage.Seek -> listener.onSeek(message.payload)
                         is SyncMessage.Heartbeat -> {
-                            sendHeartbeatAck(message.payload.serverTimeMs)
+                            sendHeartbeatAck(webSocket, message.payload.serverTimeMs)
                             listener.onHeartbeat(message.payload.serverTimeMs)
                         }
                         is SyncMessage.Error -> listener.onError(message.payload.message)
@@ -84,14 +88,17 @@ class RoomWebSocketClient(
             }
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+                if (!isCurrentSession(generation, webSocket)) return
                 listener.onError(t.message ?: "Unknown WebSocket failure")
             }
 
             override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
+                if (!isCurrentSession(generation, webSocket)) return
                 listener.onLog("WebSocket closing: $code / $reason")
             }
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+                if (!isCurrentSession(generation, webSocket)) return
                 listener.onLog("WebSocket closed: $code / $reason")
             }
         })
@@ -131,6 +138,7 @@ class RoomWebSocketClient(
     }
 
     fun close() {
+        sessionGeneration++
         webSocket?.close(1000, "client closed")
         webSocket = null
         activeRoomId = null
@@ -193,8 +201,7 @@ class RoomWebSocketClient(
         }
     }
 
-    private fun sendHeartbeatAck(serverTimeMs: Long) {
-        val webSocket = webSocket ?: return
+    private fun sendHeartbeatAck(webSocket: WebSocket, serverTimeMs: Long) {
         val sent = webSocket.send(
             envelopeToJson(
                 HeartbeatAckPayload(
@@ -207,5 +214,9 @@ class RoomWebSocketClient(
         if (!sent) {
             throw IllegalStateException("Failed to send heartbeat_ack")
         }
+    }
+
+    private fun isCurrentSession(generation: Long, candidate: WebSocket): Boolean {
+        return generation == sessionGeneration && candidate == webSocket
     }
 }

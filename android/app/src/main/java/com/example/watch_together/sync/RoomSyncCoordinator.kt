@@ -5,6 +5,7 @@ import com.example.watch_together.sync.protocol.PausePayload
 import com.example.watch_together.sync.protocol.PlayPayload
 import com.example.watch_together.sync.protocol.SeekPayload
 import com.example.watch_together.ui.player.PlayerAdapter
+import kotlin.math.min
 import kotlin.math.abs
 import kotlin.math.roundToLong
 
@@ -110,23 +111,37 @@ class RoomSyncCoordinator(
         return authorityState.positionMs + progressedMs
     }
 
+    fun capExpectedPositionToDuration(expectedPositionMs: Long, durationMs: Long): Long {
+        if (durationMs <= 0L) {
+            return expectedPositionMs
+        }
+        return min(expectedPositionMs, durationMs)
+    }
+
     // evaluateDrift compares the local player with the extrapolated authority timeline
     // and decides whether one correction seek is worth doing.
     fun evaluateDrift(
         authorityState: RoomSyncState,
         nowMs: Long,
         lastCorrectionAtMs: Long,
+        durationMs: Long = 0L,
+        playbackEnded: Boolean = false,
         thresholdMs: Long = DEFAULT_DRIFT_THRESHOLD_MS,
         correctionIntervalMs: Long = DEFAULT_CORRECTION_INTERVAL_MS
     ): DriftCheck {
         val localPositionMs = playerAdapter.getCurrentPosition().coerceAtLeast(0L)
-        val expectedPositionMs = estimateExpectedPositionMs(authorityState, nowMs)
+        val expectedPositionMs = capExpectedPositionToDuration(
+            estimateExpectedPositionMs(authorityState, nowMs),
+            durationMs
+        )
         val driftMs = localPositionMs - expectedPositionMs
 
-        val shouldCorrect = !authorityState.paused &&
+        val shouldCorrect = !playbackEnded &&
+            !authorityState.paused &&
             authorityState.authorityAppliedAtMs > 0L &&
             nowMs - authorityState.authorityAppliedAtMs >= correctionIntervalMs &&
             (lastCorrectionAtMs <= 0L || nowMs - lastCorrectionAtMs >= correctionIntervalMs) &&
+            (durationMs <= 0L || localPositionMs < durationMs) &&
             abs(driftMs) >= thresholdMs
 
         return DriftCheck(

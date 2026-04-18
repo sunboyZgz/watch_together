@@ -25,6 +25,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -38,6 +39,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.media3.common.Player
 import androidx.media3.ui.PlayerView
 import com.example.watch_together.config.AppConfig
 import com.example.watch_together.sync.RoomHttpClient
@@ -60,6 +62,7 @@ private enum class SyncStatus(val label: String) {
     CreatingRoom("Creating room"),
     JoiningAsHost("Joining as host"),
     JoiningAsViewer("Joining as viewer"),
+    RejoiningCurrentUser("Rejoining current user"),
     Connected("Connected"),
     RoomStateApplied("room_state applied"),
     PlayApplied("play applied"),
@@ -92,6 +95,7 @@ fun PlayerScreen(modifier: Modifier = Modifier) {
     var currentPosition by remember { mutableLongStateOf(0L) }
     var duration by remember { mutableLongStateOf(0L) }
     var isPlaying by remember { mutableStateOf(false) }
+    var playbackState by remember { mutableIntStateOf(Player.STATE_IDLE) }
     var playbackSpeed by remember { mutableFloatStateOf(1f) }
     var lastDriftCorrectionAtMs by remember { mutableLongStateOf(0L) }
 
@@ -102,6 +106,9 @@ fun PlayerScreen(modifier: Modifier = Modifier) {
     DisposableEffect(adapter) {
         adapter.setEventListener { event ->
             appendLog(playerEventLogs, event.toDebugLabel(), maxSize = 8)
+            if (event is PlayerEvent.PlaybackStateChanged) {
+                playbackState = event.playbackState
+            }
         }
         onDispose {
             adapter.setEventListener(null)
@@ -132,7 +139,9 @@ fun PlayerScreen(modifier: Modifier = Modifier) {
             val driftCheck = roomSyncCoordinator.evaluateDrift(
                 authorityState = authorityState,
                 nowMs = nowMs,
-                lastCorrectionAtMs = lastDriftCorrectionAtMs
+                lastCorrectionAtMs = lastDriftCorrectionAtMs,
+                durationMs = duration,
+                playbackEnded = playbackState == Player.STATE_ENDED
             )
 
             if (!driftCheck.shouldCorrect) {
@@ -242,6 +251,28 @@ fun PlayerScreen(modifier: Modifier = Modifier) {
         }
     }
 
+    fun joinCurrentRoomAsUser(
+        roomId: String,
+        userId: String,
+        status: SyncStatus,
+        reason: String
+    ) {
+        roomWebSocketClient.close()
+        latestSyncState = null
+        lastDriftCorrectionAtMs = 0L
+        currentRoomId = roomId
+        joinRoomInput = roomId
+        syncStatus = status
+        appendLog(syncLogs, "$reason starting roomId=$roomId userId=$userId")
+
+        roomWebSocketClient.joinRoom(
+            wsUrl = AppConfig.wsBaseUrl,
+            roomId = roomId,
+            userId = userId,
+            listener = syncListener
+        )
+    }
+
     fun createAndJoinAsHost() {
         coroutineScope.launch {
             runCatching {
@@ -257,19 +288,17 @@ fun PlayerScreen(modifier: Modifier = Modifier) {
                 currentRoomId = createResult.roomId
                 joinRoomInput = createResult.roomId
                 activeUserId = hostUserId
-                syncStatus = SyncStatus.JoiningAsHost
                 appendLog(
                     syncLogs,
                     "Created roomId=${createResult.roomId} mediaId=${createResult.roomState.mediaId}"
                 )
-
-                roomWebSocketClient.joinRoom(
-                    wsUrl = AppConfig.wsBaseUrl,
+                joinCurrentRoomAsUser(
                     roomId = createResult.roomId,
                     userId = hostUserId,
-                    listener = syncListener
+                    status = SyncStatus.JoiningAsHost,
+                    reason = "host join"
                 )
-            }.onFailure { error ->
+            }.onFailure { error: Throwable ->
                 syncStatus = SyncStatus.CreateAndJoinFailed
                 appendLog(syncLogs, "Create and join failed: ${error.message}")
             }
@@ -284,14 +313,30 @@ fun PlayerScreen(modifier: Modifier = Modifier) {
         }
 
         activeUserId = viewerUserId
-        currentRoomId = roomId
-        syncStatus = SyncStatus.JoiningAsViewer
-        appendLog(syncLogs, "Joining roomId=$roomId as $viewerUserId")
-        roomWebSocketClient.joinRoom(
-            wsUrl = AppConfig.wsBaseUrl,
+        joinCurrentRoomAsUser(
             roomId = roomId,
             userId = viewerUserId,
-            listener = syncListener
+            status = SyncStatus.JoiningAsViewer,
+            reason = "viewer join"
+        )
+    }
+
+    fun rejoinCurrentUser() {
+        val userId = activeUserId ?: run {
+            appendLog(syncLogs, "Rejoin aborted: no active user")
+            return
+        }
+        val candidateRoomId = currentRoomId ?: joinRoomInput.trim().takeIf { it.isNotBlank() }
+        if (candidateRoomId == null) {
+            appendLog(syncLogs, "Rejoin aborted: no roomId")
+            return
+        }
+
+        joinCurrentRoomAsUser(
+            roomId = candidateRoomId,
+            userId = userId,
+            status = SyncStatus.RejoiningCurrentUser,
+            reason = "repeated join"
         )
     }
 
@@ -344,7 +389,9 @@ fun PlayerScreen(modifier: Modifier = Modifier) {
             joinRoomInput = joinRoomInput,
             onJoinRoomInputChange = { joinRoomInput = it },
             onCreateAndJoinAsHost = ::createAndJoinAsHost,
-            onJoinAsViewer = ::joinAsViewer
+            onJoinAsViewer = ::joinAsViewer,
+            onRejoinCurrentUser = ::rejoinCurrentUser,
+            canRejoinCurrentUser = activeUserId != null && currentRoomId != null
         )
         PlayerViewport(adapter = adapter)
         PlayerControls(
@@ -445,7 +492,9 @@ private fun JoinSyncActionsCard(
     joinRoomInput: String,
     onJoinRoomInputChange: (String) -> Unit,
     onCreateAndJoinAsHost: () -> Unit,
-    onJoinAsViewer: () -> Unit
+    onJoinAsViewer: () -> Unit,
+    onRejoinCurrentUser: () -> Unit,
+    canRejoinCurrentUser: Boolean
 ) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(
@@ -488,6 +537,12 @@ private fun JoinSyncActionsCard(
                     enabled = joinRoomInput.isNotBlank()
                 ) {
                     Text("Join as viewer")
+                }
+                OutlinedButton(
+                    onClick = onRejoinCurrentUser,
+                    enabled = canRejoinCurrentUser
+                ) {
+                    Text("Rejoin current user")
                 }
             }
         }
