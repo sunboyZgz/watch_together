@@ -15,6 +15,7 @@
 
 - [架构.png](./架构.png): 当前架构图静态资源
 - [contributing.md](./contributing.md): 当前仓库的基础工作规约
+- [core-sync-technical-notes.md](./core-sync-technical-notes.md): 核心同步功能中的关键技术点记录
 - [environment-config.md](./environment-config.md): 当前阶段环境参数清单与归类
 - [websocket-event-protocol.md](./websocket-event-protocol.md): Phase 1 最小 WebSocket 事件协议草案
 
