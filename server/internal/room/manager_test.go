@@ -72,3 +72,27 @@ func TestManagerCreateRoomRegistersUniqueRoom(t *testing.T) {
 		t.Fatalf("expected stored room pointer to match created room")
 	}
 }
+
+func TestRoomJoinReplacesPreviousConnectionForSameUser(t *testing.T) {
+	room := NewCreatedRoom("ROOM01", "user_a", "sample_001")
+
+	first := NewClientConnection(nil)
+	first.SetIdentity("user_b", "ROOM01")
+	firstJoin := room.Join(first)
+	if firstJoin.ReplacedClient != nil {
+		t.Fatalf("expected no replaced client on first join")
+	}
+
+	second := NewClientConnection(nil)
+	second.SetIdentity("user_b", "ROOM01")
+	secondJoin := room.Join(second)
+	if secondJoin.ReplacedClient != first {
+		t.Fatalf("expected first connection to be replaced")
+	}
+	if got := room.ClientCount(); got != 1 {
+		t.Fatalf("expected one active connection after repeated join, got %d", got)
+	}
+	if secondJoin.State.HostUserID != "user_a" {
+		t.Fatalf("expected host to stay user_a, got %s", secondJoin.State.HostUserID)
+	}
+}

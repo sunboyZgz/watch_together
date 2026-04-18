@@ -86,3 +86,11 @@ func (c *ClientConnection) HeartbeatTimedOut(now time.Time, timeout time.Duratio
 func (c *ClientConnection) Close(status websocket.StatusCode, reason string) error {
 	return c.conn.Close(status, reason)
 }
+
+// CloseNow force-closes the underlying WebSocket connection without waiting for a close handshake.
+func (c *ClientConnection) CloseNow() error {
+	if c.conn == nil {
+		return nil
+	}
+	return c.conn.CloseNow()
+}

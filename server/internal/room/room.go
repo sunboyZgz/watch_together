@@ -18,10 +18,11 @@ type State struct {
 }
 
 type Room struct {
-	id      string
-	mu      sync.RWMutex
-	clients map[*ClientConnection]struct{}
-	state   State
+	id            string
+	mu            sync.RWMutex
+	clients       map[*ClientConnection]struct{}
+	clientsByUser map[string]*ClientConnection
+	state         State
 }
 
 type LeaveResult struct {
@@ -31,11 +32,17 @@ type LeaveResult struct {
 	RoomEmpty       bool
 }
 
+type JoinResult struct {
+	State          State
+	ReplacedClient *ClientConnection
+}
+
 // New creates a room with a minimal default playback state.
 func New(id string) *Room {
 	return &Room{
-		id:      id,
-		clients: make(map[*ClientConnection]struct{}),
+		id:            id,
+		clients:       make(map[*ClientConnection]struct{}),
+		clientsByUser: make(map[string]*ClientConnection),
 		state: State{
 			RoomID:       id,
 			MediaID:      "",
@@ -69,17 +76,27 @@ func (r *Room) StateSnapshot() State {
 	return r.state
 }
 
-// Join registers a client in the room and returns the current room snapshot.
-func (r *Room) Join(client *ClientConnection) State {
+// Join registers a client in the room and replaces any previous connection from the same user.
+func (r *Room) Join(client *ClientConnection) JoinResult {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	var replacedClient *ClientConnection
+	if existing := r.clientsByUser[client.UserID()]; existing != nil && existing != client {
+		delete(r.clients, existing)
+		replacedClient = existing
+	}
+
 	r.clients[client] = struct{}{}
+	r.clientsByUser[client.UserID()] = client
 	// The first connected user becomes the initial host until later host rules are added.
 	if r.state.HostUserID == "" {
 		r.state.HostUserID = client.UserID()
 	}
-	return r.state
+	return JoinResult{
+		State:          r.state,
+		ReplacedClient: replacedClient,
+	}
 }
 
 // Leave removes a client and reports whether the disconnect triggered host transfer.
@@ -88,6 +105,9 @@ func (r *Room) Leave(client *ClientConnection) LeaveResult {
 	defer r.mu.Unlock()
 
 	delete(r.clients, client)
+	if current := r.clientsByUser[client.UserID()]; current == client {
+		delete(r.clientsByUser, client.UserID())
+	}
 	result := LeaveResult{}
 	if r.state.HostUserID == client.UserID() {
 		previousHost := r.state.HostUserID

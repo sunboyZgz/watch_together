@@ -10,6 +10,7 @@
 - `play / pause / seek` 的最小控制事件处理与广播
 - 应用层 heartbeat 与静默连接超时清理
 - host disconnect 后的 immediate host transfer
+- same-user repeated join 的单有效连接收敛
 - 最小 `Room / ClientConnection / RoomManager` 内存结构
 - 基于 `INT-19` 协议草案的最小消息解析层
 - `join_room` 的已存在房间接入流程
@@ -75,6 +76,7 @@ server/
 - `internal/room/manager.go`: 房间创建、查询、唯一 `roomId` 生成和客户端清理
 - `internal/transport/room_http_handler.go`: create room HTTP 入口
 - `internal/transport/websocket_handler.go`: join room、heartbeat、host 校验、控制事件处理和广播
+- `internal/room/room.go`: 房间成员、host 状态和 repeated join 连接替换逻辑
 
 ## Current Validation
 
@@ -89,5 +91,6 @@ server/
 - 服务端会周期性发送 `heartbeat`，客户端需返回 `heartbeat_ack`
 - 超时未 ack 的连接会进入现有断连清理流程
 - host 断开连接后，剩余成员会收到新的 `room_state` 且 host 身份立即转移
+- 同一 `userId` repeated join 同一房间时，新连接会替换旧连接并重新收到最新 `room_state`
 
 其中 `POST /rooms`、`join_room`、`play / pause / seek` 与 host transfer 的最小同步路径已通过基础测试验证。

@@ -405,6 +405,96 @@ func TestWebSocketHeartbeatTimeoutRemovesSilentClient(t *testing.T) {
 	})
 }
 
+func TestWebSocketRepeatedJoinReplacesPreviousConnectionForSameUser(t *testing.T) {
+	roomManager := room.NewManager()
+	createdRoom, err := roomManager.CreateRoom("user_a", "sample_001")
+	if err != nil {
+		t.Fatalf("create room: %v", err)
+	}
+	mux := http.NewServeMux()
+	mux.Handle("/ws", NewWebSocketHandler(roomManager, true))
+
+	httpServer := httptest.NewServer(mux)
+	defer httpServer.Close()
+
+	wsURL := "ws" + httpServer.URL[len("http"):] + "/ws"
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	firstConn := mustDialWebSocket(t, ctx, wsURL)
+	secondConn := mustDialWebSocket(t, ctx, wsURL)
+	defer secondConn.Close(websocket.StatusNormalClosure, "test done")
+
+	mustJoinRoom(t, ctx, firstConn, createdRoom.ID(), "user_b")
+	firstRoomState := mustReadEnvelope(t, ctx, firstConn)
+	if firstRoomState.Type != protocol.TypeRoomState {
+		t.Fatalf("expected room_state on first join, got %s", firstRoomState.Type)
+	}
+
+	mustJoinRoom(t, ctx, secondConn, createdRoom.ID(), "user_b")
+	secondRoomState := mustReadEnvelope(t, ctx, secondConn)
+	if secondRoomState.Type != protocol.TypeRoomState {
+		t.Fatalf("expected room_state on repeated join, got %s", secondRoomState.Type)
+	}
+
+	waitFor(t, time.Second, func() bool {
+		return roomManager.ClientCount(createdRoom.ID()) == 1
+	})
+
+	readUntilClosed(t, ctx, firstConn)
+
+	state := createdRoom.StateSnapshot()
+	if state.HostUserID != "user_a" {
+		t.Fatalf("expected host to stay user_a, got %s", state.HostUserID)
+	}
+}
+
+func TestWebSocketRepeatedJoinKeepsHostIdentityStable(t *testing.T) {
+	roomManager := room.NewManager()
+	createdRoom, err := roomManager.CreateRoom("user_a", "sample_001")
+	if err != nil {
+		t.Fatalf("create room: %v", err)
+	}
+	mux := http.NewServeMux()
+	mux.Handle("/ws", NewWebSocketHandler(roomManager, true))
+
+	httpServer := httptest.NewServer(mux)
+	defer httpServer.Close()
+
+	wsURL := "ws" + httpServer.URL[len("http"):] + "/ws"
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	hostConn1 := mustDialWebSocket(t, ctx, wsURL)
+	hostConn2 := mustDialWebSocket(t, ctx, wsURL)
+	defer hostConn2.Close(websocket.StatusNormalClosure, "test done")
+
+	mustJoinRoom(t, ctx, hostConn1, createdRoom.ID(), "user_a")
+	firstRoomState := mustReadEnvelope(t, ctx, hostConn1)
+	if firstRoomState.Type != protocol.TypeRoomState {
+		t.Fatalf("expected room_state on first host join, got %s", firstRoomState.Type)
+	}
+
+	mustJoinRoom(t, ctx, hostConn2, createdRoom.ID(), "user_a")
+	secondRoomState := mustReadEnvelope(t, ctx, hostConn2)
+	if secondRoomState.Type != protocol.TypeRoomState {
+		t.Fatalf("expected room_state on repeated host join, got %s", secondRoomState.Type)
+	}
+
+	readUntilClosed(t, ctx, hostConn1)
+
+	state := createdRoom.StateSnapshot()
+	if state.HostUserID != "user_a" {
+		t.Fatalf("expected host identity to stay user_a, got %s", state.HostUserID)
+	}
+	if state.Seq != 1 {
+		t.Fatalf("expected repeated host join not to change seq, got %d", state.Seq)
+	}
+	if got := roomManager.ClientCount(createdRoom.ID()); got != 1 {
+		t.Fatalf("expected one active host connection after repeated join, got %d", got)
+	}
+}
+
 func mustDialWebSocket(t *testing.T, ctx context.Context, wsURL string) *websocket.Conn {
 	t.Helper()
 	conn, _, err := websocket.Dial(ctx, wsURL, nil)

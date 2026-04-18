@@ -172,18 +172,22 @@ func (h *WebSocketHandler) handleJoinRoom(
 
 	// We persist identity on the connection first so disconnect cleanup can find the room later.
 	client.SetIdentity(payload.UserID, payload.RoomID)
-	state := existingRoom.Join(client)
+	joinResult := existingRoom.Join(client)
+	if joinResult.ReplacedClient != nil {
+		// Repeated join for the same logical user should leave only one active connection.
+		_ = joinResult.ReplacedClient.CloseNow()
+	}
 
 	return client.WriteJSON(ctx, protocol.Envelope{
 		Type: protocol.TypeRoomState,
 		Payload: mustJSONRaw(protocol.RoomStatePayload{
 			RoomID:       payload.RoomID,
-			MediaID:      state.MediaID,
-			HostUserID:   state.HostUserID,
-			Paused:       state.Paused,
-			PositionMs:   state.PositionMs,
-			PlaybackRate: state.PlaybackRate,
-			Seq:          state.Seq,
+			MediaID:      joinResult.State.MediaID,
+			HostUserID:   joinResult.State.HostUserID,
+			Paused:       joinResult.State.Paused,
+			PositionMs:   joinResult.State.PositionMs,
+			PlaybackRate: joinResult.State.PlaybackRate,
+			Seq:          joinResult.State.Seq,
 		}),
 	})
 }
