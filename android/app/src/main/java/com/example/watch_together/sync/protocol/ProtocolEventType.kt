@@ -24,6 +24,14 @@ enum class ProtocolEventType(
         wireName = "seek",
         direction = ProtocolDirection.ClientToServerAndServerToClients
     ),
+    Heartbeat(
+        wireName = "heartbeat",
+        direction = ProtocolDirection.ServerToClient
+    ),
+    HeartbeatAck(
+        wireName = "heartbeat_ack",
+        direction = ProtocolDirection.ClientToServer
+    ),
     Error(
         wireName = "error",
         direction = ProtocolDirection.ServerToClient

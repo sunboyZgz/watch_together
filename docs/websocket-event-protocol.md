@@ -20,7 +20,7 @@
 当前协议不覆盖以下内容：
 
 - 鉴权协议
-- 心跳与重连细节
+- 复杂重连策略
 - 错误码体系完善化
 - 多房主和复杂权限
 - 字幕、音轨、连麦扩展
@@ -140,8 +140,9 @@
 - 所有消息统一使用 `type + payload`
 - 播放位置统一使用 `positionMs`
 - 协议字段使用跨平台语义，不使用 Android/ExoPlayer 专属命名
-- 当前阶段只覆盖 `join_room`、`room_state`、`play`、`pause`、`seek`、`error`
+- 当前阶段只覆盖 `join_room`、`room_state`、`play`、`pause`、`seek`、`heartbeat`、`heartbeat_ack`、`error`
 - `seq` 视为服务端权威顺序号；客户端上报事件时可带上本地已知 `seq`，服务端广播时应使用最新状态序号
+- `heartbeat` 与 `heartbeat_ack` 只用于连接健康检测，不参与房间状态推进
 
 ## Control Sync Strategy
 
@@ -284,6 +285,54 @@
   }
 }
 ```
+
+### `heartbeat`
+
+- 方向：server -> client
+- 作用：由服务端定时确认连接仍然存活
+- 当前阶段使用应用层 heartbeat，而不是只依赖底层 WebSocket ping/pong
+- `heartbeat` 不参与 `seq`
+
+```json
+{
+  "type": "heartbeat",
+  "payload": {
+    "serverTimeMs": 1710000000000
+  }
+}
+```
+
+### `heartbeat_ack`
+
+- 方向：client -> server
+- 作用：客户端确认自己仍在线，并回传本次 heartbeat 的服务端时间戳
+- `heartbeat_ack` 不参与 `seq`
+- 当前阶段建议客户端收到 heartbeat 后立即回包
+
+```json
+{
+  "type": "heartbeat_ack",
+  "payload": {
+    "serverTimeMs": 1710000000000,
+    "clientTimeMs": 1710000000123
+  }
+}
+```
+
+## Heartbeat Rules
+
+当前阶段 heartbeat 的最小语义如下：
+
+- 服务端周期性向每个活跃 WebSocket 连接发送 `heartbeat`
+- 客户端收到后尽快发送 `heartbeat_ack`
+- 服务端仅把 heartbeat 视为连接健康信号，不把它写入 `room_state`
+- 若服务端在超时窗口内未收到 ack，则关闭该连接并走现有 disconnect cleanup
+- heartbeat 超时触发的 disconnect，应与显式断连走同一条 room cleanup / host transfer 流程
+
+当前建议初始值：
+
+- heartbeat interval: `5s`
+- heartbeat timeout: `15s`
 
 ### `error`
 

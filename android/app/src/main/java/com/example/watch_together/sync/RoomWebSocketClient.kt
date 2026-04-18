@@ -1,6 +1,7 @@
 package com.example.watch_together.sync
 
 import com.example.watch_together.sync.protocol.JoinRoomPayload
+import com.example.watch_together.sync.protocol.HeartbeatAckPayload
 import com.example.watch_together.sync.protocol.PausePayload
 import com.example.watch_together.sync.protocol.PlayPayload
 import com.example.watch_together.sync.protocol.SeekPayload
@@ -18,6 +19,7 @@ interface RoomWebSocketListener {
     fun onPlay(payload: PlayPayload)
     fun onPause(payload: PausePayload)
     fun onSeek(payload: SeekPayload)
+    fun onHeartbeat(serverTimeMs: Long)
     fun onError(message: String)
 }
 
@@ -70,6 +72,10 @@ class RoomWebSocketClient(
                         is SyncMessage.Play -> listener.onPlay(message.payload)
                         is SyncMessage.Pause -> listener.onPause(message.payload)
                         is SyncMessage.Seek -> listener.onSeek(message.payload)
+                        is SyncMessage.Heartbeat -> {
+                            sendHeartbeatAck(message.payload.serverTimeMs)
+                            listener.onHeartbeat(message.payload.serverTimeMs)
+                        }
                         is SyncMessage.Error -> listener.onError(message.payload.message)
                     }
                 } catch (error: Throwable) {
@@ -178,7 +184,28 @@ class RoomWebSocketClient(
                 "seq" to payload.seq
             )
 
+            is HeartbeatAckPayload -> mapOf(
+                "serverTimeMs" to payload.serverTimeMs,
+                "clientTimeMs" to payload.clientTimeMs
+            )
+
             else -> error("Unsupported payload type: ${payload::class.java.simpleName}")
+        }
+    }
+
+    private fun sendHeartbeatAck(serverTimeMs: Long) {
+        val webSocket = webSocket ?: return
+        val sent = webSocket.send(
+            envelopeToJson(
+                HeartbeatAckPayload(
+                    serverTimeMs = serverTimeMs,
+                    clientTimeMs = System.currentTimeMillis()
+                ).toEnvelope()
+            )
+        )
+
+        if (!sent) {
+            throw IllegalStateException("Failed to send heartbeat_ack")
         }
     }
 }

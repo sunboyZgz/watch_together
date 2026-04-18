@@ -36,6 +36,15 @@ data class SeekPayload(
     val seq: Long
 ) : ProtocolPayload
 
+data class HeartbeatPayload(
+    val serverTimeMs: Long
+) : ProtocolPayload
+
+data class HeartbeatAckPayload(
+    val serverTimeMs: Long,
+    val clientTimeMs: Long
+) : ProtocolPayload
+
 data class ErrorPayload(
     val roomId: String,
     val message: String
@@ -72,6 +81,20 @@ fun PausePayload.toEnvelope(): ProtocolEnvelope<PausePayload> {
 fun SeekPayload.toEnvelope(): ProtocolEnvelope<SeekPayload> {
     return ProtocolEnvelope(
         type = ProtocolEventType.Seek.wireName,
+        payload = this
+    )
+}
+
+fun HeartbeatPayload.toEnvelope(): ProtocolEnvelope<HeartbeatPayload> {
+    return ProtocolEnvelope(
+        type = ProtocolEventType.Heartbeat.wireName,
+        payload = this
+    )
+}
+
+fun HeartbeatAckPayload.toEnvelope(): ProtocolEnvelope<HeartbeatAckPayload> {
+    return ProtocolEnvelope(
+        type = ProtocolEventType.HeartbeatAck.wireName,
         payload = this
     )
 }

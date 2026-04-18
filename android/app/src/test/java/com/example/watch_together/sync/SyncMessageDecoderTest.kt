@@ -132,4 +132,20 @@ class SyncMessageDecoderTest {
         assertEquals(42_000L, seek.payload.positionMs)
         assertEquals(4L, seek.payload.seq)
     }
+
+    @Test
+    fun `heartbeat message decodes into heartbeat payload`() {
+        val rawMessage = """
+            {
+              "type": "heartbeat",
+              "payload": {
+                "serverTimeMs": 1710000000000
+              }
+            }
+        """.trimIndent()
+
+        val decoded = decoder.decode(rawMessage) as SyncMessage.Heartbeat
+
+        assertEquals(1_710_000_000_000L, decoded.payload.serverTimeMs)
+    }
 }

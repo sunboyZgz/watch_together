@@ -1,6 +1,7 @@
 package com.example.watch_together.sync
 
 import com.example.watch_together.sync.protocol.ErrorPayload
+import com.example.watch_together.sync.protocol.HeartbeatPayload
 import com.example.watch_together.sync.protocol.PausePayload
 import com.example.watch_together.sync.protocol.PlayPayload
 import com.example.watch_together.sync.protocol.ProtocolEventType
@@ -13,6 +14,7 @@ sealed interface SyncMessage {
     data class Play(val payload: PlayPayload) : SyncMessage
     data class Pause(val payload: PausePayload) : SyncMessage
     data class Seek(val payload: SeekPayload) : SyncMessage
+    data class Heartbeat(val payload: HeartbeatPayload) : SyncMessage
     data class Error(val payload: ErrorPayload) : SyncMessage
 }
 
@@ -69,6 +71,14 @@ class SyncMessageDecoder {
                         userId = payload.getString("userId"),
                         positionMs = payload.getLong("positionMs"),
                         seq = payload.getLong("seq")
+                    )
+                )
+            }
+
+            ProtocolEventType.Heartbeat.wireName -> {
+                SyncMessage.Heartbeat(
+                    HeartbeatPayload(
+                        serverTimeMs = payload.getLong("serverTimeMs")
                     )
                 )
             }

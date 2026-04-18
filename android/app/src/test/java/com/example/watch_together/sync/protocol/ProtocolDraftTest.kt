@@ -19,6 +19,8 @@ class ProtocolDraftTest {
             ProtocolEventType.Seek to (
                 "seek" to ProtocolDirection.ClientToServerAndServerToClients
             ),
+            ProtocolEventType.Heartbeat to ("heartbeat" to ProtocolDirection.ServerToClient),
+            ProtocolEventType.HeartbeatAck to ("heartbeat_ack" to ProtocolDirection.ClientToServer),
             ProtocolEventType.Error to ("error" to ProtocolDirection.ServerToClient)
         )
 
@@ -56,6 +58,14 @@ class ProtocolDraftTest {
         assertEquals(
             "seek",
             SeekPayload("room_001", "user_a", 210_000L, 6L).toEnvelope().type
+        )
+        assertEquals(
+            "heartbeat",
+            HeartbeatPayload(1710000000000L).toEnvelope().type
+        )
+        assertEquals(
+            "heartbeat_ack",
+            HeartbeatAckPayload(1710000000000L, 1710000000123L).toEnvelope().type
         )
         assertEquals(
             "error",

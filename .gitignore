@@ -108,3 +108,6 @@ scripts/out/
 *.tar.gz
 *.tgz
 *.rar
+
+### ======== figma .fig
+fig/

@@ -55,6 +55,20 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.UUID
 
+private enum class SyncStatus(val label: String) {
+    Idle("Idle"),
+    CreatingRoom("Creating room"),
+    JoiningAsHost("Joining as host"),
+    JoiningAsViewer("Joining as viewer"),
+    Connected("Connected"),
+    RoomStateApplied("room_state applied"),
+    PlayApplied("play applied"),
+    PauseApplied("pause applied"),
+    SeekApplied("seek applied"),
+    SyncFailed("Sync failed"),
+    CreateAndJoinFailed("Create and join failed")
+}
+
 @Composable
 fun PlayerScreen(modifier: Modifier = Modifier) {
     val adapter = rememberPlayerAdapter()
@@ -74,7 +88,7 @@ fun PlayerScreen(modifier: Modifier = Modifier) {
     var activeUserId by remember { mutableStateOf<String?>(null) }
     var currentRoomId by remember { mutableStateOf<String?>(null) }
     var latestSyncState by remember { mutableStateOf<RoomSyncState?>(null) }
-    var syncStatus by remember { mutableStateOf("Idle") }
+    var syncStatus by remember { mutableStateOf(SyncStatus.Idle) }
     var currentPosition by remember { mutableLongStateOf(0L) }
     var duration by remember { mutableLongStateOf(0L) }
     var isPlaying by remember { mutableStateOf(false) }
@@ -108,7 +122,11 @@ fun PlayerScreen(modifier: Modifier = Modifier) {
         }
     }
 
-    fun applyAuthoritativeState(newState: RoomSyncState, reason: String) {
+    fun applyAuthoritativeState(
+        newState: RoomSyncState,
+        status: SyncStatus,
+        reason: String
+    ) {
         if (!newState.isNewerThan(latestSyncState)) {
             appendLog(syncLogs, "Ignored stale $reason seq=${newState.seq}")
             return
@@ -118,7 +136,7 @@ fun PlayerScreen(modifier: Modifier = Modifier) {
         currentRoomId = newState.roomId
         joinRoomInput = newState.roomId
         playbackSpeed = newState.playbackRate.toFloat()
-        syncStatus = "$reason applied"
+        syncStatus = status
         appendLog(syncLogs, "Applied $reason seq=${newState.seq} roomId=${newState.roomId}")
     }
 
@@ -133,7 +151,7 @@ fun PlayerScreen(modifier: Modifier = Modifier) {
             override fun onRoomState(payload: RoomSyncState) {
                 coroutineScope.launch {
                     val appliedState = roomSyncCoordinator.applyInitialState(payload)
-                    applyAuthoritativeState(appliedState, "room_state")
+                    applyAuthoritativeState(appliedState, SyncStatus.RoomStateApplied, "room_state")
                 }
             }
 
@@ -148,7 +166,7 @@ fun PlayerScreen(modifier: Modifier = Modifier) {
                         return@launch
                     }
                     val appliedState = roomSyncCoordinator.applyPlayEvent(previous, payload)
-                    applyAuthoritativeState(appliedState, "play")
+                    applyAuthoritativeState(appliedState, SyncStatus.PlayApplied, "play")
                 }
             }
 
@@ -163,7 +181,7 @@ fun PlayerScreen(modifier: Modifier = Modifier) {
                         return@launch
                     }
                     val appliedState = roomSyncCoordinator.applyPauseEvent(previous, payload)
-                    applyAuthoritativeState(appliedState, "pause")
+                    applyAuthoritativeState(appliedState, SyncStatus.PauseApplied, "pause")
                 }
             }
 
@@ -178,13 +196,20 @@ fun PlayerScreen(modifier: Modifier = Modifier) {
                         return@launch
                     }
                     val appliedState = roomSyncCoordinator.applySeekEvent(previous, payload)
-                    applyAuthoritativeState(appliedState, "seek")
+                    applyAuthoritativeState(appliedState, SyncStatus.SeekApplied, "seek")
+                }
+            }
+
+            override fun onHeartbeat(serverTimeMs: Long) {
+                coroutineScope.launch {
+                    syncStatus = SyncStatus.Connected
+                    appendLog(syncLogs, "heartbeat acknowledged serverTimeMs=$serverTimeMs")
                 }
             }
 
             override fun onError(message: String) {
                 coroutineScope.launch {
-                    syncStatus = "Sync failed"
+                    syncStatus = SyncStatus.SyncFailed
                     appendLog(syncLogs, "Sync error: $message")
                 }
             }
@@ -194,7 +219,7 @@ fun PlayerScreen(modifier: Modifier = Modifier) {
     fun createAndJoinAsHost() {
         coroutineScope.launch {
             runCatching {
-                syncStatus = "Creating room"
+                syncStatus = SyncStatus.CreatingRoom
                 appendLog(syncLogs, "POST /rooms for hostUserId=$hostUserId")
                 val createResult = withContext(Dispatchers.IO) {
                     roomHttpClient.createRoom(
@@ -206,7 +231,7 @@ fun PlayerScreen(modifier: Modifier = Modifier) {
                 currentRoomId = createResult.roomId
                 joinRoomInput = createResult.roomId
                 activeUserId = hostUserId
-                syncStatus = "Joining as host"
+                syncStatus = SyncStatus.JoiningAsHost
                 appendLog(
                     syncLogs,
                     "Created roomId=${createResult.roomId} mediaId=${createResult.roomState.mediaId}"
@@ -219,7 +244,7 @@ fun PlayerScreen(modifier: Modifier = Modifier) {
                     listener = syncListener
                 )
             }.onFailure { error ->
-                syncStatus = "Create and join failed"
+                syncStatus = SyncStatus.CreateAndJoinFailed
                 appendLog(syncLogs, "Create and join failed: ${error.message}")
             }
         }
@@ -234,7 +259,7 @@ fun PlayerScreen(modifier: Modifier = Modifier) {
 
         activeUserId = viewerUserId
         currentRoomId = roomId
-        syncStatus = "Joining as viewer"
+        syncStatus = SyncStatus.JoiningAsViewer
         appendLog(syncLogs, "Joining roomId=$roomId as $viewerUserId")
         roomWebSocketClient.joinRoom(
             wsUrl = AppConfig.wsBaseUrl,
@@ -338,7 +363,7 @@ private fun rememberPlayerAdapter(): PlayerAdapter {
 private fun PlayerStatusHeader(
     sampleUrl: String,
     currentRoomId: String?,
-    syncStatus: String,
+    syncStatus: SyncStatus,
     activeUserId: String?,
     isHostController: Boolean
 ) {
@@ -377,7 +402,7 @@ private fun PlayerStatusHeader(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             Text(
-                text = "Sync status: $syncStatus",
+                text = "Sync status: ${syncStatus.label}",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -390,7 +415,7 @@ private fun JoinSyncActionsCard(
     hostUserId: String,
     viewerUserId: String,
     currentRoomId: String?,
-    syncStatus: String,
+    syncStatus: SyncStatus,
     joinRoomInput: String,
     onJoinRoomInputChange: (String) -> Unit,
     onCreateAndJoinAsHost: () -> Unit,
@@ -417,7 +442,7 @@ private fun JoinSyncActionsCard(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             Text(
-                text = "Current room: ${currentRoomId ?: "(none)"} · $syncStatus",
+                text = "Current room: ${currentRoomId ?: "(none)"} · ${syncStatus.label}",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
