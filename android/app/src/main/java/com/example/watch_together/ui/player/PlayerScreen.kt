@@ -69,6 +69,7 @@ private enum class SyncStatus(val label: String) {
     PauseApplied("pause applied"),
     SeekApplied("seek applied"),
     PlaybackRateApplied("playback rate applied"),
+    EndedApplied("ended applied"),
     SyncFailed("Sync failed"),
     CreateAndJoinFailed("Create and join failed")
 }
@@ -99,6 +100,7 @@ fun PlayerScreen(modifier: Modifier = Modifier) {
     var playbackState by remember { mutableIntStateOf(Player.STATE_IDLE) }
     var playbackSpeed by remember { mutableFloatStateOf(1f) }
     var lastDriftCorrectionAtMs by remember { mutableLongStateOf(0L) }
+    var lastEndedReportedSeq by remember { mutableLongStateOf(-1L) }
 
     val isHostController = remember(activeUserId, latestSyncState) {
         activeUserId != null && latestSyncState?.hostUserId == activeUserId
@@ -262,6 +264,25 @@ fun PlayerScreen(modifier: Modifier = Modifier) {
                 }
             }
 
+            override fun onEnded(payload: com.example.watch_together.sync.protocol.EndedPayload) {
+                coroutineScope.launch {
+                    appendLog(
+                        syncLogs,
+                        "received ended seq=${payload.seq} position=${payload.positionMs}"
+                    )
+                    val previous = latestSyncState ?: run {
+                        appendLog(syncLogs, "Ignored ended before room_state")
+                        return@launch
+                    }
+                    if (payload.seq <= previous.seq) {
+                        appendLog(syncLogs, "Ignored stale ended seq=${payload.seq}")
+                        return@launch
+                    }
+                    val appliedState = roomSyncCoordinator.applyEndedEvent(previous, payload)
+                    applyAuthoritativeState(appliedState, SyncStatus.EndedApplied, "ended")
+                }
+            }
+
             override fun onHeartbeat(serverTimeMs: Long) {
                 coroutineScope.launch {
                     syncStatus = SyncStatus.Connected
@@ -415,6 +436,27 @@ fun PlayerScreen(modifier: Modifier = Modifier) {
             adapter.setPlaybackSpeed(previousPlaybackSpeed)
         }
         appendLog(syncLogs, "playbackRate sent=$sent rate=${speed}x at ${currentPosition}ms")
+    }
+
+    fun sendEndedSync() {
+        val currentState = latestSyncState ?: return
+        val sent = roomWebSocketClient.sendEnded(
+            positionMs = currentPosition,
+            seq = currentState.seq
+        )
+        appendLog(syncLogs, "ended sent=$sent at ${currentPosition}ms")
+        if (sent) {
+            lastEndedReportedSeq = currentState.seq
+        }
+    }
+
+    LaunchedEffect(playbackState, isHostController, latestSyncState?.seq, latestSyncState?.ended) {
+        val currentState = latestSyncState ?: return@LaunchedEffect
+        if (!isHostController) return@LaunchedEffect
+        if (playbackState != Player.STATE_ENDED) return@LaunchedEffect
+        if (currentState.ended) return@LaunchedEffect
+        if (lastEndedReportedSeq == currentState.seq) return@LaunchedEffect
+        sendEndedSync()
     }
 
     Column(

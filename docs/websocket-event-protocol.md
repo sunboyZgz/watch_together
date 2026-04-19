@@ -15,6 +15,7 @@
 - 房主触发播放
 - 房主触发暂停
 - 房主触发拖动
+- 房主上报播放结束
 - 服务端下发基础错误
 
 当前协议不覆盖以下内容：
@@ -123,6 +124,12 @@
 - 含义：当前是否处于暂停状态
 - 类型：boolean
 
+### `ended`
+
+- 含义：当前房间是否已经进入播放完成态
+- 类型：boolean
+- 约束：`ended == true` 时，`positionMs` 应冻结在完成位置，客户端不应再继续外推播放进度
+
 ### `seq`
 
 - 含义：房间状态序列号
@@ -140,7 +147,7 @@
 - 所有消息统一使用 `type + payload`
 - 播放位置统一使用 `positionMs`
 - 协议字段使用跨平台语义，不使用 Android/ExoPlayer 专属命名
-- 当前阶段只覆盖 `join_room`、`room_state`、`play`、`pause`、`seek`、`set_playback_rate`、`heartbeat`、`heartbeat_ack`、`error`
+- 当前阶段只覆盖 `join_room`、`room_state`、`play`、`pause`、`seek`、`set_playback_rate`、`ended`、`heartbeat`、`heartbeat_ack`、`error`
 - `seq` 视为服务端权威顺序号；客户端上报事件时可带上本地已知 `seq`，服务端广播时应使用最新状态序号
 - `heartbeat` 与 `heartbeat_ack` 只用于连接健康检测，不参与房间状态推进
 
@@ -167,7 +174,7 @@
 
 ## Server-side Event Rules
 
-围绕 `play / pause / seek / set_playback_rate`，当前服务端建议遵循以下最小规则：
+围绕 `play / pause / seek / set_playback_rate / ended`，当前服务端建议遵循以下最小规则：
 
 - 仅允许当前房主发起控制事件
 - 房间不存在时返回 `error`
@@ -175,6 +182,8 @@
 - 服务端在接受控制事件后更新内存中的房间状态
 - 服务端在更新状态后递增 `seq`
 - 服务端广播的事件应携带最新 `seq`
+- `ended` 发生后，服务端应冻结当前位置并把房间收敛到稳定 completed state
+- `seek` 离开结尾时，应清除 `ended`
 
 当前阶段服务端无需引入复杂仲裁，只需要把“谁是权威、状态何时更新、`seq` 何时递增”这几个点保持稳定。
 
@@ -187,6 +196,7 @@
 - `pause`：先把本地基线位置对齐到事件 `positionMs`，再执行暂停
 - `seek`：先执行 seek 到事件 `positionMs`，再根据当前房间暂停状态决定是否保持暂停
 - 应用成功后更新本地 `RoomSyncState`
+- 若房间已经进入 `ended`，客户端应停止继续做基于播放中的 drift correction
 
 这几条规则的目标是先保证“控制语义一致 + 新旧顺序清楚”，而不是一次解决所有漂移修正问题。
 
@@ -215,6 +225,7 @@
 - 房间状态基线广播
 - 当前 Android 首个客户端实现会在 join 成功后把这条 `room_state` 视为本地权威基线，并立即应用到播放器
 - 当房间处于播放中时，服务端返回的 `positionMs` 应代表“当前有效播放位置”，而不是最后一次控制事件被冻结的旧位置
+- 当房间已经播放结束时，服务端返回的 `room_state` 应代表冻结后的 completed state，而不是继续向前外推的播放中状态
 
 ```json
 {
@@ -224,6 +235,7 @@
     "mediaId": "sample_001",
     "hostUserId": "user_a",
     "paused": false,
+    "ended": false,
     "positionMs": 125000,
     "playbackRate": 1.0,
     "seq": 3
@@ -309,6 +321,27 @@
 }
 ```
 
+### `ended`
+
+- 方向：client -> server / server -> clients
+- 作用：房主上报媒体播放完成，服务端确认后把房间收敛到稳定 completed state 并广播
+- 当前阶段建议仅由当前房主在播放器真实进入 ended 时上报
+- 服务端广播时应使用最新 `seq`
+- `ended` 会冻结当前房间位置，并把 `paused` 一并视为 `true`
+- 后续若房主执行 `seek` 离开结尾，应清除 `ended`
+
+```json
+{
+  "type": "ended",
+  "payload": {
+    "roomId": "room_001",
+    "userId": "user_a",
+    "positionMs": 210000,
+    "seq": 8
+  }
+}
+```
+
 ### `heartbeat`
 
 - 方向：server -> client
@@ -381,6 +414,10 @@
 | `play` | client -> server, server -> clients |
 | `pause` | client -> server, server -> clients |
 | `seek` | client -> server, server -> clients |
+| `set_playback_rate` | client -> server, server -> clients |
+| `ended` | client -> server, server -> clients |
+| `heartbeat` | server -> client |
+| `heartbeat_ack` | client -> server |
 | `error` | server -> client |
 
 ## Recommended Phase 1 Execution Order

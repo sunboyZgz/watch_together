@@ -1,6 +1,7 @@
 package com.example.watch_together.sync
 
 import androidx.media3.ui.PlayerView
+import com.example.watch_together.sync.protocol.EndedPayload
 import com.example.watch_together.sync.protocol.PausePayload
 import com.example.watch_together.sync.protocol.PlayPayload
 import com.example.watch_together.sync.protocol.SetPlaybackRatePayload
@@ -23,6 +24,7 @@ class RoomSyncCoordinatorTest {
             mediaId = "custom_media",
             hostUserId = "user_a",
             paused = false,
+            ended = false,
             positionMs = 42_000L,
             playbackRate = 1.25,
             seq = 2L
@@ -42,7 +44,7 @@ class RoomSyncCoordinatorTest {
     fun `applyPlayEvent seeks then plays and advances seq`() {
         val fakePlayerAdapter = FakePlayerAdapter()
         val coordinator = RoomSyncCoordinator(fakePlayerAdapter)
-        val previous = RoomSyncState("ROOM01", "sample_001", "user_a", true, 10_000L, 1.0, 1L)
+        val previous = RoomSyncState("ROOM01", "sample_001", "user_a", true, false, 10_000L, 1.0, 1L)
 
         val next = coordinator.applyPlayEvent(
             previous,
@@ -61,7 +63,7 @@ class RoomSyncCoordinatorTest {
     fun `applyPauseEvent seeks then pauses and advances seq`() {
         val fakePlayerAdapter = FakePlayerAdapter()
         val coordinator = RoomSyncCoordinator(fakePlayerAdapter)
-        val previous = RoomSyncState("ROOM01", "sample_001", "user_a", false, 10_000L, 1.0, 2L)
+        val previous = RoomSyncState("ROOM01", "sample_001", "user_a", false, false, 10_000L, 1.0, 2L)
 
         val next = coordinator.applyPauseEvent(
             previous,
@@ -80,7 +82,7 @@ class RoomSyncCoordinatorTest {
     fun `applySeekEvent preserves paused flag while moving position`() {
         val fakePlayerAdapter = FakePlayerAdapter()
         val coordinator = RoomSyncCoordinator(fakePlayerAdapter)
-        val previous = RoomSyncState("ROOM01", "sample_001", "user_a", true, 15_000L, 1.0, 3L)
+        val previous = RoomSyncState("ROOM01", "sample_001", "user_a", true, false, 15_000L, 1.0, 3L)
 
         val next = coordinator.applySeekEvent(
             previous,
@@ -100,7 +102,7 @@ class RoomSyncCoordinatorTest {
     fun `applyPlaybackRateEvent updates speed and preserves play state`() {
         val fakePlayerAdapter = FakePlayerAdapter()
         val coordinator = RoomSyncCoordinator(fakePlayerAdapter)
-        val previous = RoomSyncState("ROOM01", "sample_001", "user_a", false, 15_000L, 1.0, 4L)
+        val previous = RoomSyncState("ROOM01", "sample_001", "user_a", false, false, 15_000L, 1.0, 4L)
 
         val next = coordinator.applyPlaybackRateEvent(
             previous,
@@ -118,6 +120,25 @@ class RoomSyncCoordinatorTest {
     }
 
     @Test
+    fun `applyEndedEvent freezes player into completed state`() {
+        val fakePlayerAdapter = FakePlayerAdapter()
+        val coordinator = RoomSyncCoordinator(fakePlayerAdapter)
+        val previous = RoomSyncState("ROOM01", "sample_001", "user_a", false, false, 18_000L, 1.5, 5L)
+
+        val next = coordinator.applyEndedEvent(
+            previous,
+            EndedPayload("ROOM01", "user_a", 210_000L, 6L),
+            appliedAtMs = 6_000L
+        )
+
+        assertEquals(210_000L, fakePlayerAdapter.seekPositionMs)
+        assertTrue(fakePlayerAdapter.pauseCalled)
+        assertTrue(next.paused)
+        assertTrue(next.ended)
+        assertEquals(6L, next.seq)
+    }
+
+    @Test
     fun `estimateExpectedPositionMs extrapolates from authority baseline`() {
         val fakePlayerAdapter = FakePlayerAdapter()
         val coordinator = RoomSyncCoordinator(fakePlayerAdapter)
@@ -126,6 +147,7 @@ class RoomSyncCoordinatorTest {
             mediaId = "sample_001",
             hostUserId = "user_a",
             paused = false,
+            ended = false,
             positionMs = 10_000L,
             playbackRate = 1.0,
             seq = 5L,
@@ -148,6 +170,7 @@ class RoomSyncCoordinatorTest {
             mediaId = "sample_001",
             hostUserId = "user_a",
             paused = false,
+            ended = false,
             positionMs = 10_000L,
             playbackRate = 1.0,
             seq = 5L,
@@ -179,6 +202,7 @@ class RoomSyncCoordinatorTest {
             mediaId = "sample_001",
             hostUserId = "user_a",
             paused = false,
+            ended = false,
             positionMs = 10_000L,
             playbackRate = 1.0,
             seq = 5L,
@@ -209,6 +233,7 @@ class RoomSyncCoordinatorTest {
             mediaId = "sample_001",
             hostUserId = "user_a",
             paused = false,
+            ended = false,
             positionMs = 9_000L,
             playbackRate = 1.0,
             seq = 5L,
@@ -238,6 +263,7 @@ class RoomSyncCoordinatorTest {
             mediaId = "sample_001",
             hostUserId = "user_a",
             paused = false,
+            ended = false,
             positionMs = 10_000L,
             playbackRate = 1.0,
             seq = 5L,
@@ -254,6 +280,36 @@ class RoomSyncCoordinatorTest {
 
         assertEquals(13_000L, fakePlayerAdapter.seekPositionMs)
         assertTrue(fakePlayerAdapter.playCalled)
+    }
+
+    @Test
+    fun `evaluateDrift skips correction when authority state is ended`() {
+        val fakePlayerAdapter = FakePlayerAdapter().apply {
+            currentPositionMs = 15_000L
+        }
+        val coordinator = RoomSyncCoordinator(fakePlayerAdapter)
+        val authority = RoomSyncState(
+            roomId = "ROOM01",
+            mediaId = "sample_001",
+            hostUserId = "user_a",
+            paused = true,
+            ended = true,
+            positionMs = 210_000L,
+            playbackRate = 1.0,
+            seq = 6L,
+            authorityAppliedAtMs = 2_000L
+        )
+
+        val check = coordinator.evaluateDrift(
+            authorityState = authority,
+            nowMs = 5_000L,
+            lastCorrectionAtMs = 0L,
+            thresholdMs = 750L,
+            correctionIntervalMs = 1_000L
+        )
+
+        assertFalse(check.shouldCorrect)
+        assertEquals(210_000L, check.expectedPositionMs)
     }
 }
 

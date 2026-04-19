@@ -19,6 +19,7 @@ class SyncMessageDecoderTest {
                 "mediaId": "sample_001",
                 "hostUserId": "user_a",
                 "paused": false,
+                "ended": false,
                 "positionMs": 125000,
                 "playbackRate": 1.25,
                 "seq": 3
@@ -65,6 +66,7 @@ class SyncMessageDecoderTest {
                     "mediaId": "sample_001",
                     "hostUserId": "host_a",
                     "paused": true,
+                    "ended": false,
                     "positionMs": 0,
                     "playbackRate": 1.0,
                     "seq": 1
@@ -78,6 +80,7 @@ class SyncMessageDecoderTest {
         assertEquals("ROOM42", roomSyncState.roomId)
         assertEquals("host_a", roomSyncState.hostUserId)
         assertTrue(roomSyncState.paused)
+        assertFalse(roomSyncState.ended)
     }
 
     @Test
@@ -154,6 +157,27 @@ class SyncMessageDecoderTest {
         assertEquals(18_000L, decoded.payload.positionMs)
         assertEquals(1.5, decoded.payload.playbackRate, 0.0)
         assertEquals(5L, decoded.payload.seq)
+    }
+
+    @Test
+    fun `ended message decodes with room position and seq`() {
+        val decoded = decoder.decode(
+            """
+                {
+                  "type": "ended",
+                  "payload": {
+                    "roomId": "ROOM42",
+                    "userId": "host_a",
+                    "positionMs": 210000,
+                    "seq": 6
+                  }
+                }
+            """.trimIndent()
+        ) as SyncMessage.Ended
+
+        assertEquals("ROOM42", decoded.payload.roomId)
+        assertEquals(210_000L, decoded.payload.positionMs)
+        assertEquals(6L, decoded.payload.seq)
     }
 
     @Test

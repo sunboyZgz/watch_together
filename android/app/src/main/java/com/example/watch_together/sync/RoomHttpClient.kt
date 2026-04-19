@@ -47,6 +47,7 @@ class RoomHttpClient(
                     mediaId = stateJson.getString("mediaId"),
                     hostUserId = stateJson.getString("hostUserId"),
                     paused = stateJson.getBoolean("paused"),
+                    ended = stateJson.optBoolean("ended", false),
                     positionMs = stateJson.getLong("positionMs"),
                     playbackRate = stateJson.getDouble("playbackRate"),
                     seq = stateJson.getLong("seq")

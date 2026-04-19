@@ -22,6 +22,9 @@ class ProtocolDraftTest {
             ProtocolEventType.SetPlaybackRate to (
                 "set_playback_rate" to ProtocolDirection.ClientToServerAndServerToClients
             ),
+            ProtocolEventType.Ended to (
+                "ended" to ProtocolDirection.ClientToServerAndServerToClients
+            ),
             ProtocolEventType.Heartbeat to ("heartbeat" to ProtocolDirection.ServerToClient),
             ProtocolEventType.HeartbeatAck to ("heartbeat_ack" to ProtocolDirection.ClientToServer),
             ProtocolEventType.Error to ("error" to ProtocolDirection.ServerToClient)
@@ -46,7 +49,7 @@ class ProtocolDraftTest {
         assertEquals("join_room", JoinRoomPayload("room_001", "user_a").toEnvelope().type)
         assertEquals(
             "room_state",
-            RoomStatePayload("room_001", "sample_001", "user_a", false, 125_000L, 1.0, 3L)
+            RoomStatePayload("room_001", "sample_001", "user_a", false, false, 125_000L, 1.0, 3L)
                 .toEnvelope()
                 .type
         )
@@ -65,6 +68,10 @@ class ProtocolDraftTest {
         assertEquals(
             "set_playback_rate",
             SetPlaybackRatePayload("room_001", "user_a", 125_000L, 1.5, 7L).toEnvelope().type
+        )
+        assertEquals(
+            "ended",
+            EndedPayload("room_001", "user_a", 210_000L, 8L).toEnvelope().type
         )
         assertEquals(
             "heartbeat",

@@ -20,6 +20,7 @@
 - room_state
 - play / pause / seek
 - playback rate sync
+- ended-state authority
 - heartbeat
 - host transfer
 
@@ -59,6 +60,10 @@
 
 - `authorityUpdatedAtMs`
 
+当房间播放完成后，权威状态还需要显式保存：
+
+- `ended`
+
 它不需要直接暴露进协议，但它决定了服务端在任意时刻如何推导“当前有效播放位置”。
 
 #### Server-side Effective Position
@@ -85,6 +90,39 @@
 
 3. 作为新的 authority snapshot 返回给客户端
    这样 repeated join、host transfer 后收到的 `room_state` 就能代表“当前时刻的房间位置”，而不是过期快照。
+
+#### Completed State Semantics
+
+播放结束不是普通的暂停，它需要一个稳定的 completed state。
+
+当前更合理的 authority 语义是：
+
+- `ended == true`
+- `paused == true`
+- `positionMs` 冻结在完成位置
+- `playbackRate` 保留当前权威倍率
+- `seq` 因 ended 事件推进一次
+
+服务端算法思路：
+
+1. host 上报 `ended`
+   - 服务端先按当前 authority timeline 结算出“此刻真实有效位置”
+   - 再与 host 上报的 `positionMs` 取一个更接近结尾的冻结位置
+
+2. 把房间收敛到 completed state
+   - `ended = true`
+   - `paused = true`
+   - `positionMs = frozenPositionMs`
+   - `authorityUpdatedAtMs = serverNow`
+   - `seq++`
+
+3. 对外广播 `ended`
+   - 让其他成员停止继续播放
+   - 让 repeated join / reconnect 后拿到稳定终态
+
+4. seek 离开结尾时清除 ended
+   - 一旦 host 主动 seek 到非结尾位置，completed state 不应继续保留
+   - 这时房间回到正常的播放/暂停 authority 语义
 
 优化方向：
 
@@ -309,7 +347,36 @@ drift correction 是当前最值得持续跟踪的核心技术点之一。
 6. 广播 `set_playback_rate`
 7. 客户端应用新倍率后，继续沿更新后的 baseline 做 drift correction
 
-### 8. Loop Prevention
+### 8. Ended-state Authority
+
+`ended` 是房间权威状态的一部分，而不只是本地播放器事件。
+
+关键点：
+
+- host 到达媒体结尾后，需要由服务端确认并广播 `ended`
+- `ended` 不是简单复用 `pause`
+- repeated join / reconnect 收到的 `room_state` 必须能表达 completed state
+- drift correction 在 authority state 已经 `ended` 时必须停止
+
+算法思路：
+
+1. host 进入播放器 ended
+2. Android 端上报 `ended(positionMs, seq)`
+3. 服务端先结算 authority timeline 的当前有效位置
+4. 服务端冻结 `positionMs`，写入 `ended=true`
+5. 服务端广播 `ended`
+6. 客户端收到后：
+   - seek 到冻结位置
+   - pause 本地播放器
+   - 更新本地 authority baseline
+   - 停止继续做 drift correction
+
+这样可以解决两个关键问题：
+
+- 视频播完后房间状态不再继续被当作“播放中”
+- repeated join / reconnect 不会再收到一个继续向前外推的伪播放状态
+
+### 9. Loop Prevention
 
 当前同步实现必须避免回环。
 

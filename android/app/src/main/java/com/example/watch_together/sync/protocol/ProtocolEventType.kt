@@ -28,6 +28,10 @@ enum class ProtocolEventType(
         wireName = "set_playback_rate",
         direction = ProtocolDirection.ClientToServerAndServerToClients
     ),
+    Ended(
+        wireName = "ended",
+        direction = ProtocolDirection.ClientToServerAndServerToClients
+    ),
     Heartbeat(
         wireName = "heartbeat",
         direction = ProtocolDirection.ServerToClient

@@ -1,6 +1,7 @@
 package com.example.watch_together.sync
 
 import com.example.watch_together.config.AppConfig
+import com.example.watch_together.sync.protocol.EndedPayload
 import com.example.watch_together.sync.protocol.PausePayload
 import com.example.watch_together.sync.protocol.PlayPayload
 import com.example.watch_together.sync.protocol.SetPlaybackRatePayload
@@ -58,6 +59,7 @@ class RoomSyncCoordinator(
         return previous.copy(
             positionMs = payload.positionMs,
             paused = false,
+            ended = false,
             seq = payload.seq,
             authorityAppliedAtMs = appliedAtMs
         )
@@ -75,6 +77,7 @@ class RoomSyncCoordinator(
         return previous.copy(
             positionMs = payload.positionMs,
             paused = true,
+            ended = false,
             seq = payload.seq,
             authorityAppliedAtMs = appliedAtMs
         )
@@ -95,6 +98,7 @@ class RoomSyncCoordinator(
 
         return previous.copy(
             positionMs = payload.positionMs,
+            ended = false,
             seq = payload.seq,
             authorityAppliedAtMs = appliedAtMs
         )
@@ -122,10 +126,28 @@ class RoomSyncCoordinator(
         )
     }
 
+    // applyEndedEvent moves the local player into a stable completed state.
+    fun applyEndedEvent(
+        previous: RoomSyncState,
+        payload: EndedPayload,
+        appliedAtMs: Long = System.currentTimeMillis()
+    ): RoomSyncState {
+        playerAdapter.seekTo(payload.positionMs)
+        playerAdapter.pause()
+
+        return previous.copy(
+            paused = true,
+            ended = true,
+            positionMs = payload.positionMs,
+            seq = payload.seq,
+            authorityAppliedAtMs = appliedAtMs
+        )
+    }
+
     // estimateExpectedPositionMs extrapolates where the local player should be now
     // based on the latest authoritative baseline and the elapsed local wall-clock time.
     fun estimateExpectedPositionMs(authorityState: RoomSyncState, nowMs: Long): Long {
-        if (authorityState.paused || authorityState.authorityAppliedAtMs <= 0L) {
+        if (authorityState.paused || authorityState.ended || authorityState.authorityAppliedAtMs <= 0L) {
             return authorityState.positionMs
         }
 
@@ -161,6 +183,7 @@ class RoomSyncCoordinator(
 
         val shouldCorrect = !playbackEnded &&
             !authorityState.paused &&
+            !authorityState.ended &&
             authorityState.authorityAppliedAtMs > 0L &&
             nowMs - authorityState.authorityAppliedAtMs >= correctionIntervalMs &&
             (lastCorrectionAtMs <= 0L || nowMs - lastCorrectionAtMs >= correctionIntervalMs) &&

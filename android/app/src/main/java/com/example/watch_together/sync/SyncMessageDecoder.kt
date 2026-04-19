@@ -2,6 +2,7 @@ package com.example.watch_together.sync
 
 import com.example.watch_together.sync.protocol.ErrorPayload
 import com.example.watch_together.sync.protocol.HeartbeatPayload
+import com.example.watch_together.sync.protocol.EndedPayload
 import com.example.watch_together.sync.protocol.PausePayload
 import com.example.watch_together.sync.protocol.PlayPayload
 import com.example.watch_together.sync.protocol.ProtocolEventType
@@ -16,6 +17,7 @@ sealed interface SyncMessage {
     data class Pause(val payload: PausePayload) : SyncMessage
     data class Seek(val payload: SeekPayload) : SyncMessage
     data class SetPlaybackRate(val payload: SetPlaybackRatePayload) : SyncMessage
+    data class Ended(val payload: EndedPayload) : SyncMessage
     data class Heartbeat(val payload: HeartbeatPayload) : SyncMessage
     data class Error(val payload: ErrorPayload) : SyncMessage
 }
@@ -37,6 +39,7 @@ class SyncMessageDecoder {
                         mediaId = payload.getString("mediaId"),
                         hostUserId = payload.getString("hostUserId"),
                         paused = payload.getBoolean("paused"),
+                        ended = payload.getBoolean("ended"),
                         positionMs = payload.getLong("positionMs"),
                         playbackRate = payload.getDouble("playbackRate"),
                         seq = payload.getLong("seq")
@@ -84,6 +87,17 @@ class SyncMessageDecoder {
                         userId = payload.getString("userId"),
                         positionMs = payload.getLong("positionMs"),
                         playbackRate = payload.getDouble("playbackRate"),
+                        seq = payload.getLong("seq")
+                    )
+                )
+            }
+
+            ProtocolEventType.Ended.wireName -> {
+                SyncMessage.Ended(
+                    EndedPayload(
+                        roomId = payload.getString("roomId"),
+                        userId = payload.getString("userId"),
+                        positionMs = payload.getLong("positionMs"),
                         seq = payload.getLong("seq")
                     )
                 )

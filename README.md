@@ -11,6 +11,7 @@
 - 两个用户进入同一个房间
 - 观看同一个云端视频资源
 - 在房间内同步播放、暂停、拖动和倍速
+- 在播放结束后保持稳定的 completed state
 - 保持较好的同步体验
 - 尽量降低使用门槛
 
@@ -74,10 +75,10 @@ watch_together/
 
 各目录职责：
 
-- `android/`: Android 客户端工程，当前已包含播放器适配层、协议草案、join-time initial state sync、heartbeat ack、最小 drift correction、repeated join resync 和最小控制事件/倍速同步能力
+- `android/`: Android 客户端工程，当前已包含播放器适配层、协议草案、join-time initial state sync、heartbeat ack、最小 drift correction、repeated join resync 和最小控制事件/倍速/ended-state 同步能力
 - `media/`: 本地开发和联调使用的样例媒体资源
 - `windows/`: Windows 客户端工程与跨平台同步能力
-- `server/`: 基于 Go 的房间服务骨架，当前已包含 `POST /rooms`、`/ws`、协议解析、应用层 heartbeat、最小房间管理结构和 `play / pause / seek / set_playback_rate` 控制广播
+- `server/`: 基于 Go 的房间服务骨架，当前已包含 `POST /rooms`、`/ws`、协议解析、应用层 heartbeat、最小房间管理结构和 `play / pause / seek / set_playback_rate / ended` 控制广播
 - `docs/`: 仓库内文档入口和静态资源
 - `shared/`: 跨端共享定义，例如协议、Schema、常量
 - `scripts/`: 开发、维护和初始化辅助脚本

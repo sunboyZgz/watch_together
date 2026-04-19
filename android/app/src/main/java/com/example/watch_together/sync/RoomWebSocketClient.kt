@@ -2,6 +2,7 @@ package com.example.watch_together.sync
 
 import com.example.watch_together.sync.protocol.JoinRoomPayload
 import com.example.watch_together.sync.protocol.HeartbeatAckPayload
+import com.example.watch_together.sync.protocol.EndedPayload
 import com.example.watch_together.sync.protocol.PausePayload
 import com.example.watch_together.sync.protocol.PlayPayload
 import com.example.watch_together.sync.protocol.SeekPayload
@@ -21,6 +22,7 @@ interface RoomWebSocketListener {
     fun onPause(payload: PausePayload)
     fun onSeek(payload: SeekPayload)
     fun onPlaybackRate(payload: SetPlaybackRatePayload)
+    fun onEnded(payload: EndedPayload)
     fun onHeartbeat(serverTimeMs: Long)
     fun onError(message: String)
 }
@@ -79,6 +81,7 @@ class RoomWebSocketClient(
                         is SyncMessage.Pause -> listener.onPause(message.payload)
                         is SyncMessage.Seek -> listener.onSeek(message.payload)
                         is SyncMessage.SetPlaybackRate -> listener.onPlaybackRate(message.payload)
+                        is SyncMessage.Ended -> listener.onEnded(message.payload)
                         is SyncMessage.Heartbeat -> {
                             sendHeartbeatAck(webSocket, message.payload.serverTimeMs)
                             listener.onHeartbeat(message.payload.serverTimeMs)
@@ -152,6 +155,17 @@ class RoomWebSocketClient(
         )
     }
 
+    fun sendEnded(positionMs: Long, seq: Long): Boolean {
+        return sendControl(
+            EndedPayload(
+                roomId = activeRoomId ?: return false,
+                userId = activeUserId ?: return false,
+                positionMs = positionMs,
+                seq = seq
+            ).toEnvelope()
+        )
+    }
+
     fun close() {
         sessionGeneration++
         webSocket?.close(1000, "client closed")
@@ -212,6 +226,13 @@ class RoomWebSocketClient(
                 "userId" to payload.userId,
                 "positionMs" to payload.positionMs,
                 "playbackRate" to payload.playbackRate,
+                "seq" to payload.seq
+            )
+
+            is EndedPayload -> mapOf(
+                "roomId" to payload.roomId,
+                "userId" to payload.userId,
+                "positionMs" to payload.positionMs,
                 "seq" to payload.seq
             )
 

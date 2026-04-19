@@ -10,6 +10,7 @@ data class RoomStatePayload(
     val mediaId: String,
     val hostUserId: String,
     val paused: Boolean,
+    val ended: Boolean,
     val positionMs: Long,
     val playbackRate: Double,
     val seq: Long
@@ -41,6 +42,13 @@ data class SetPlaybackRatePayload(
     val userId: String,
     val positionMs: Long,
     val playbackRate: Double,
+    val seq: Long
+) : ProtocolPayload
+
+data class EndedPayload(
+    val roomId: String,
+    val userId: String,
+    val positionMs: Long,
     val seq: Long
 ) : ProtocolPayload
 
@@ -96,6 +104,13 @@ fun SeekPayload.toEnvelope(): ProtocolEnvelope<SeekPayload> {
 fun SetPlaybackRatePayload.toEnvelope(): ProtocolEnvelope<SetPlaybackRatePayload> {
     return ProtocolEnvelope(
         type = ProtocolEventType.SetPlaybackRate.wireName,
+        payload = this
+    )
+}
+
+fun EndedPayload.toEnvelope(): ProtocolEnvelope<EndedPayload> {
+    return ProtocolEnvelope(
+        type = ProtocolEventType.Ended.wireName,
         payload = this
     )
 }
