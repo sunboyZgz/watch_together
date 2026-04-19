@@ -18,7 +18,7 @@
 
 当前目录内的关键职责：
 
-- `app/src/main/java/.../ui/player/`：播放器页面、播放器适配器、播放器事件
+- `app/src/main/java/.../ui/player/`：播放器页面、播放器适配器、播放器事件与页面状态模型
 - `app/src/main/java/.../sync/`：建房、入房、协议解码、heartbeat ack 和 join 后初始状态应用
 - `app/src/main/java/.../sync/protocol/`：Android 侧最小协议草案模型
 - `app/src/main/java/.../config/`：Android 配置注入入口
@@ -53,7 +53,7 @@ android/
 - `config/`：统一读取 `BuildConfig` 并生成 Android 端可直接使用的 URL
 - `sync/`：当前阶段的 Android 首个同步接入层，负责 create room、join room、heartbeat ack、authority baseline 管理、drift correction、repeated join resync、控制事件出站、消息解码、`seq` 判断、倍速同步、ended-state 应用与播放器状态应用
 - `sync/protocol/`：保留与 `INT-19` 协议草案一致的 Android 本地协议模型
-- `ui/player/`：播放器页面、Media3 适配器、播放器事件和调试面板
+- `ui/player/`：播放器页面、页面状态模型、Media3 适配器、播放器事件和调试面板
 - `src/test/.../sync/`：协议解码和 join-time state application 的最小单元测试
 
 当前实现使用的核心库：
@@ -62,3 +62,22 @@ android/
 - Network: OkHttp
 
 在 Phase 1 中，这里会继续承载 Android ↔ Android 同步观影 MVP 的主要客户端实现。
+
+## Refactor Direction
+
+当前 Android 播放器同步核心已经基本具备，下一步更适合进入“播放器核心与房间业务逻辑分离”的重构阶段。
+
+当前推荐顺序：
+
+1. 先抽离页面状态模型
+2. 再抽离房间会话控制器
+3. 最后拆分 `PlayerScreen` 为页面壳层与播放器核心壳层
+4. 再补测试与文档收口
+
+这样可以避免过早直接拆页面 UI，导致状态和副作用只是被分散复制，而没有真正降低耦合。
+
+当前已完成的第一步：
+
+- 已抽离 `RoomPlayerUiState`
+- 已把 `SyncStatus` 从 `PlayerScreen.kt` 中抽出
+- 已将页面主要运行时状态收拢到统一状态入口

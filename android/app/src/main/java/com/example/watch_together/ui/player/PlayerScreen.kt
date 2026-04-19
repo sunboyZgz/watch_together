@@ -24,9 +24,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -47,7 +44,6 @@ import com.example.watch_together.sync.RoomSyncCoordinator
 import com.example.watch_together.sync.RoomSyncState
 import com.example.watch_together.sync.RoomWebSocketClient
 import com.example.watch_together.sync.RoomWebSocketListener
-import com.example.watch_together.sync.SyncMessage
 import com.example.watch_together.sync.isNewerThan
 import com.example.watch_together.ui.theme.Watch_togetherTheme
 import kotlinx.coroutines.Dispatchers
@@ -56,23 +52,6 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.UUID
-
-private enum class SyncStatus(val label: String) {
-    Idle("Idle"),
-    CreatingRoom("Creating room"),
-    JoiningAsHost("Joining as host"),
-    JoiningAsViewer("Joining as viewer"),
-    RejoiningCurrentUser("Rejoining current user"),
-    Connected("Connected"),
-    RoomStateApplied("room_state applied"),
-    PlayApplied("play applied"),
-    PauseApplied("pause applied"),
-    SeekApplied("seek applied"),
-    PlaybackRateApplied("playback rate applied"),
-    EndedApplied("ended applied"),
-    SyncFailed("Sync failed"),
-    CreateAndJoinFailed("Create and join failed")
-}
 
 @Composable
 fun PlayerScreen(modifier: Modifier = Modifier) {
@@ -89,28 +68,27 @@ fun PlayerScreen(modifier: Modifier = Modifier) {
     val playerEventLogs = remember { mutableStateListOf<String>() }
     val syncLogs = remember { mutableStateListOf<String>() }
 
-    var joinRoomInput by remember { mutableStateOf("") }
-    var activeUserId by remember { mutableStateOf<String?>(null) }
-    var currentRoomId by remember { mutableStateOf<String?>(null) }
-    var latestSyncState by remember { mutableStateOf<RoomSyncState?>(null) }
-    var syncStatus by remember { mutableStateOf(SyncStatus.Idle) }
-    var currentPosition by remember { mutableLongStateOf(0L) }
-    var duration by remember { mutableLongStateOf(0L) }
-    var isPlaying by remember { mutableStateOf(false) }
-    var playbackState by remember { mutableIntStateOf(Player.STATE_IDLE) }
-    var playbackSpeed by remember { mutableFloatStateOf(1f) }
-    var lastDriftCorrectionAtMs by remember { mutableLongStateOf(0L) }
-    var lastEndedReportedSeq by remember { mutableLongStateOf(-1L) }
+    var uiState by remember { mutableStateOf(RoomPlayerUiState()) }
 
-    val isHostController = remember(activeUserId, latestSyncState) {
-        activeUserId != null && latestSyncState?.hostUserId == activeUserId
+    val isHostController = remember(uiState.activeUserId, uiState.latestSyncState) {
+        uiState.activeUserId != null && uiState.latestSyncState?.hostUserId == uiState.activeUserId
+    }
+    val latestSyncState = uiState.latestSyncState
+    val playbackSnapshot = uiState.player
+
+    fun updateUiState(transform: (RoomPlayerUiState) -> RoomPlayerUiState) {
+        uiState = transform(uiState)
     }
 
     DisposableEffect(adapter) {
         adapter.setEventListener { event ->
             appendLog(playerEventLogs, event.toDebugLabel(), maxSize = 8)
             if (event is PlayerEvent.PlaybackStateChanged) {
-                playbackState = event.playbackState
+                updateUiState { current ->
+                    current.copy(
+                        player = current.player.copy(playbackState = event.playbackState)
+                    )
+                }
             }
         }
         onDispose {
@@ -126,9 +104,15 @@ fun PlayerScreen(modifier: Modifier = Modifier) {
 
     LaunchedEffect(adapter) {
         while (isActive) {
-            currentPosition = adapter.getCurrentPosition()
-            duration = adapter.getDuration().coerceAtLeast(0L)
-            isPlaying = adapter.isPlaying()
+            updateUiState { current ->
+                current.copy(
+                    player = current.player.copy(
+                        currentPosition = adapter.getCurrentPosition(),
+                        duration = adapter.getDuration().coerceAtLeast(0L),
+                        isPlaying = adapter.isPlaying()
+                    )
+                )
+            }
             delay(500)
         }
     }
@@ -137,14 +121,14 @@ fun PlayerScreen(modifier: Modifier = Modifier) {
         while (isActive) {
             delay(RoomSyncCoordinator.DEFAULT_CORRECTION_INTERVAL_MS)
 
-            val authorityState = latestSyncState ?: continue
+            val authorityState = uiState.latestSyncState ?: continue
             val nowMs = System.currentTimeMillis()
             val driftCheck = roomSyncCoordinator.evaluateDrift(
                 authorityState = authorityState,
                 nowMs = nowMs,
-                lastCorrectionAtMs = lastDriftCorrectionAtMs,
-                durationMs = duration,
-                playbackEnded = playbackState == Player.STATE_ENDED
+                lastCorrectionAtMs = uiState.lastDriftCorrectionAtMs,
+                durationMs = uiState.player.duration,
+                playbackEnded = uiState.player.playbackState == Player.STATE_ENDED
             )
 
             if (!driftCheck.shouldCorrect) {
@@ -152,7 +136,7 @@ fun PlayerScreen(modifier: Modifier = Modifier) {
             }
 
             roomSyncCoordinator.applyDriftCorrection(driftCheck, authorityState)
-            lastDriftCorrectionAtMs = nowMs
+            updateUiState { current -> current.copy(lastDriftCorrectionAtMs = nowMs) }
             appendLog(
                 syncLogs,
                 "drift correction local=${driftCheck.localPositionMs} expected=${driftCheck.expectedPositionMs} drift=${driftCheck.driftMs}"
@@ -165,16 +149,20 @@ fun PlayerScreen(modifier: Modifier = Modifier) {
         status: SyncStatus,
         reason: String
     ) {
-        if (!newState.isNewerThan(latestSyncState)) {
+        if (!newState.isNewerThan(uiState.latestSyncState)) {
             appendLog(syncLogs, "Ignored stale $reason seq=${newState.seq}")
             return
         }
 
-        latestSyncState = newState
-        currentRoomId = newState.roomId
-        joinRoomInput = newState.roomId
-        playbackSpeed = newState.playbackRate.toFloat()
-        syncStatus = status
+        updateUiState { current ->
+            current.copy(
+                currentRoomId = newState.roomId,
+                joinRoomInput = newState.roomId,
+                latestSyncState = newState,
+                syncStatus = status,
+                player = current.player.copy(playbackSpeed = newState.playbackRate.toFloat())
+            )
+        }
         appendLog(syncLogs, "Applied $reason seq=${newState.seq} roomId=${newState.roomId}")
     }
 
@@ -255,7 +243,6 @@ fun PlayerScreen(modifier: Modifier = Modifier) {
                         return@launch
                     }
                     val appliedState = roomSyncCoordinator.applyPlaybackRateEvent(previous, payload)
-                    playbackSpeed = payload.playbackRate.toFloat()
                     applyAuthoritativeState(
                         appliedState,
                         SyncStatus.PlaybackRateApplied,
@@ -285,14 +272,14 @@ fun PlayerScreen(modifier: Modifier = Modifier) {
 
             override fun onHeartbeat(serverTimeMs: Long) {
                 coroutineScope.launch {
-                    syncStatus = SyncStatus.Connected
+                    updateUiState { current -> current.copy(syncStatus = SyncStatus.Connected) }
                     appendLog(syncLogs, "heartbeat acknowledged serverTimeMs=$serverTimeMs")
                 }
             }
 
             override fun onError(message: String) {
                 coroutineScope.launch {
-                    syncStatus = SyncStatus.SyncFailed
+                    updateUiState { current -> current.copy(syncStatus = SyncStatus.SyncFailed) }
                     appendLog(syncLogs, "Sync error: $message")
                 }
             }
@@ -306,11 +293,15 @@ fun PlayerScreen(modifier: Modifier = Modifier) {
         reason: String
     ) {
         roomWebSocketClient.close()
-        latestSyncState = null
-        lastDriftCorrectionAtMs = 0L
-        currentRoomId = roomId
-        joinRoomInput = roomId
-        syncStatus = status
+        updateUiState { current ->
+            current.copy(
+                currentRoomId = roomId,
+                joinRoomInput = roomId,
+                latestSyncState = null,
+                syncStatus = status,
+                lastDriftCorrectionAtMs = 0L
+            )
+        }
         appendLog(syncLogs, "$reason starting roomId=$roomId userId=$userId")
 
         roomWebSocketClient.joinRoom(
@@ -324,7 +315,9 @@ fun PlayerScreen(modifier: Modifier = Modifier) {
     fun createAndJoinAsHost() {
         coroutineScope.launch {
             runCatching {
-                syncStatus = SyncStatus.CreatingRoom
+                updateUiState { current ->
+                    current.copy(syncStatus = SyncStatus.CreatingRoom)
+                }
                 appendLog(syncLogs, "POST /rooms for hostUserId=$hostUserId")
                 val createResult = withContext(Dispatchers.IO) {
                     roomHttpClient.createRoom(
@@ -333,9 +326,13 @@ fun PlayerScreen(modifier: Modifier = Modifier) {
                     )
                 }
 
-                currentRoomId = createResult.roomId
-                joinRoomInput = createResult.roomId
-                activeUserId = hostUserId
+                updateUiState { current ->
+                    current.copy(
+                        currentRoomId = createResult.roomId,
+                        joinRoomInput = createResult.roomId,
+                        activeUserId = hostUserId
+                    )
+                }
                 appendLog(
                     syncLogs,
                     "Created roomId=${createResult.roomId} mediaId=${createResult.roomState.mediaId}"
@@ -347,20 +344,22 @@ fun PlayerScreen(modifier: Modifier = Modifier) {
                     reason = "host join"
                 )
             }.onFailure { error: Throwable ->
-                syncStatus = SyncStatus.CreateAndJoinFailed
+                updateUiState { current ->
+                    current.copy(syncStatus = SyncStatus.CreateAndJoinFailed)
+                }
                 appendLog(syncLogs, "Create and join failed: ${error.message}")
             }
         }
     }
 
     fun joinAsViewer() {
-        val roomId = joinRoomInput.trim()
+        val roomId = uiState.joinRoomInput.trim()
         if (roomId.isBlank()) {
             appendLog(syncLogs, "Join aborted: roomId is empty")
             return
         }
 
-        activeUserId = viewerUserId
+        updateUiState { current -> current.copy(activeUserId = viewerUserId) }
         joinCurrentRoomAsUser(
             roomId = roomId,
             userId = viewerUserId,
@@ -370,11 +369,12 @@ fun PlayerScreen(modifier: Modifier = Modifier) {
     }
 
     fun rejoinCurrentUser() {
-        val userId = activeUserId ?: run {
+        val userId = uiState.activeUserId ?: run {
             appendLog(syncLogs, "Rejoin aborted: no active user")
             return
         }
-        val candidateRoomId = currentRoomId ?: joinRoomInput.trim().takeIf { it.isNotBlank() }
+        val candidateRoomId =
+            uiState.currentRoomId ?: uiState.joinRoomInput.trim().takeIf { it.isNotBlank() }
         if (candidateRoomId == null) {
             appendLog(syncLogs, "Rejoin aborted: no roomId")
             return
@@ -389,25 +389,25 @@ fun PlayerScreen(modifier: Modifier = Modifier) {
     }
 
     fun sendPlay() {
-        val currentState = latestSyncState ?: return
+        val currentState = uiState.latestSyncState ?: return
         val sent = roomWebSocketClient.sendPlay(
-            positionMs = currentPosition,
+            positionMs = uiState.player.currentPosition,
             seq = currentState.seq
         )
-        appendLog(syncLogs, "play sent=$sent at ${currentPosition}ms")
+        appendLog(syncLogs, "play sent=$sent at ${uiState.player.currentPosition}ms")
     }
 
     fun sendPause() {
-        val currentState = latestSyncState ?: return
+        val currentState = uiState.latestSyncState ?: return
         val sent = roomWebSocketClient.sendPause(
-            positionMs = currentPosition,
+            positionMs = uiState.player.currentPosition,
             seq = currentState.seq
         )
-        appendLog(syncLogs, "pause sent=$sent at ${currentPosition}ms")
+        appendLog(syncLogs, "pause sent=$sent at ${uiState.player.currentPosition}ms")
     }
 
     fun sendSeek(targetPositionMs: Long) {
-        val currentState = latestSyncState ?: return
+        val currentState = uiState.latestSyncState ?: return
         val sent = roomWebSocketClient.sendSeek(
             positionMs = targetPositionMs,
             seq = currentState.seq
@@ -416,46 +416,59 @@ fun PlayerScreen(modifier: Modifier = Modifier) {
     }
 
     fun sendPlaybackRateSync(speed: Float) {
-        val currentState = latestSyncState ?: return
-        val previousPlaybackSpeed = playbackSpeed
-        latestSyncState = currentState.copy(
-            positionMs = currentPosition,
-            playbackRate = speed.toDouble(),
-            authorityAppliedAtMs = System.currentTimeMillis()
-        )
-        playbackSpeed = speed
+        val currentState = uiState.latestSyncState ?: return
+        val previousPlaybackSpeed = uiState.player.playbackSpeed
+        updateUiState { current ->
+            current.copy(
+                latestSyncState = currentState.copy(
+                    positionMs = current.player.currentPosition,
+                    playbackRate = speed.toDouble(),
+                    authorityAppliedAtMs = System.currentTimeMillis()
+                ),
+                player = current.player.copy(playbackSpeed = speed)
+            )
+        }
         adapter.setPlaybackSpeed(speed)
         val sent = roomWebSocketClient.sendPlaybackRate(
             playbackRate = speed.toDouble(),
-            positionMs = currentPosition,
+            positionMs = uiState.player.currentPosition,
             seq = currentState.seq
         )
         if (!sent) {
-            latestSyncState = currentState
-            playbackSpeed = previousPlaybackSpeed
+            updateUiState { current ->
+                current.copy(
+                    latestSyncState = currentState,
+                    player = current.player.copy(playbackSpeed = previousPlaybackSpeed)
+                )
+            }
             adapter.setPlaybackSpeed(previousPlaybackSpeed)
         }
-        appendLog(syncLogs, "playbackRate sent=$sent rate=${speed}x at ${currentPosition}ms")
+        appendLog(syncLogs, "playbackRate sent=$sent rate=${speed}x at ${uiState.player.currentPosition}ms")
     }
 
     fun sendEndedSync() {
-        val currentState = latestSyncState ?: return
+        val currentState = uiState.latestSyncState ?: return
         val sent = roomWebSocketClient.sendEnded(
-            positionMs = currentPosition,
+            positionMs = uiState.player.currentPosition,
             seq = currentState.seq
         )
-        appendLog(syncLogs, "ended sent=$sent at ${currentPosition}ms")
+        appendLog(syncLogs, "ended sent=$sent at ${uiState.player.currentPosition}ms")
         if (sent) {
-            lastEndedReportedSeq = currentState.seq
+            updateUiState { current -> current.copy(lastEndedReportedSeq = currentState.seq) }
         }
     }
 
-    LaunchedEffect(playbackState, isHostController, latestSyncState?.seq, latestSyncState?.ended) {
-        val currentState = latestSyncState ?: return@LaunchedEffect
+    LaunchedEffect(
+        uiState.player.playbackState,
+        isHostController,
+        uiState.latestSyncState?.seq,
+        uiState.latestSyncState?.ended
+    ) {
+        val currentState = uiState.latestSyncState ?: return@LaunchedEffect
         if (!isHostController) return@LaunchedEffect
-        if (playbackState != Player.STATE_ENDED) return@LaunchedEffect
+        if (uiState.player.playbackState != Player.STATE_ENDED) return@LaunchedEffect
         if (currentState.ended) return@LaunchedEffect
-        if (lastEndedReportedSeq == currentState.seq) return@LaunchedEffect
+        if (uiState.lastEndedReportedSeq == currentState.seq) return@LaunchedEffect
         sendEndedSync()
     }
 
@@ -468,51 +481,55 @@ fun PlayerScreen(modifier: Modifier = Modifier) {
     ) {
         PlayerStatusHeader(
             sampleUrl = sampleUrl,
-            currentRoomId = currentRoomId,
-            syncStatus = syncStatus,
-            activeUserId = activeUserId,
+            currentRoomId = uiState.currentRoomId,
+            syncStatus = uiState.syncStatus,
+            activeUserId = uiState.activeUserId,
             isHostController = isHostController
         )
         JoinSyncActionsCard(
             hostUserId = hostUserId,
             viewerUserId = viewerUserId,
-            currentRoomId = currentRoomId,
-            syncStatus = syncStatus,
-            joinRoomInput = joinRoomInput,
-            onJoinRoomInputChange = { joinRoomInput = it },
+            currentRoomId = uiState.currentRoomId,
+            syncStatus = uiState.syncStatus,
+            joinRoomInput = uiState.joinRoomInput,
+            onJoinRoomInputChange = { value ->
+                updateUiState { current -> current.copy(joinRoomInput = value) }
+            },
             onCreateAndJoinAsHost = ::createAndJoinAsHost,
             onJoinAsViewer = ::joinAsViewer,
             onRejoinCurrentUser = ::rejoinCurrentUser,
-            canRejoinCurrentUser = activeUserId != null && currentRoomId != null
+            canRejoinCurrentUser = uiState.activeUserId != null && uiState.currentRoomId != null
         )
         PlayerViewport(adapter = adapter)
         PlayerControls(
             adapter = adapter,
             sampleUrl = sampleUrl,
-            currentPosition = currentPosition,
-            duration = duration,
-            isPlaying = isPlaying,
-            playbackSpeed = playbackSpeed,
+            currentPosition = playbackSnapshot.currentPosition,
+            duration = playbackSnapshot.duration,
+            isPlaying = playbackSnapshot.isPlaying,
+            playbackSpeed = playbackSnapshot.playbackSpeed,
             isHostController = isHostController,
-            isJoinedToRoom = latestSyncState != null,
+            isJoinedToRoom = uiState.isJoinedToRoom,
             onPlaySync = ::sendPlay,
             onPauseSync = ::sendPause,
             onSeekSync = ::sendSeek,
             onPlaybackSpeedChange = { speed ->
-                if (isHostController && latestSyncState != null) {
+                if (isHostController && uiState.latestSyncState != null) {
                     appendLog(syncLogs, "playbackRate click path=sync rate=${speed}x")
                     sendPlaybackRateSync(speed)
                 } else {
                     appendLog(
                         syncLogs,
-                        "playbackRate click path=local rate=${speed}x host=$isHostController joined=${latestSyncState != null}"
+                        "playbackRate click path=local rate=${speed}x host=$isHostController joined=${uiState.latestSyncState != null}"
                     )
-                    playbackSpeed = speed
+                    updateUiState { current ->
+                        current.copy(player = current.player.copy(playbackSpeed = speed))
+                    }
                     adapter.setPlaybackSpeed(speed)
                 }
             }
         )
-        SyncStatePanel(latestSyncState = latestSyncState)
+        SyncStatePanel(latestSyncState = uiState.latestSyncState)
         SyncDebugPanel(syncLogs = syncLogs)
         PlayerEventDebugPanel(eventLogs = playerEventLogs)
         ConfigInjectionHint()
