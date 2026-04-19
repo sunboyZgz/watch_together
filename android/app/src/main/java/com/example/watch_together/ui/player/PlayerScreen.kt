@@ -39,10 +39,9 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.Player
 import androidx.media3.ui.PlayerView
 import com.example.watch_together.config.AppConfig
-import com.example.watch_together.sync.RoomHttpClient
+import com.example.watch_together.sync.RoomSessionController
 import com.example.watch_together.sync.RoomSyncCoordinator
 import com.example.watch_together.sync.RoomSyncState
-import com.example.watch_together.sync.RoomWebSocketClient
 import com.example.watch_together.sync.RoomWebSocketListener
 import com.example.watch_together.sync.isNewerThan
 import com.example.watch_together.ui.theme.Watch_togetherTheme
@@ -56,8 +55,7 @@ import java.util.UUID
 @Composable
 fun PlayerScreen(modifier: Modifier = Modifier) {
     val adapter = rememberPlayerAdapter()
-    val roomHttpClient = remember { RoomHttpClient() }
-    val roomWebSocketClient = remember { RoomWebSocketClient() }
+    val roomSessionController = remember { RoomSessionController() }
     val roomSyncCoordinator = remember(adapter) { RoomSyncCoordinator(adapter) }
     val coroutineScope = rememberCoroutineScope()
 
@@ -96,9 +94,9 @@ fun PlayerScreen(modifier: Modifier = Modifier) {
         }
     }
 
-    DisposableEffect(roomWebSocketClient) {
+    DisposableEffect(roomSessionController) {
         onDispose {
-            roomWebSocketClient.close()
+            roomSessionController.closeSession()
         }
     }
 
@@ -292,7 +290,7 @@ fun PlayerScreen(modifier: Modifier = Modifier) {
         status: SyncStatus,
         reason: String
     ) {
-        roomWebSocketClient.close()
+        roomSessionController.closeSession()
         updateUiState { current ->
             current.copy(
                 currentRoomId = roomId,
@@ -304,8 +302,7 @@ fun PlayerScreen(modifier: Modifier = Modifier) {
         }
         appendLog(syncLogs, "$reason starting roomId=$roomId userId=$userId")
 
-        roomWebSocketClient.joinRoom(
-            wsUrl = AppConfig.wsBaseUrl,
+        roomSessionController.startSession(
             roomId = roomId,
             userId = userId,
             listener = syncListener
@@ -320,7 +317,7 @@ fun PlayerScreen(modifier: Modifier = Modifier) {
                 }
                 appendLog(syncLogs, "POST /rooms for hostUserId=$hostUserId")
                 val createResult = withContext(Dispatchers.IO) {
-                    roomHttpClient.createRoom(
+                    roomSessionController.createRoom(
                         userId = hostUserId,
                         mediaId = AppConfig.defaultMediaIdForRoom()
                     )
@@ -390,7 +387,7 @@ fun PlayerScreen(modifier: Modifier = Modifier) {
 
     fun sendPlay() {
         val currentState = uiState.latestSyncState ?: return
-        val sent = roomWebSocketClient.sendPlay(
+        val sent = roomSessionController.sendPlay(
             positionMs = uiState.player.currentPosition,
             seq = currentState.seq
         )
@@ -399,7 +396,7 @@ fun PlayerScreen(modifier: Modifier = Modifier) {
 
     fun sendPause() {
         val currentState = uiState.latestSyncState ?: return
-        val sent = roomWebSocketClient.sendPause(
+        val sent = roomSessionController.sendPause(
             positionMs = uiState.player.currentPosition,
             seq = currentState.seq
         )
@@ -408,7 +405,7 @@ fun PlayerScreen(modifier: Modifier = Modifier) {
 
     fun sendSeek(targetPositionMs: Long) {
         val currentState = uiState.latestSyncState ?: return
-        val sent = roomWebSocketClient.sendSeek(
+        val sent = roomSessionController.sendSeek(
             positionMs = targetPositionMs,
             seq = currentState.seq
         )
@@ -429,7 +426,7 @@ fun PlayerScreen(modifier: Modifier = Modifier) {
             )
         }
         adapter.setPlaybackSpeed(speed)
-        val sent = roomWebSocketClient.sendPlaybackRate(
+        val sent = roomSessionController.sendPlaybackRate(
             playbackRate = speed.toDouble(),
             positionMs = uiState.player.currentPosition,
             seq = currentState.seq
@@ -448,7 +445,7 @@ fun PlayerScreen(modifier: Modifier = Modifier) {
 
     fun sendEndedSync() {
         val currentState = uiState.latestSyncState ?: return
-        val sent = roomWebSocketClient.sendEnded(
+        val sent = roomSessionController.sendEnded(
             positionMs = uiState.player.currentPosition,
             seq = currentState.seq
         )

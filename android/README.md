@@ -32,6 +32,7 @@ android/
 │       ├── config/
 │       │   └── AppConfig.kt
 │       ├── sync/
+│       │   ├── RoomSessionController.kt
 │       │   ├── RoomHttpClient.kt
 │       │   ├── RoomSyncCoordinator.kt
 │       │   ├── RoomSyncState.kt
@@ -51,7 +52,7 @@ android/
 各部分职责：
 
 - `config/`：统一读取 `BuildConfig` 并生成 Android 端可直接使用的 URL
-- `sync/`：当前阶段的 Android 首个同步接入层，负责 create room、join room、heartbeat ack、authority baseline 管理、drift correction、repeated join resync、控制事件出站、消息解码、`seq` 判断、倍速同步、ended-state 应用与播放器状态应用
+- `sync/`：当前阶段的 Android 首个同步接入层，负责 create room、join room、房间会话控制、heartbeat ack、authority baseline 管理、drift correction、repeated join resync、控制事件出站、消息解码、`seq` 判断、倍速同步、ended-state 应用与播放器状态应用
 - `sync/protocol/`：保留与 `INT-19` 协议草案一致的 Android 本地协议模型
 - `ui/player/`：播放器页面、页面状态模型、Media3 适配器、播放器事件和调试面板
 - `src/test/.../sync/`：协议解码和 join-time state application 的最小单元测试
@@ -81,3 +82,9 @@ android/
 - 已抽离 `RoomPlayerUiState`
 - 已把 `SyncStatus` 从 `PlayerScreen.kt` 中抽出
 - 已将页面主要运行时状态收拢到统一状态入口
+
+当前已完成的第二步：
+
+- 已新增 `RoomSessionController`
+- 已把 create room / join / rejoin / close session / 控制事件出站 收口到统一会话入口
+- `PlayerScreen` 不再直接依赖 `RoomHttpClient` 与 `RoomWebSocketClient`

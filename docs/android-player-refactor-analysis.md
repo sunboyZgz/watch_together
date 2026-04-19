@@ -252,6 +252,19 @@ android/app/src/main/java/com/example/watch_together/
 - 页面只发“我要 create/join/rejoin”
 - 控制器负责和 `RoomHttpClient + RoomWebSocketClient + RoomSyncCoordinator` 交互
 
+当前这一步已经完成了第一轮落地：
+
+- 已新增轻量 `RoomSessionController`
+- 已把 `PlayerScreen` 中对 `RoomHttpClient` 和 `RoomWebSocketClient` 的直接依赖收敛到 controller
+- 已把 create room、join/rejoin、会话关闭以及控制事件出站统一收口到会话控制器入口
+
+当前仍然保留：
+
+- 页面层对 `RoomSyncCoordinator` 的直接使用
+- 页面层对 listener 具体内容的组织
+
+这符合当前阶段“先把会话入口抽离，再继续做页面壳层拆分”的目标。
+
 ### 第三步：页面只保留 UI 映射
 
 重构完成后，页面层应尽量只做：
