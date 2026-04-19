@@ -173,6 +173,27 @@ func (r *Room) ApplySeek(userID string, positionMs int64) (State, []*ClientConne
 	return r.currentStateLocked(r.authorityAt), r.clientsSnapshotLocked(), nil
 }
 
+// ApplyPlaybackRate updates the room playback rate while preserving a continuous authority timeline.
+func (r *Room) ApplyPlaybackRate(
+	userID string,
+	playbackRate float64,
+) (State, []*ClientConnection, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.state.HostUserID != userID {
+		return State{}, nil, ErrNotHost
+	}
+
+	now := r.now()
+	currentState := r.currentStateLocked(now)
+	r.state.PositionMs = currentState.PositionMs
+	r.state.PlaybackRate = playbackRate
+	r.authorityAt = now
+	r.state.Seq++
+	return r.currentStateLocked(r.authorityAt), r.clientsSnapshotLocked(), nil
+}
+
 func (r *Room) applyControl(
 	userID string,
 	positionMs int64,

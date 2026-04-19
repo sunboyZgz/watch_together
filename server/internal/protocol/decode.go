@@ -63,6 +63,21 @@ func DecodeSeek(envelope Envelope) (SeekPayload, error) {
 	return decodeControlPayload[SeekPayload](envelope)
 }
 
+// DecodeSetPlaybackRate validates and decodes a playback-rate control event.
+func DecodeSetPlaybackRate(envelope Envelope) (SetPlaybackRatePayload, error) {
+	if envelope.Type != TypeSetPlaybackRate {
+		return SetPlaybackRatePayload{}, fmt.Errorf("%w: %s", ErrUnsupportedMessageType, envelope.Type)
+	}
+	payload, err := decodeControlPayload[SetPlaybackRatePayload](envelope)
+	if err != nil {
+		return SetPlaybackRatePayload{}, err
+	}
+	if payload.PlaybackRate <= 0 {
+		return SetPlaybackRatePayload{}, errors.New("invalid playbackRate")
+	}
+	return payload, nil
+}
+
 // DecodeHeartbeatAck validates and decodes one heartbeat_ack event.
 func DecodeHeartbeatAck(envelope Envelope) (HeartbeatAckPayload, error) {
 	if envelope.Type != TypeHeartbeatAck {

@@ -129,6 +129,8 @@ func (h *WebSocketHandler) handleMessage(
 		return h.handlePause(ctx, client, envelope)
 	case protocol.TypeSeek:
 		return h.handleSeek(ctx, client, envelope)
+	case protocol.TypeSetPlaybackRate:
+		return h.handleSetPlaybackRate(ctx, client, envelope)
 	case protocol.TypeHeartbeatAck:
 		return h.handleHeartbeatAck(client, envelope)
 	default:
@@ -281,6 +283,38 @@ func (h *WebSocketHandler) handleSeek(
 					UserID:     state.HostUserID,
 					PositionMs: state.PositionMs,
 					Seq:        state.Seq,
+				}),
+			}
+		},
+	)
+}
+
+// handleSetPlaybackRate validates one playback-rate control event and broadcasts the authoritative rate.
+func (h *WebSocketHandler) handleSetPlaybackRate(
+	ctx context.Context,
+	client *room.ClientConnection,
+	envelope protocol.Envelope,
+) error {
+	payload, err := protocol.DecodeSetPlaybackRate(envelope)
+	if err != nil {
+		return err
+	}
+	client.MarkHeartbeatAck(time.Now())
+	return h.handleControlEvent(
+		ctx,
+		payload.RoomID,
+		func(existingRoom *room.Room) (room.State, []*room.ClientConnection, error) {
+			return existingRoom.ApplyPlaybackRate(payload.UserID, payload.PlaybackRate)
+		},
+		func(state room.State) protocol.Envelope {
+			return protocol.Envelope{
+				Type: protocol.TypeSetPlaybackRate,
+				Payload: mustJSONRaw(protocol.SetPlaybackRatePayload{
+					RoomID:       state.RoomID,
+					UserID:       state.HostUserID,
+					PositionMs:   state.PositionMs,
+					PlaybackRate: state.PlaybackRate,
+					Seq:          state.Seq,
 				}),
 			}
 		},

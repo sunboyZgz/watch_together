@@ -36,6 +36,14 @@ type SeekPayload struct {
 	Seq        int64  `json:"seq"`
 }
 
+type SetPlaybackRatePayload struct {
+	RoomID       string  `json:"roomId"`
+	UserID       string  `json:"userId"`
+	PositionMs   int64   `json:"positionMs"`
+	PlaybackRate float64 `json:"playbackRate"`
+	Seq          int64   `json:"seq"`
+}
+
 type HeartbeatPayload struct {
 	ServerTimeMs int64 `json:"serverTimeMs"`
 }
@@ -81,5 +89,13 @@ func (p SeekPayload) GetRoomID() string {
 }
 
 func (p SeekPayload) GetUserID() string {
+	return p.UserID
+}
+
+func (p SetPlaybackRatePayload) GetRoomID() string {
+	return p.RoomID
+}
+
+func (p SetPlaybackRatePayload) GetUserID() string {
 	return p.UserID
 }

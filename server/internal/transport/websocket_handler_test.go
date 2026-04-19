@@ -196,6 +196,20 @@ func TestWebSocketControlSyncFlow(t *testing.T) {
 	assertControlBroadcast(t, ctx, hostConn, protocol.TypeSeek, 42_000, 4)
 	assertControlBroadcast(t, ctx, viewerConn, protocol.TypeSeek, 42_000, 4)
 
+	mustSendEnvelope(t, ctx, hostConn, protocol.Envelope{
+		Type: protocol.TypeSetPlaybackRate,
+		Payload: mustJSONRaw(protocol.SetPlaybackRatePayload{
+			RoomID:       createdRoom.ID(),
+			UserID:       "user_a",
+			PositionMs:   42_000,
+			PlaybackRate: 1.5,
+			Seq:          4,
+		}),
+	})
+
+	assertPlaybackRateBroadcast(t, ctx, hostConn, 42_000, 1.5, 5)
+	assertPlaybackRateBroadcast(t, ctx, viewerConn, 42_000, 1.5, 5)
+
 	state := createdRoom.StateSnapshot()
 	if state.PositionMs != 42_000 {
 		t.Fatalf("expected final room position 42000, got %d", state.PositionMs)
@@ -203,8 +217,11 @@ func TestWebSocketControlSyncFlow(t *testing.T) {
 	if !state.Paused {
 		t.Fatalf("expected seek to preserve paused=true after pause and seek sequence")
 	}
-	if state.Seq != 4 {
-		t.Fatalf("expected final seq 4, got %d", state.Seq)
+	if state.Seq != 5 {
+		t.Fatalf("expected final seq 5, got %d", state.Seq)
+	}
+	if state.PlaybackRate != 1.5 {
+		t.Fatalf("expected playbackRate 1.5, got %f", state.PlaybackRate)
 	}
 }
 
@@ -254,6 +271,25 @@ func TestWebSocketControlSyncRejectsNonHost(t *testing.T) {
 	state := createdRoom.StateSnapshot()
 	if state.Seq != 1 {
 		t.Fatalf("expected seq to stay 1, got %d", state.Seq)
+	}
+
+	mustSendEnvelope(t, ctx, viewerConn, protocol.Envelope{
+		Type: protocol.TypeSetPlaybackRate,
+		Payload: mustJSONRaw(protocol.SetPlaybackRatePayload{
+			RoomID:       createdRoom.ID(),
+			UserID:       "user_b",
+			PositionMs:   5_000,
+			PlaybackRate: 1.5,
+			Seq:          1,
+		}),
+	})
+
+	readMessageAs(t, ctx, viewerConn, &envelope)
+	if envelope.Type != protocol.TypeError {
+		t.Fatalf("expected error response, got %s", envelope.Type)
+	}
+	if envelope.Payload.Message != "only host can control playback" {
+		t.Fatalf("unexpected playback rate error message: %s", envelope.Payload.Message)
 	}
 }
 
@@ -560,6 +596,62 @@ func TestWebSocketRepeatedJoinReturnsCurrentEffectiveRoomState(t *testing.T) {
 	}
 }
 
+func TestWebSocketRepeatedJoinKeepsCurrentPlaybackRateInRoomState(t *testing.T) {
+	roomManager := room.NewManager()
+	createdRoom, err := roomManager.CreateRoom("user_a", "sample_001")
+	if err != nil {
+		t.Fatalf("create room: %v", err)
+	}
+	mux := http.NewServeMux()
+	mux.Handle("/ws", NewWebSocketHandler(roomManager, true))
+
+	httpServer := httptest.NewServer(mux)
+	defer httpServer.Close()
+
+	wsURL := "ws" + httpServer.URL[len("http"):] + "/ws"
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	hostConn := mustDialWebSocket(t, ctx, wsURL)
+	defer hostConn.Close(websocket.StatusNormalClosure, "test done")
+	viewerConn1 := mustDialWebSocket(t, ctx, wsURL)
+	viewerConn2 := mustDialWebSocket(t, ctx, wsURL)
+	defer viewerConn2.Close(websocket.StatusNormalClosure, "test done")
+
+	mustJoinRoom(t, ctx, hostConn, createdRoom.ID(), "user_a")
+	mustReadEnvelope(t, ctx, hostConn)
+	mustJoinRoom(t, ctx, viewerConn1, createdRoom.ID(), "user_b")
+	mustReadEnvelope(t, ctx, viewerConn1)
+
+	mustSendEnvelope(t, ctx, hostConn, protocol.Envelope{
+		Type: protocol.TypeSetPlaybackRate,
+		Payload: mustJSONRaw(protocol.SetPlaybackRatePayload{
+			RoomID:       createdRoom.ID(),
+			UserID:       "user_a",
+			PositionMs:   0,
+			PlaybackRate: 1.5,
+			Seq:          1,
+		}),
+	})
+
+	assertPlaybackRateBroadcast(t, ctx, hostConn, 0, 1.5, 2)
+	assertPlaybackRateBroadcast(t, ctx, viewerConn1, 0, 1.5, 2)
+
+	mustJoinRoom(t, ctx, viewerConn2, createdRoom.ID(), "user_b")
+	rejoinEnvelope := mustReadEnvelope(t, ctx, viewerConn2)
+	if rejoinEnvelope.Type != protocol.TypeRoomState {
+		t.Fatalf("expected room_state on repeated join, got %s", rejoinEnvelope.Type)
+	}
+
+	var payload protocol.RoomStatePayload
+	if err := json.Unmarshal(rejoinEnvelope.Payload, &payload); err != nil {
+		t.Fatalf("unmarshal room_state payload: %v", err)
+	}
+	if payload.PlaybackRate != 1.5 {
+		t.Fatalf("expected repeated join room_state playbackRate 1.5, got %f", payload.PlaybackRate)
+	}
+}
+
 func TestWebSocketFormerHostReconnectsAsNormalMember(t *testing.T) {
 	roomManager := room.NewManager()
 	createdRoom, err := roomManager.CreateRoom("user_a", "sample_001")
@@ -756,6 +848,31 @@ func assertControlBroadcast(
 		}
 	default:
 		t.Fatalf("unsupported expected control type %s", expectedType)
+	}
+}
+
+func assertPlaybackRateBroadcast(
+	t *testing.T,
+	ctx context.Context,
+	conn *websocket.Conn,
+	expectedPosition int64,
+	expectedRate float64,
+	expectedSeq int64,
+) {
+	t.Helper()
+	envelope := mustReadEnvelope(t, ctx, conn)
+	if envelope.Type != protocol.TypeSetPlaybackRate {
+		t.Fatalf("expected %s, got %s", protocol.TypeSetPlaybackRate, envelope.Type)
+	}
+
+	var payload protocol.SetPlaybackRatePayload
+	if err := json.Unmarshal(envelope.Payload, &payload); err != nil {
+		t.Fatalf("unmarshal set_playback_rate payload: %v", err)
+	}
+	if payload.PositionMs != expectedPosition ||
+		payload.Seq != expectedSeq ||
+		payload.PlaybackRate != expectedRate {
+		t.Fatalf("unexpected set_playback_rate payload: %+v", payload)
 	}
 }
 

@@ -8,6 +8,7 @@
 - `POST /rooms` 的最小 create room 能力
 - `/ws` WebSocket 接入路由与正式 join room 语义
 - `play / pause / seek` 的最小控制事件处理与广播
+- `set_playback_rate` 的最小控制事件处理与广播
 - 应用层 heartbeat 与静默连接超时清理
 - host disconnect 后的 immediate host transfer
 - same-user repeated join 的单有效连接收敛
@@ -67,7 +68,7 @@ server/
 - `internal/app/`: 应用组装层，负责配置和 HTTP server 初始化
 - `internal/protocol/`: 与 `INT-19` 对齐的最小协议结构，包含 create room 请求 / 响应和 WebSocket 事件模型
 - `internal/room/`: 房间、连接、房间管理器，以及房间创建与控制状态更新的内存模型
-- `internal/transport/`: `POST /rooms`、`/ws`、join room 与 `play / pause / seek` 的接入层和测试
+- `internal/transport/`: `POST /rooms`、`/ws`、join room 与 `play / pause / seek / set_playback_rate` 的接入层和测试
 
 当前关键文件对应关系：
 
@@ -88,6 +89,7 @@ server/
 - `POST /rooms` 返回 `201 Created` 与初始 `room_state`
 - `join_room` 仅允许加入已存在房间，不存在房间时返回 `error`
 - host 发出的 `play / pause / seek` 会更新房间状态并广播
+- host 发出的 `set_playback_rate` 会更新房间权威倍率并广播
 - 非 host 发出的控制事件会返回 `error`
 - 服务端会周期性发送 `heartbeat`，客户端需返回 `heartbeat_ack`
 - 超时未 ack 的连接会进入现有断连清理流程
@@ -96,4 +98,4 @@ server/
 - 同一 `userId` repeated join 同一房间时，新连接会替换旧连接并重新收到基于 authority timeline 结算后的最新 `room_state`
 - 最后一个成员离开后，房间不会立即销毁，而是进入 2 分钟 grace period；若期间有人重新加入则继续保留，否则自动销毁
 
-其中 `POST /rooms`、`join_room`、`play / pause / seek` 与 host transfer 的最小同步路径已通过基础测试验证。
+其中 `POST /rooms`、`join_room`、`play / pause / seek / set_playback_rate` 与 host transfer 的最小同步路径已通过基础测试验证。
