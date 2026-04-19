@@ -9,6 +9,7 @@
 - `/ws` WebSocket 接入路由与正式 join room 语义
 - `play / pause / seek` 的最小控制事件处理与广播
 - `set_playback_rate` 的最小控制事件处理与广播
+- `ended` completed state 的最小权威语义与广播
 - 应用层 heartbeat 与静默连接超时清理
 - host disconnect 后的 immediate host transfer
 - same-user repeated join 的单有效连接收敛
@@ -68,17 +69,17 @@ server/
 - `internal/app/`: 应用组装层，负责配置和 HTTP server 初始化
 - `internal/protocol/`: 与 `INT-19` 对齐的最小协议结构，包含 create room 请求 / 响应和 WebSocket 事件模型
 - `internal/room/`: 房间、连接、房间管理器，以及房间创建与控制状态更新的内存模型
-- `internal/transport/`: `POST /rooms`、`/ws`、join room 与 `play / pause / seek / set_playback_rate` 的接入层和测试
+- `internal/transport/`: `POST /rooms`、`/ws`、join room 与 `play / pause / seek / set_playback_rate / ended` 的接入层和测试
 
 当前关键文件对应关系：
 
 - `cmd/roomserver/main.go`: 读取配置并启动服务
 - `internal/app/server.go`: 注册 `/healthz`、`POST /rooms` 和 `/ws`
-- `internal/protocol/events.go`: create room、join room、room_state、heartbeat、error 等最小结构
+- `internal/protocol/events.go`: create room、join room、room_state、ended、heartbeat、error 等最小结构
 - `internal/room/manager.go`: 房间创建、查询、唯一 `roomId` 生成和客户端清理
 - `internal/transport/room_http_handler.go`: create room HTTP 入口
 - `internal/transport/websocket_handler.go`: join room、heartbeat、host 校验、控制事件处理和广播
-- `internal/room/room.go`: 房间成员、host 状态和 repeated join 连接替换逻辑
+- `internal/room/room.go`: 房间成员、host 状态、authority timeline、ended completed state 和 repeated join 连接替换逻辑
 
 ## Current Validation
 
@@ -90,12 +91,15 @@ server/
 - `join_room` 仅允许加入已存在房间，不存在房间时返回 `error`
 - host 发出的 `play / pause / seek` 会更新房间状态并广播
 - host 发出的 `set_playback_rate` 会更新房间权威倍率并广播
+- host 发出的 `ended` 会把房间收敛到稳定 completed state，并冻结当前位置
+- `seek` 离开结尾时会清除 `ended`
 - 非 host 发出的控制事件会返回 `error`
 - 服务端会周期性发送 `heartbeat`，客户端需返回 `heartbeat_ack`
 - 超时未 ack 的连接会进入现有断连清理流程
 - host 断开连接后，剩余成员会收到新的 `room_state` 且 host 身份立即转移
 - former host 在 host transfer 后重新 join room 时，会作为普通成员回到房间，不会隐式拿回 host 身份
 - 同一 `userId` repeated join 同一房间时，新连接会替换旧连接并重新收到基于 authority timeline 结算后的最新 `room_state`
+- repeated join / reconnect 在视频已播完时，会收到 `ended=true` 的稳定 `room_state`
 - 最后一个成员离开后，房间不会立即销毁，而是进入 2 分钟 grace period；若期间有人重新加入则继续保留，否则自动销毁
 
-其中 `POST /rooms`、`join_room`、`play / pause / seek / set_playback_rate` 与 host transfer 的最小同步路径已通过基础测试验证。
+其中 `POST /rooms`、`join_room`、`play / pause / seek / set_playback_rate / ended` 与 host transfer 的最小同步路径已通过基础测试验证。

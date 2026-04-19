@@ -78,6 +78,14 @@ func DecodeSetPlaybackRate(envelope Envelope) (SetPlaybackRatePayload, error) {
 	return payload, nil
 }
 
+// DecodeEnded validates and decodes one ended control event.
+func DecodeEnded(envelope Envelope) (EndedPayload, error) {
+	if envelope.Type != TypeEnded {
+		return EndedPayload{}, fmt.Errorf("%w: %s", ErrUnsupportedMessageType, envelope.Type)
+	}
+	return decodeControlPayload[EndedPayload](envelope)
+}
+
 // DecodeHeartbeatAck validates and decodes one heartbeat_ack event.
 func DecodeHeartbeatAck(envelope Envelope) (HeartbeatAckPayload, error) {
 	if envelope.Type != TypeHeartbeatAck {

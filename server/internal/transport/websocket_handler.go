@@ -131,6 +131,8 @@ func (h *WebSocketHandler) handleMessage(
 		return h.handleSeek(ctx, client, envelope)
 	case protocol.TypeSetPlaybackRate:
 		return h.handleSetPlaybackRate(ctx, client, envelope)
+	case protocol.TypeEnded:
+		return h.handleEnded(ctx, client, envelope)
 	case protocol.TypeHeartbeatAck:
 		return h.handleHeartbeatAck(client, envelope)
 	default:
@@ -188,6 +190,7 @@ func (h *WebSocketHandler) handleJoinRoom(
 			MediaID:      joinResult.State.MediaID,
 			HostUserID:   joinResult.State.HostUserID,
 			Paused:       joinResult.State.Paused,
+			Ended:        joinResult.State.Ended,
 			PositionMs:   joinResult.State.PositionMs,
 			PlaybackRate: joinResult.State.PlaybackRate,
 			Seq:          joinResult.State.Seq,
@@ -321,6 +324,37 @@ func (h *WebSocketHandler) handleSetPlaybackRate(
 	)
 }
 
+// handleEnded validates one ended control event and broadcasts the authoritative completed state.
+func (h *WebSocketHandler) handleEnded(
+	ctx context.Context,
+	client *room.ClientConnection,
+	envelope protocol.Envelope,
+) error {
+	payload, err := protocol.DecodeEnded(envelope)
+	if err != nil {
+		return err
+	}
+	client.MarkHeartbeatAck(time.Now())
+	return h.handleControlEvent(
+		ctx,
+		payload.RoomID,
+		func(existingRoom *room.Room) (room.State, []*room.ClientConnection, error) {
+			return existingRoom.ApplyEnded(payload.UserID, payload.PositionMs)
+		},
+		func(state room.State) protocol.Envelope {
+			return protocol.Envelope{
+				Type: protocol.TypeEnded,
+				Payload: mustJSONRaw(protocol.EndedPayload{
+					RoomID:     state.RoomID,
+					UserID:     state.HostUserID,
+					PositionMs: state.PositionMs,
+					Seq:        state.Seq,
+				}),
+			}
+		},
+	)
+}
+
 func (h *WebSocketHandler) handleControlEvent(
 	ctx context.Context,
 	roomID string,
@@ -376,6 +410,7 @@ func (h *WebSocketHandler) broadcastRoomState(result room.RemoveClientResult) {
 			MediaID:      result.State.MediaID,
 			HostUserID:   result.State.HostUserID,
 			Paused:       result.State.Paused,
+			Ended:        result.State.Ended,
 			PositionMs:   result.State.PositionMs,
 			PlaybackRate: result.State.PlaybackRate,
 			Seq:          result.State.Seq,

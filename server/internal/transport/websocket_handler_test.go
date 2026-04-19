@@ -76,6 +76,9 @@ func TestWebSocketJoinRoomFlow(t *testing.T) {
 	if !payload.Paused {
 		t.Fatalf("expected initial room state paused=true")
 	}
+	if payload.Ended {
+		t.Fatalf("expected initial room state ended=false")
+	}
 	if got := roomManager.ClientCount(createdRoom.ID()); got != 1 {
 		t.Fatalf("expected 1 joined client in room, got %d", got)
 	}
@@ -652,6 +655,175 @@ func TestWebSocketRepeatedJoinKeepsCurrentPlaybackRateInRoomState(t *testing.T) 
 	}
 }
 
+func TestWebSocketEndedBroadcastAndRepeatedJoinState(t *testing.T) {
+	roomManager := room.NewManager()
+	createdRoom, err := roomManager.CreateRoom("user_a", "sample_001")
+	if err != nil {
+		t.Fatalf("create room: %v", err)
+	}
+	mux := http.NewServeMux()
+	mux.Handle("/ws", NewWebSocketHandler(roomManager, true))
+
+	httpServer := httptest.NewServer(mux)
+	defer httpServer.Close()
+
+	wsURL := "ws" + httpServer.URL[len("http"):] + "/ws"
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	hostConn := mustDialWebSocket(t, ctx, wsURL)
+	defer hostConn.Close(websocket.StatusNormalClosure, "test done")
+	viewerConn1 := mustDialWebSocket(t, ctx, wsURL)
+	viewerConn2 := mustDialWebSocket(t, ctx, wsURL)
+	defer viewerConn2.Close(websocket.StatusNormalClosure, "test done")
+
+	mustJoinRoom(t, ctx, hostConn, createdRoom.ID(), "user_a")
+	mustReadEnvelope(t, ctx, hostConn)
+	mustJoinRoom(t, ctx, viewerConn1, createdRoom.ID(), "user_b")
+	mustReadEnvelope(t, ctx, viewerConn1)
+
+	mustSendEnvelope(t, ctx, hostConn, protocol.Envelope{
+		Type: protocol.TypeEnded,
+		Payload: mustJSONRaw(protocol.EndedPayload{
+			RoomID:     createdRoom.ID(),
+			UserID:     "user_a",
+			PositionMs: 210_000,
+			Seq:        1,
+		}),
+	})
+
+	assertEndedBroadcast(t, ctx, hostConn, 210_000, 2)
+	assertEndedBroadcast(t, ctx, viewerConn1, 210_000, 2)
+
+	state := createdRoom.StateSnapshot()
+	if !state.Ended {
+		t.Fatalf("expected room ended=true after ended event")
+	}
+	if !state.Paused {
+		t.Fatalf("expected room paused=true after ended event")
+	}
+
+	mustJoinRoom(t, ctx, viewerConn2, createdRoom.ID(), "user_b")
+	rejoinEnvelope := mustReadEnvelope(t, ctx, viewerConn2)
+	if rejoinEnvelope.Type != protocol.TypeRoomState {
+		t.Fatalf("expected room_state on repeated join, got %s", rejoinEnvelope.Type)
+	}
+
+	var payload protocol.RoomStatePayload
+	if err := json.Unmarshal(rejoinEnvelope.Payload, &payload); err != nil {
+		t.Fatalf("unmarshal room_state payload: %v", err)
+	}
+	if !payload.Ended {
+		t.Fatalf("expected repeated join room_state ended=true")
+	}
+	if !payload.Paused {
+		t.Fatalf("expected repeated join room_state paused=true")
+	}
+	if payload.PositionMs != 210_000 {
+		t.Fatalf("expected repeated join room_state frozen position 210000, got %d", payload.PositionMs)
+	}
+}
+
+func TestWebSocketEndedRejectsNonHost(t *testing.T) {
+	roomManager := room.NewManager()
+	createdRoom, err := roomManager.CreateRoom("user_a", "sample_001")
+	if err != nil {
+		t.Fatalf("create room: %v", err)
+	}
+	mux := http.NewServeMux()
+	mux.Handle("/ws", NewWebSocketHandler(roomManager, true))
+
+	httpServer := httptest.NewServer(mux)
+	defer httpServer.Close()
+
+	wsURL := "ws" + httpServer.URL[len("http"):] + "/ws"
+	ctx := context.Background()
+
+	hostConn := mustDialWebSocket(t, ctx, wsURL)
+	defer hostConn.Close(websocket.StatusNormalClosure, "test done")
+	viewerConn := mustDialWebSocket(t, ctx, wsURL)
+	defer viewerConn.Close(websocket.StatusNormalClosure, "test done")
+
+	mustJoinRoom(t, ctx, hostConn, createdRoom.ID(), "user_a")
+	mustReadEnvelope(t, ctx, hostConn)
+	mustJoinRoom(t, ctx, viewerConn, createdRoom.ID(), "user_b")
+	mustReadEnvelope(t, ctx, viewerConn)
+
+	mustSendEnvelope(t, ctx, viewerConn, protocol.Envelope{
+		Type: protocol.TypeEnded,
+		Payload: mustJSONRaw(protocol.EndedPayload{
+			RoomID:     createdRoom.ID(),
+			UserID:     "user_b",
+			PositionMs: 210_000,
+			Seq:        1,
+		}),
+	})
+
+	var envelope protocol.ErrorEnvelope
+	readMessageAs(t, ctx, viewerConn, &envelope)
+	if envelope.Type != protocol.TypeError {
+		t.Fatalf("expected error response, got %s", envelope.Type)
+	}
+	if envelope.Payload.Message != "only host can control playback" {
+		t.Fatalf("unexpected ended error message: %s", envelope.Payload.Message)
+	}
+}
+
+func TestWebSocketSeekClearsEndedState(t *testing.T) {
+	roomManager := room.NewManager()
+	createdRoom, err := roomManager.CreateRoom("user_a", "sample_001")
+	if err != nil {
+		t.Fatalf("create room: %v", err)
+	}
+	mux := http.NewServeMux()
+	mux.Handle("/ws", NewWebSocketHandler(roomManager, true))
+
+	httpServer := httptest.NewServer(mux)
+	defer httpServer.Close()
+
+	wsURL := "ws" + httpServer.URL[len("http"):] + "/ws"
+	ctx := context.Background()
+
+	hostConn := mustDialWebSocket(t, ctx, wsURL)
+	defer hostConn.Close(websocket.StatusNormalClosure, "test done")
+	viewerConn := mustDialWebSocket(t, ctx, wsURL)
+	defer viewerConn.Close(websocket.StatusNormalClosure, "test done")
+
+	mustJoinRoom(t, ctx, hostConn, createdRoom.ID(), "user_a")
+	mustReadEnvelope(t, ctx, hostConn)
+	mustJoinRoom(t, ctx, viewerConn, createdRoom.ID(), "user_b")
+	mustReadEnvelope(t, ctx, viewerConn)
+
+	mustSendEnvelope(t, ctx, hostConn, protocol.Envelope{
+		Type: protocol.TypeEnded,
+		Payload: mustJSONRaw(protocol.EndedPayload{
+			RoomID:     createdRoom.ID(),
+			UserID:     "user_a",
+			PositionMs: 210_000,
+			Seq:        1,
+		}),
+	})
+	assertEndedBroadcast(t, ctx, hostConn, 210_000, 2)
+	assertEndedBroadcast(t, ctx, viewerConn, 210_000, 2)
+
+	mustSendEnvelope(t, ctx, hostConn, protocol.Envelope{
+		Type: protocol.TypeSeek,
+		Payload: mustJSONRaw(protocol.SeekPayload{
+			RoomID:     createdRoom.ID(),
+			UserID:     "user_a",
+			PositionMs: 120_000,
+			Seq:        2,
+		}),
+	})
+	assertControlBroadcast(t, ctx, hostConn, protocol.TypeSeek, 120_000, 3)
+	assertControlBroadcast(t, ctx, viewerConn, protocol.TypeSeek, 120_000, 3)
+
+	state := createdRoom.StateSnapshot()
+	if state.Ended {
+		t.Fatalf("expected seek to clear ended state")
+	}
+}
+
 func TestWebSocketFormerHostReconnectsAsNormalMember(t *testing.T) {
 	roomManager := room.NewManager()
 	createdRoom, err := roomManager.CreateRoom("user_a", "sample_001")
@@ -873,6 +1045,28 @@ func assertPlaybackRateBroadcast(
 		payload.Seq != expectedSeq ||
 		payload.PlaybackRate != expectedRate {
 		t.Fatalf("unexpected set_playback_rate payload: %+v", payload)
+	}
+}
+
+func assertEndedBroadcast(
+	t *testing.T,
+	ctx context.Context,
+	conn *websocket.Conn,
+	expectedPosition int64,
+	expectedSeq int64,
+) {
+	t.Helper()
+	envelope := mustReadEnvelope(t, ctx, conn)
+	if envelope.Type != protocol.TypeEnded {
+		t.Fatalf("expected %s, got %s", protocol.TypeEnded, envelope.Type)
+	}
+
+	var payload protocol.EndedPayload
+	if err := json.Unmarshal(envelope.Payload, &payload); err != nil {
+		t.Fatalf("unmarshal ended payload: %v", err)
+	}
+	if payload.PositionMs != expectedPosition || payload.Seq != expectedSeq {
+		t.Fatalf("unexpected ended payload: %+v", payload)
 	}
 }
 

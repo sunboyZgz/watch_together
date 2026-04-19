@@ -9,6 +9,7 @@ const (
 	TypePause           = "pause"
 	TypeSeek            = "seek"
 	TypeSetPlaybackRate = "set_playback_rate"
+	TypeEnded           = "ended"
 	TypeHeartbeat       = "heartbeat"
 	TypeHeartbeatAck    = "heartbeat_ack"
 	TypeError           = "error"

@@ -14,6 +14,7 @@ type State struct {
 	MediaID      string
 	HostUserID   string
 	Paused       bool
+	Ended        bool
 	PositionMs   int64
 	PlaybackRate float64
 	Seq          int64
@@ -56,6 +57,7 @@ func newWithClock(id string, now func() time.Time) *Room {
 			MediaID:      "",
 			HostUserID:   "",
 			Paused:       true,
+			Ended:        false,
 			PositionMs:   0,
 			PlaybackRate: 1.0,
 			Seq:          1,
@@ -168,6 +170,7 @@ func (r *Room) ApplySeek(userID string, positionMs int64) (State, []*ClientConne
 	}
 
 	r.state.PositionMs = positionMs
+	r.state.Ended = false
 	r.authorityAt = r.now()
 	r.state.Seq++
 	return r.currentStateLocked(r.authorityAt), r.clientsSnapshotLocked(), nil
@@ -194,6 +197,29 @@ func (r *Room) ApplyPlaybackRate(
 	return r.currentStateLocked(r.authorityAt), r.clientsSnapshotLocked(), nil
 }
 
+// ApplyEnded marks the room authority timeline as completed and freezes the position.
+func (r *Room) ApplyEnded(userID string, positionMs int64) (State, []*ClientConnection, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.state.HostUserID != userID {
+		return State{}, nil, ErrNotHost
+	}
+
+	now := r.now()
+	currentState := r.currentStateLocked(now)
+	frozenPosition := positionMs
+	if currentState.PositionMs > frozenPosition {
+		frozenPosition = currentState.PositionMs
+	}
+	r.state.PositionMs = frozenPosition
+	r.state.Paused = true
+	r.state.Ended = true
+	r.authorityAt = now
+	r.state.Seq++
+	return r.currentStateLocked(r.authorityAt), r.clientsSnapshotLocked(), nil
+}
+
 func (r *Room) applyControl(
 	userID string,
 	positionMs int64,
@@ -207,6 +233,7 @@ func (r *Room) applyControl(
 	}
 
 	r.state.Paused = paused
+	r.state.Ended = false
 	r.state.PositionMs = positionMs
 	r.authorityAt = r.now()
 	r.state.Seq++
@@ -223,7 +250,7 @@ func (r *Room) clientsSnapshotLocked() []*ClientConnection {
 
 func (r *Room) currentStateLocked(now time.Time) State {
 	snapshot := r.state
-	if snapshot.Paused || r.authorityAt.IsZero() {
+	if snapshot.Paused || snapshot.Ended || r.authorityAt.IsZero() {
 		return snapshot
 	}
 

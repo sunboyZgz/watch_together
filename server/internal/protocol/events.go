@@ -44,6 +44,13 @@ type SetPlaybackRatePayload struct {
 	Seq          int64   `json:"seq"`
 }
 
+type EndedPayload struct {
+	RoomID     string `json:"roomId"`
+	UserID     string `json:"userId"`
+	PositionMs int64  `json:"positionMs"`
+	Seq        int64  `json:"seq"`
+}
+
 type HeartbeatPayload struct {
 	ServerTimeMs int64 `json:"serverTimeMs"`
 }
@@ -58,6 +65,7 @@ type RoomStatePayload struct {
 	MediaID      string  `json:"mediaId"`
 	HostUserID   string  `json:"hostUserId"`
 	Paused       bool    `json:"paused"`
+	Ended        bool    `json:"ended"`
 	PositionMs   int64   `json:"positionMs"`
 	PlaybackRate float64 `json:"playbackRate"`
 	Seq          int64   `json:"seq"`
@@ -97,5 +105,13 @@ func (p SetPlaybackRatePayload) GetRoomID() string {
 }
 
 func (p SetPlaybackRatePayload) GetUserID() string {
+	return p.UserID
+}
+
+func (p EndedPayload) GetRoomID() string {
+	return p.RoomID
+}
+
+func (p EndedPayload) GetUserID() string {
 	return p.UserID
 }
