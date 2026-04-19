@@ -1,16 +1,30 @@
 package room
 
 import (
+	"context"
 	"crypto/rand"
 	"errors"
 	"sync"
+	"time"
 )
 
 var ErrUnableToGenerateRoomID = errors.New("unable to generate unique room id")
 
+const (
+	defaultEmptyRoomGracePeriod = 2 * time.Minute
+	defaultCleanupInterval      = 5 * time.Second
+)
+
+func DefaultCleanupInterval() time.Duration {
+	return defaultCleanupInterval
+}
+
 type Manager struct {
-	mu    sync.RWMutex
-	rooms map[string]*Room
+	mu                   sync.RWMutex
+	rooms                map[string]*Room
+	emptySince           map[string]time.Time
+	now                  func() time.Time
+	emptyRoomGracePeriod time.Duration
 }
 
 type RemoveClientResult struct {
@@ -22,8 +36,15 @@ type RemoveClientResult struct {
 
 // NewManager creates the top-level in-memory registry for all active rooms.
 func NewManager() *Manager {
+	return newManagerWithClock(time.Now, defaultEmptyRoomGracePeriod)
+}
+
+func newManagerWithClock(now func() time.Time, emptyRoomGracePeriod time.Duration) *Manager {
 	return &Manager{
-		rooms: make(map[string]*Room),
+		rooms:                make(map[string]*Room),
+		emptySince:           make(map[string]time.Time),
+		now:                  now,
+		emptyRoomGracePeriod: emptyRoomGracePeriod,
 	}
 }
 
@@ -31,6 +52,7 @@ func NewManager() *Manager {
 func (m *Manager) CreateRoom(hostUserID string, mediaID string) (*Room, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.cleanupExpiredRoomsLocked(m.now())
 
 	for range 10 {
 		roomID, err := generateRoomID(6)
@@ -53,6 +75,7 @@ func (m *Manager) CreateRoom(hostUserID string, mediaID string) (*Room, error) {
 func (m *Manager) GetOrCreate(roomID string) *Room {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.cleanupExpiredRoomsLocked(m.now())
 
 	if room, ok := m.rooms[roomID]; ok {
 		return room
@@ -86,10 +109,40 @@ func (m *Manager) RemoveClient(client *ClientConnection) RemoveClientResult {
 		HostTransferred: leaveResult.HostTransferred,
 	}
 	if leaveResult.RoomEmpty {
-		delete(m.rooms, roomID)
-		result.RoomRemoved = true
+		m.emptySince[roomID] = m.now()
 	}
 	return result
+}
+
+// MarkRoomActive clears any pending empty-room cleanup after a member rejoins.
+func (m *Manager) MarkRoomActive(roomID string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	delete(m.emptySince, roomID)
+}
+
+// CleanupExpiredRooms removes rooms whose empty grace period has elapsed.
+func (m *Manager) CleanupExpiredRooms() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	return m.cleanupExpiredRoomsLocked(m.now())
+}
+
+// StartCleanupLoop periodically removes expired empty rooms.
+func (m *Manager) StartCleanupLoop(ctx context.Context, interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			m.CleanupExpiredRooms()
+		}
+	}
 }
 
 // RoomCount exposes the current number of active rooms for tests and diagnostics.
@@ -113,11 +166,27 @@ func (m *Manager) ClientCount(roomID string) int {
 
 // Get returns one room by ID without creating a new one.
 func (m *Manager) Get(roomID string) (*Room, bool) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.cleanupExpiredRoomsLocked(m.now())
 
 	room, ok := m.rooms[roomID]
 	return room, ok
+}
+
+func (m *Manager) cleanupExpiredRoomsLocked(now time.Time) int {
+	removed := 0
+	for roomID, emptySince := range m.emptySince {
+		if now.Sub(emptySince) < m.emptyRoomGracePeriod {
+			continue
+		}
+		delete(m.emptySince, roomID)
+		if _, ok := m.rooms[roomID]; ok {
+			delete(m.rooms, roomID)
+			removed++
+		}
+	}
+	return removed
 }
 
 func generateRoomID(length int) (string, error) {

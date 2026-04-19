@@ -560,6 +560,101 @@ func TestWebSocketRepeatedJoinReturnsCurrentEffectiveRoomState(t *testing.T) {
 	}
 }
 
+func TestWebSocketFormerHostReconnectsAsNormalMember(t *testing.T) {
+	roomManager := room.NewManager()
+	createdRoom, err := roomManager.CreateRoom("user_a", "sample_001")
+	if err != nil {
+		t.Fatalf("create room: %v", err)
+	}
+	mux := http.NewServeMux()
+	mux.Handle("/ws", NewWebSocketHandler(roomManager, true))
+
+	httpServer := httptest.NewServer(mux)
+	defer httpServer.Close()
+
+	wsURL := "ws" + httpServer.URL[len("http"):] + "/ws"
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	hostConn := mustDialWebSocket(t, ctx, wsURL)
+	viewerConn := mustDialWebSocket(t, ctx, wsURL)
+	defer viewerConn.Close(websocket.StatusNormalClosure, "test done")
+
+	mustJoinRoom(t, ctx, hostConn, createdRoom.ID(), "user_a")
+	mustReadEnvelope(t, ctx, hostConn)
+	mustJoinRoom(t, ctx, viewerConn, createdRoom.ID(), "user_b")
+	mustReadEnvelope(t, ctx, viewerConn)
+
+	if err := hostConn.Close(websocket.StatusNormalClosure, "host leaves"); err != nil {
+		t.Fatalf("close host websocket: %v", err)
+	}
+
+	hostTransferred := mustReadEnvelope(t, ctx, viewerConn)
+	if hostTransferred.Type != protocol.TypeRoomState {
+		t.Fatalf("expected room_state after host transfer, got %s", hostTransferred.Type)
+	}
+	var transferredState protocol.RoomStatePayload
+	if err := json.Unmarshal(hostTransferred.Payload, &transferredState); err != nil {
+		t.Fatalf("unmarshal transferred room_state: %v", err)
+	}
+	if transferredState.HostUserID != "user_b" {
+		t.Fatalf("expected host to transfer to user_b, got %s", transferredState.HostUserID)
+	}
+
+	reconnectedFormerHost := mustDialWebSocket(t, ctx, wsURL)
+	defer reconnectedFormerHost.Close(websocket.StatusNormalClosure, "test done")
+	mustJoinRoom(t, ctx, reconnectedFormerHost, createdRoom.ID(), "user_a")
+
+	rejoinStateEnvelope := mustReadEnvelope(t, ctx, reconnectedFormerHost)
+	if rejoinStateEnvelope.Type != protocol.TypeRoomState {
+		t.Fatalf("expected room_state on former host reconnect, got %s", rejoinStateEnvelope.Type)
+	}
+	var rejoinState protocol.RoomStatePayload
+	if err := json.Unmarshal(rejoinStateEnvelope.Payload, &rejoinState); err != nil {
+		t.Fatalf("unmarshal former host room_state: %v", err)
+	}
+	if rejoinState.HostUserID != "user_b" {
+		t.Fatalf("expected current host to stay user_b after former host reconnect, got %s", rejoinState.HostUserID)
+	}
+
+	mustSendEnvelope(t, ctx, reconnectedFormerHost, protocol.Envelope{
+		Type: protocol.TypePlay,
+		Payload: mustJSONRaw(protocol.PlayPayload{
+			RoomID:     createdRoom.ID(),
+			UserID:     "user_a",
+			PositionMs: 5_000,
+			Seq:        rejoinState.Seq,
+		}),
+	})
+
+	var errorEnvelope protocol.ErrorEnvelope
+	readMessageAs(t, ctx, reconnectedFormerHost, &errorEnvelope)
+	if errorEnvelope.Type != protocol.TypeError {
+		t.Fatalf("expected error for former host control attempt, got %s", errorEnvelope.Type)
+	}
+	if errorEnvelope.Payload.Message != "only host can control playback" {
+		t.Fatalf("expected host control rejection, got %s", errorEnvelope.Payload.Message)
+	}
+
+	mustSendEnvelope(t, ctx, viewerConn, protocol.Envelope{
+		Type: protocol.TypePlay,
+		Payload: mustJSONRaw(protocol.PlayPayload{
+			RoomID:     createdRoom.ID(),
+			UserID:     "user_b",
+			PositionMs: 9_000,
+			Seq:        rejoinState.Seq,
+		}),
+	})
+
+	assertControlBroadcast(t, ctx, viewerConn, protocol.TypePlay, 9_000, transferredState.Seq+1)
+	assertControlBroadcast(t, ctx, reconnectedFormerHost, protocol.TypePlay, 9_000, transferredState.Seq+1)
+
+	state := createdRoom.StateSnapshot()
+	if state.HostUserID != "user_b" {
+		t.Fatalf("expected room host to remain user_b, got %s", state.HostUserID)
+	}
+}
+
 func mustDialWebSocket(t *testing.T, ctx context.Context, wsURL string) *websocket.Conn {
 	t.Helper()
 	conn, _, err := websocket.Dial(ctx, wsURL, nil)

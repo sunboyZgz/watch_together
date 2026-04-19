@@ -7,7 +7,10 @@ import (
 )
 
 func TestManagerRemoveClientDeletesEmptyRoom(t *testing.T) {
-	manager := NewManager()
+	currentTime := time.UnixMilli(1_000)
+	manager := newManagerWithClock(func() time.Time {
+		return currentTime
+	}, 2*time.Minute)
 	room := manager.GetOrCreate("room_001")
 	client := NewClientConnection(nil)
 	client.SetIdentity("user_a", "room_001")
@@ -22,8 +25,15 @@ func TestManagerRemoveClientDeletesEmptyRoom(t *testing.T) {
 
 	manager.RemoveClient(client)
 
+	if got := manager.RoomCount(); got != 1 {
+		t.Fatalf("expected room to remain during grace period, got %d rooms", got)
+	}
+
+	currentTime = currentTime.Add(2*time.Minute + time.Millisecond)
+	manager.CleanupExpiredRooms()
+
 	if got := manager.RoomCount(); got != 0 {
-		t.Fatalf("expected room cleanup after disconnect, got %d rooms", got)
+		t.Fatalf("expected room cleanup after grace period, got %d rooms", got)
 	}
 }
 
@@ -117,5 +127,38 @@ func TestRoomStateSnapshotExtrapolatesCurrentPositionWhilePlaying(t *testing.T) 
 	}
 	if state.Seq != 2 {
 		t.Fatalf("expected seq 2 after play, got %d", state.Seq)
+	}
+}
+
+func TestManagerJoinDuringGracePeriodKeepsRoomAlive(t *testing.T) {
+	currentTime := time.UnixMilli(1_000)
+	manager := newManagerWithClock(func() time.Time {
+		return currentTime
+	}, 2*time.Minute)
+
+	room := manager.GetOrCreate("room_001")
+	firstClient := NewClientConnection(nil)
+	firstClient.SetIdentity("user_a", "room_001")
+	room.Join(firstClient)
+
+	manager.RemoveClient(firstClient)
+	if got := manager.RoomCount(); got != 1 {
+		t.Fatalf("expected room to still exist during grace period, got %d rooms", got)
+	}
+
+	rejoinedRoom, ok := manager.Get("room_001")
+	if !ok {
+		t.Fatalf("expected room to be rejoinable during grace period")
+	}
+	secondClient := NewClientConnection(nil)
+	secondClient.SetIdentity("user_b", "room_001")
+	rejoinedRoom.Join(secondClient)
+	manager.MarkRoomActive("room_001")
+
+	currentTime = currentTime.Add(2*time.Minute + time.Millisecond)
+	manager.CleanupExpiredRooms()
+
+	if got := manager.RoomCount(); got != 1 {
+		t.Fatalf("expected room to survive after rejoin during grace period, got %d rooms", got)
 	}
 }

@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"os"
@@ -47,6 +48,7 @@ type Server struct {
 // NewServer assembles the in-memory room manager and the HTTP routes around it.
 func NewServer(config Config) *Server {
 	roomManager := room.NewManager()
+	go roomManager.StartCleanupLoop(context.Background(), room.DefaultCleanupInterval())
 	mux := http.NewServeMux()
 	roomHTTPHandler := transport.NewRoomHTTPHandler(roomManager)
 

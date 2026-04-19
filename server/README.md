@@ -11,6 +11,7 @@
 - 应用层 heartbeat 与静默连接超时清理
 - host disconnect 后的 immediate host transfer
 - same-user repeated join 的单有效连接收敛
+- 房间最后一个成员离开后的 grace-period lifecycle 规则
 - 最小 `Room / ClientConnection / RoomManager` 内存结构
 - 基于 `INT-19` 协议草案的最小消息解析层
 - `join_room` 的已存在房间接入流程
@@ -91,6 +92,8 @@ server/
 - 服务端会周期性发送 `heartbeat`，客户端需返回 `heartbeat_ack`
 - 超时未 ack 的连接会进入现有断连清理流程
 - host 断开连接后，剩余成员会收到新的 `room_state` 且 host 身份立即转移
+- former host 在 host transfer 后重新 join room 时，会作为普通成员回到房间，不会隐式拿回 host 身份
 - 同一 `userId` repeated join 同一房间时，新连接会替换旧连接并重新收到基于 authority timeline 结算后的最新 `room_state`
+- 最后一个成员离开后，房间不会立即销毁，而是进入 2 分钟 grace period；若期间有人重新加入则继续保留，否则自动销毁
 
 其中 `POST /rooms`、`join_room`、`play / pause / seek` 与 host transfer 的最小同步路径已通过基础测试验证。

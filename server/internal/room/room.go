@@ -99,7 +99,8 @@ func (r *Room) Join(client *ClientConnection) JoinResult {
 
 	r.clients[client] = struct{}{}
 	r.clientsByUser[client.UserID()] = client
-	// The first connected user becomes the initial host until later host rules are added.
+	// The first connected user becomes the initial host. After host transfer has
+	// happened, reconnecting former hosts must not implicitly reclaim host identity.
 	if r.state.HostUserID == "" {
 		r.state.HostUserID = client.UserID()
 	}

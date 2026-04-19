@@ -173,6 +173,7 @@ func (h *WebSocketHandler) handleJoinRoom(
 	// We persist identity on the connection first so disconnect cleanup can find the room later.
 	client.SetIdentity(payload.UserID, payload.RoomID)
 	joinResult := existingRoom.Join(client)
+	h.roomManager.MarkRoomActive(payload.RoomID)
 	if joinResult.ReplacedClient != nil {
 		// Repeated join for the same logical user should leave only one active connection.
 		_ = joinResult.ReplacedClient.CloseNow()
