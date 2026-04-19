@@ -68,6 +68,7 @@ private enum class SyncStatus(val label: String) {
     PlayApplied("play applied"),
     PauseApplied("pause applied"),
     SeekApplied("seek applied"),
+    PlaybackRateApplied("playback rate applied"),
     SyncFailed("Sync failed"),
     CreateAndJoinFailed("Create and join failed")
 }
@@ -235,6 +236,32 @@ fun PlayerScreen(modifier: Modifier = Modifier) {
                 }
             }
 
+            override fun onPlaybackRate(
+                payload: com.example.watch_together.sync.protocol.SetPlaybackRatePayload
+            ) {
+                coroutineScope.launch {
+                    appendLog(
+                        syncLogs,
+                        "received set_playback_rate rate=${payload.playbackRate} seq=${payload.seq} position=${payload.positionMs}"
+                    )
+                    val previous = latestSyncState ?: run {
+                        appendLog(syncLogs, "Ignored playback rate before room_state")
+                        return@launch
+                    }
+                    if (payload.seq <= previous.seq) {
+                        appendLog(syncLogs, "Ignored stale playback rate seq=${payload.seq}")
+                        return@launch
+                    }
+                    val appliedState = roomSyncCoordinator.applyPlaybackRateEvent(previous, payload)
+                    playbackSpeed = payload.playbackRate.toFloat()
+                    applyAuthoritativeState(
+                        appliedState,
+                        SyncStatus.PlaybackRateApplied,
+                        "set_playback_rate"
+                    )
+                }
+            }
+
             override fun onHeartbeat(serverTimeMs: Long) {
                 coroutineScope.launch {
                     syncStatus = SyncStatus.Connected
@@ -367,6 +394,29 @@ fun PlayerScreen(modifier: Modifier = Modifier) {
         appendLog(syncLogs, "seek sent=$sent to ${targetPositionMs}ms")
     }
 
+    fun sendPlaybackRateSync(speed: Float) {
+        val currentState = latestSyncState ?: return
+        val previousPlaybackSpeed = playbackSpeed
+        latestSyncState = currentState.copy(
+            positionMs = currentPosition,
+            playbackRate = speed.toDouble(),
+            authorityAppliedAtMs = System.currentTimeMillis()
+        )
+        playbackSpeed = speed
+        adapter.setPlaybackSpeed(speed)
+        val sent = roomWebSocketClient.sendPlaybackRate(
+            playbackRate = speed.toDouble(),
+            positionMs = currentPosition,
+            seq = currentState.seq
+        )
+        if (!sent) {
+            latestSyncState = currentState
+            playbackSpeed = previousPlaybackSpeed
+            adapter.setPlaybackSpeed(previousPlaybackSpeed)
+        }
+        appendLog(syncLogs, "playbackRate sent=$sent rate=${speed}x at ${currentPosition}ms")
+    }
+
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -407,8 +457,17 @@ fun PlayerScreen(modifier: Modifier = Modifier) {
             onPauseSync = ::sendPause,
             onSeekSync = ::sendSeek,
             onPlaybackSpeedChange = { speed ->
-                playbackSpeed = speed
-                adapter.setPlaybackSpeed(speed)
+                if (isHostController && latestSyncState != null) {
+                    appendLog(syncLogs, "playbackRate click path=sync rate=${speed}x")
+                    sendPlaybackRateSync(speed)
+                } else {
+                    appendLog(
+                        syncLogs,
+                        "playbackRate click path=local rate=${speed}x host=$isHostController joined=${latestSyncState != null}"
+                    )
+                    playbackSpeed = speed
+                    adapter.setPlaybackSpeed(speed)
+                }
             }
         )
         SyncStatePanel(latestSyncState = latestSyncState)
@@ -675,18 +734,25 @@ private fun PlayerControls(
                     }
                 }
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf(0.75f, 1.0f, 1.25f, 1.5f, 2.0f).forEach { speed ->
-                    val selected = speed == playbackSpeed
-                    val buttonText = if (selected) "${speed}x ✓" else "${speed}x"
-                    val onClick = { onPlaybackSpeedChange(speed) }
-                    if (selected) {
-                        Button(onClick = onClick) {
-                            Text(buttonText)
-                        }
-                    } else {
-                        OutlinedButton(onClick = onClick) {
-                            Text(buttonText)
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf(
+                    listOf(0.75f, 1.0f, 1.25f),
+                    listOf(1.5f, 2.0f)
+                ).forEach { rowSpeeds ->
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        rowSpeeds.forEach { speed ->
+                            val selected = speed == playbackSpeed
+                            val buttonText = if (selected) "${speed}x ✓" else "${speed}x"
+                            val onClick = { onPlaybackSpeedChange(speed) }
+                            if (selected) {
+                                Button(onClick = onClick) {
+                                    Text(buttonText)
+                                }
+                            } else {
+                                OutlinedButton(onClick = onClick) {
+                                    Text(buttonText)
+                                }
+                            }
                         }
                     }
                 }

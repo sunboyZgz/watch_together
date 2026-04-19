@@ -5,6 +5,7 @@ import com.example.watch_together.sync.protocol.HeartbeatAckPayload
 import com.example.watch_together.sync.protocol.PausePayload
 import com.example.watch_together.sync.protocol.PlayPayload
 import com.example.watch_together.sync.protocol.SeekPayload
+import com.example.watch_together.sync.protocol.SetPlaybackRatePayload
 import com.example.watch_together.sync.protocol.toEnvelope
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -19,6 +20,7 @@ interface RoomWebSocketListener {
     fun onPlay(payload: PlayPayload)
     fun onPause(payload: PausePayload)
     fun onSeek(payload: SeekPayload)
+    fun onPlaybackRate(payload: SetPlaybackRatePayload)
     fun onHeartbeat(serverTimeMs: Long)
     fun onError(message: String)
 }
@@ -76,6 +78,7 @@ class RoomWebSocketClient(
                         is SyncMessage.Play -> listener.onPlay(message.payload)
                         is SyncMessage.Pause -> listener.onPause(message.payload)
                         is SyncMessage.Seek -> listener.onSeek(message.payload)
+                        is SyncMessage.SetPlaybackRate -> listener.onPlaybackRate(message.payload)
                         is SyncMessage.Heartbeat -> {
                             sendHeartbeatAck(webSocket, message.payload.serverTimeMs)
                             listener.onHeartbeat(message.payload.serverTimeMs)
@@ -137,6 +140,18 @@ class RoomWebSocketClient(
         )
     }
 
+    fun sendPlaybackRate(playbackRate: Double, positionMs: Long, seq: Long): Boolean {
+        return sendControl(
+            SetPlaybackRatePayload(
+                roomId = activeRoomId ?: return false,
+                userId = activeUserId ?: return false,
+                positionMs = positionMs,
+                playbackRate = playbackRate,
+                seq = seq
+            ).toEnvelope()
+        )
+    }
+
     fun close() {
         sessionGeneration++
         webSocket?.close(1000, "client closed")
@@ -189,6 +204,14 @@ class RoomWebSocketClient(
                 "roomId" to payload.roomId,
                 "userId" to payload.userId,
                 "positionMs" to payload.positionMs,
+                "seq" to payload.seq
+            )
+
+            is SetPlaybackRatePayload -> mapOf(
+                "roomId" to payload.roomId,
+                "userId" to payload.userId,
+                "positionMs" to payload.positionMs,
+                "playbackRate" to payload.playbackRate,
                 "seq" to payload.seq
             )
 

@@ -19,6 +19,7 @@
 - join room
 - room_state
 - play / pause / seek
+- playback rate sync
 - heartbeat
 - host transfer
 
@@ -286,7 +287,29 @@ drift correction 是当前最值得持续跟踪的核心技术点之一。
 - 是否需要轻量 playback speed 微调
 - 不同设备性能下的 correction 观感差异
 
-### 7. Loop Prevention
+### 7. Playback Rate Sync
+
+`playbackRate` 是 authority state 的一部分，不能只留在本地播放器控件里。
+
+关键点：
+
+- host 修改倍速后，服务端要把新的 `playbackRate` 写回权威房间状态
+- 服务端更新倍速前，应先结算当前有效 `positionMs`，保证 authority timeline 连续
+- 服务端推进 `seq` 并广播 `set_playback_rate`
+- 客户端接收后，需要同时应用 settle 后的位置和新的倍率
+- repeated join / resync 收到的 `room_state.playbackRate` 必须反映当前权威倍率
+
+算法思路：
+
+1. host 发出倍速变更事件
+2. 服务端先根据 authority timeline 结算当前有效位置
+3. 再写入新的 `playbackRate`
+4. 刷新 authority 时间基线
+5. 推进 `seq`
+6. 广播 `set_playback_rate`
+7. 客户端应用新倍率后，继续沿更新后的 baseline 做 drift correction
+
+### 8. Loop Prevention
 
 当前同步实现必须避免回环。
 
@@ -339,5 +362,9 @@ drift correction 是当前最值得持续跟踪的核心技术点之一。
 1. authority state + event ordering
 2. heartbeat + lifecycle cleanup
 3. drift correction
+4. playback rate sync
 
-其中 `drift correction` 尤其重要，因为它最直接决定“同步控制已经成功后，观看体验是否还能继续保持同步”。
+其中 `drift correction` 和 `playback rate sync` 都很重要：
+
+- `drift correction` 决定“同步控制已经成功后，观看体验是否还能继续保持同步”
+- `playback rate sync` 决定两端是否会因为不同倍速而再次持续拉开时间线

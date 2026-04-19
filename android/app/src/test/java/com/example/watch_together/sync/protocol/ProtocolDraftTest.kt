@@ -19,6 +19,9 @@ class ProtocolDraftTest {
             ProtocolEventType.Seek to (
                 "seek" to ProtocolDirection.ClientToServerAndServerToClients
             ),
+            ProtocolEventType.SetPlaybackRate to (
+                "set_playback_rate" to ProtocolDirection.ClientToServerAndServerToClients
+            ),
             ProtocolEventType.Heartbeat to ("heartbeat" to ProtocolDirection.ServerToClient),
             ProtocolEventType.HeartbeatAck to ("heartbeat_ack" to ProtocolDirection.ClientToServer),
             ProtocolEventType.Error to ("error" to ProtocolDirection.ServerToClient)
@@ -58,6 +61,10 @@ class ProtocolDraftTest {
         assertEquals(
             "seek",
             SeekPayload("room_001", "user_a", 210_000L, 6L).toEnvelope().type
+        )
+        assertEquals(
+            "set_playback_rate",
+            SetPlaybackRatePayload("room_001", "user_a", 125_000L, 1.5, 7L).toEnvelope().type
         )
         assertEquals(
             "heartbeat",

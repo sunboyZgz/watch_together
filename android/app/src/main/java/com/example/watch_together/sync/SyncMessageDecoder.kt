@@ -6,6 +6,7 @@ import com.example.watch_together.sync.protocol.PausePayload
 import com.example.watch_together.sync.protocol.PlayPayload
 import com.example.watch_together.sync.protocol.ProtocolEventType
 import com.example.watch_together.sync.protocol.RoomStatePayload
+import com.example.watch_together.sync.protocol.SetPlaybackRatePayload
 import com.example.watch_together.sync.protocol.SeekPayload
 import org.json.JSONObject
 
@@ -14,6 +15,7 @@ sealed interface SyncMessage {
     data class Play(val payload: PlayPayload) : SyncMessage
     data class Pause(val payload: PausePayload) : SyncMessage
     data class Seek(val payload: SeekPayload) : SyncMessage
+    data class SetPlaybackRate(val payload: SetPlaybackRatePayload) : SyncMessage
     data class Heartbeat(val payload: HeartbeatPayload) : SyncMessage
     data class Error(val payload: ErrorPayload) : SyncMessage
 }
@@ -70,6 +72,18 @@ class SyncMessageDecoder {
                         roomId = payload.getString("roomId"),
                         userId = payload.getString("userId"),
                         positionMs = payload.getLong("positionMs"),
+                        seq = payload.getLong("seq")
+                    )
+                )
+            }
+
+            ProtocolEventType.SetPlaybackRate.wireName -> {
+                SyncMessage.SetPlaybackRate(
+                    SetPlaybackRatePayload(
+                        roomId = payload.getString("roomId"),
+                        userId = payload.getString("userId"),
+                        positionMs = payload.getLong("positionMs"),
+                        playbackRate = payload.getDouble("playbackRate"),
                         seq = payload.getLong("seq")
                     )
                 )

@@ -3,6 +3,7 @@ package com.example.watch_together.sync
 import androidx.media3.ui.PlayerView
 import com.example.watch_together.sync.protocol.PausePayload
 import com.example.watch_together.sync.protocol.PlayPayload
+import com.example.watch_together.sync.protocol.SetPlaybackRatePayload
 import com.example.watch_together.sync.protocol.SeekPayload
 import com.example.watch_together.ui.player.PlayerAdapter
 import com.example.watch_together.ui.player.PlayerEvent
@@ -93,6 +94,27 @@ class RoomSyncCoordinatorTest {
         assertEquals(42_000L, next.positionMs)
         assertEquals(4L, next.seq)
         assertEquals(4_000L, next.authorityAppliedAtMs)
+    }
+
+    @Test
+    fun `applyPlaybackRateEvent updates speed and preserves play state`() {
+        val fakePlayerAdapter = FakePlayerAdapter()
+        val coordinator = RoomSyncCoordinator(fakePlayerAdapter)
+        val previous = RoomSyncState("ROOM01", "sample_001", "user_a", false, 15_000L, 1.0, 4L)
+
+        val next = coordinator.applyPlaybackRateEvent(
+            previous,
+            SetPlaybackRatePayload("ROOM01", "user_a", 18_000L, 1.5, 5L),
+            appliedAtMs = 5_000L
+        )
+
+        assertEquals(18_000L, fakePlayerAdapter.seekPositionMs)
+        assertEquals(1.5f, fakePlayerAdapter.speed, 0.0f)
+        assertTrue(fakePlayerAdapter.playCalled)
+        assertEquals(18_000L, next.positionMs)
+        assertEquals(1.5, next.playbackRate, 0.0)
+        assertEquals(5L, next.seq)
+        assertEquals(5_000L, next.authorityAppliedAtMs)
     }
 
     @Test

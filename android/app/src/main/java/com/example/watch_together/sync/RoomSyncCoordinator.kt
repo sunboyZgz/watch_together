@@ -3,6 +3,7 @@ package com.example.watch_together.sync
 import com.example.watch_together.config.AppConfig
 import com.example.watch_together.sync.protocol.PausePayload
 import com.example.watch_together.sync.protocol.PlayPayload
+import com.example.watch_together.sync.protocol.SetPlaybackRatePayload
 import com.example.watch_together.sync.protocol.SeekPayload
 import com.example.watch_together.ui.player.PlayerAdapter
 import kotlin.math.min
@@ -94,6 +95,28 @@ class RoomSyncCoordinator(
 
         return previous.copy(
             positionMs = payload.positionMs,
+            seq = payload.seq,
+            authorityAppliedAtMs = appliedAtMs
+        )
+    }
+
+    // applyPlaybackRateEvent keeps timeline continuity by applying the settled position and rate together.
+    fun applyPlaybackRateEvent(
+        previous: RoomSyncState,
+        payload: SetPlaybackRatePayload,
+        appliedAtMs: Long = System.currentTimeMillis()
+    ): RoomSyncState {
+        playerAdapter.seekTo(payload.positionMs)
+        playerAdapter.setPlaybackSpeed(payload.playbackRate.toFloat())
+        if (previous.paused) {
+            playerAdapter.pause()
+        } else {
+            playerAdapter.play()
+        }
+
+        return previous.copy(
+            positionMs = payload.positionMs,
+            playbackRate = payload.playbackRate,
             seq = payload.seq,
             authorityAppliedAtMs = appliedAtMs
         )

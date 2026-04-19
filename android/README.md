@@ -9,6 +9,7 @@
 - 播放器事件回调与调试面板
 - 基于 `POST /rooms` + `/ws` 的 Android 首个 join-time initial state sync 实现
 - 基于 WebSocket 的 `play / pause / seek` 最小控制同步实现
+- 基于 WebSocket 的 `set_playback_rate` 最小控制同步实现
 - 基于 WebSocket 的应用层 heartbeat 接收与 `heartbeat_ack` 回包
 - 基于 authority baseline 的最小 drift correction
 - same-user repeated join 时的本地 resync flow
@@ -49,7 +50,7 @@ android/
 各部分职责：
 
 - `config/`：统一读取 `BuildConfig` 并生成 Android 端可直接使用的 URL
-- `sync/`：当前阶段的 Android 首个同步接入层，负责 create room、join room、heartbeat ack、authority baseline 管理、drift correction、repeated join resync、控制事件出站、消息解码、`seq` 判断与播放器状态应用
+- `sync/`：当前阶段的 Android 首个同步接入层，负责 create room、join room、heartbeat ack、authority baseline 管理、drift correction、repeated join resync、控制事件出站、消息解码、`seq` 判断、倍速同步与播放器状态应用
 - `sync/protocol/`：保留与 `INT-19` 协议草案一致的 Android 本地协议模型
 - `ui/player/`：播放器页面、Media3 适配器、播放器事件和调试面板
 - `src/test/.../sync/`：协议解码和 join-time state application 的最小单元测试

@@ -36,6 +36,14 @@ data class SeekPayload(
     val seq: Long
 ) : ProtocolPayload
 
+data class SetPlaybackRatePayload(
+    val roomId: String,
+    val userId: String,
+    val positionMs: Long,
+    val playbackRate: Double,
+    val seq: Long
+) : ProtocolPayload
+
 data class HeartbeatPayload(
     val serverTimeMs: Long
 ) : ProtocolPayload
@@ -81,6 +89,13 @@ fun PausePayload.toEnvelope(): ProtocolEnvelope<PausePayload> {
 fun SeekPayload.toEnvelope(): ProtocolEnvelope<SeekPayload> {
     return ProtocolEnvelope(
         type = ProtocolEventType.Seek.wireName,
+        payload = this
+    )
+}
+
+fun SetPlaybackRatePayload.toEnvelope(): ProtocolEnvelope<SetPlaybackRatePayload> {
+    return ProtocolEnvelope(
+        type = ProtocolEventType.SetPlaybackRate.wireName,
         payload = this
     )
 }

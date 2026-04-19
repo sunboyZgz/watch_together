@@ -140,13 +140,13 @@
 - 所有消息统一使用 `type + payload`
 - 播放位置统一使用 `positionMs`
 - 协议字段使用跨平台语义，不使用 Android/ExoPlayer 专属命名
-- 当前阶段只覆盖 `join_room`、`room_state`、`play`、`pause`、`seek`、`heartbeat`、`heartbeat_ack`、`error`
+- 当前阶段只覆盖 `join_room`、`room_state`、`play`、`pause`、`seek`、`set_playback_rate`、`heartbeat`、`heartbeat_ack`、`error`
 - `seq` 视为服务端权威顺序号；客户端上报事件时可带上本地已知 `seq`，服务端广播时应使用最新状态序号
 - `heartbeat` 与 `heartbeat_ack` 只用于连接健康检测，不参与房间状态推进
 
 ## Control Sync Strategy
 
-当前阶段的 `play / pause / seek` 同步建议统一按以下策略实现：
+当前阶段的 `play / pause / seek / set_playback_rate` 同步建议统一按以下策略实现：
 
 - 出站控制事件优先来自明确的用户操作，而不是直接把播放器底层所有事件都原样上报
 - 服务端维护房间权威状态，并负责推进 `seq`
@@ -158,6 +158,7 @@
 - 本地用户点击 `Play` 才发送 `play`
 - 本地用户点击 `Pause` 才发送 `pause`
 - 本地用户明确完成一次 seek 操作后才发送 `seek`
+- 本地 host 明确切换倍速时才发送 `set_playback_rate`
 
 而不是：
 
@@ -166,7 +167,7 @@
 
 ## Server-side Event Rules
 
-围绕 `play / pause / seek`，当前服务端建议遵循以下最小规则：
+围绕 `play / pause / seek / set_playback_rate`，当前服务端建议遵循以下最小规则：
 
 - 仅允许当前房主发起控制事件
 - 房间不存在时返回 `error`
@@ -283,6 +284,27 @@
     "userId": "user_a",
     "positionMs": 210000,
     "seq": 6
+  }
+}
+```
+
+### `set_playback_rate`
+
+- 方向：client -> server / server -> clients
+- 作用：房主更新当前房间播放倍率，服务端确认后广播
+- 当前阶段建议仅由显式用户切换倍速时触发上报
+- 服务端广播时应使用最新 `seq`
+- join / repeated join 返回的 `room_state.playbackRate` 应与最近一次权威倍率保持一致
+
+```json
+{
+  "type": "set_playback_rate",
+  "payload": {
+    "roomId": "room_001",
+    "userId": "user_a",
+    "positionMs": 210000,
+    "playbackRate": 1.5,
+    "seq": 7
   }
 }
 ```

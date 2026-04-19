@@ -134,6 +134,29 @@ class SyncMessageDecoderTest {
     }
 
     @Test
+    fun `set playback rate message decodes with room position rate and seq`() {
+        val decoded = decoder.decode(
+            """
+                {
+                  "type": "set_playback_rate",
+                  "payload": {
+                    "roomId": "ROOM42",
+                    "userId": "host_a",
+                    "positionMs": 18000,
+                    "playbackRate": 1.5,
+                    "seq": 5
+                  }
+                }
+            """.trimIndent()
+        ) as SyncMessage.SetPlaybackRate
+
+        assertEquals("ROOM42", decoded.payload.roomId)
+        assertEquals(18_000L, decoded.payload.positionMs)
+        assertEquals(1.5, decoded.payload.playbackRate, 0.0)
+        assertEquals(5L, decoded.payload.seq)
+    }
+
+    @Test
     fun `heartbeat message decodes into heartbeat payload`() {
         val rawMessage = """
             {
