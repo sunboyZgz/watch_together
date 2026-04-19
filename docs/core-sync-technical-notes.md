@@ -127,8 +127,38 @@ heartbeat 是当前连接健康判断的基础。
 - 是否需要区分 debug / release 参数
 - timeout 是否过长或过短
 - 心跳日志是否需要收敛
+- 当房间只剩 host 自己时，如何向页面层提供明确提示
 
-### 4. Host Transfer
+### 4. Room Lifecycle
+
+房间生命周期不只是“能不能创建房间”，而是要明确房间什么时候继续保留、什么时候应该清理。
+
+当前阶段更合理的生命周期规则已经收敛为：
+
+- 只要房间还没有被销毁，就允许成员继续加入
+- 不再单独维护“创建后无人加入 5 分钟自动销毁”的独立规则
+- 当最后一个成员离开后，房间进入一个短暂 grace period
+- 若 grace period 内有人重新加入，房间继续保留
+- 若 grace period 到期仍为空房间，则服务端自动销毁
+
+当前规则：
+
+- empty-room grace period: `2m`
+
+为什么这样更合适：
+
+- 它把 `INT-51` 和 `INT-52` 收敛成一条更简单的规则
+- 它与 heartbeat 超时后的静默断线清理更容易协同
+- 它为 reconnect/rejoin 提供了短暂恢复窗口
+- 它避免房间在最后一个人刚离开时被过早销毁
+
+后续优化方向：
+
+- grace period 是否需要区分 debug / release
+- 房间清理事件是否需要对客户端可见
+- 房间销毁和播放完成态是否要联动
+
+### 5. Host Transfer
 
 当前已实现 host 断线后的即时 host transfer。
 
@@ -144,8 +174,9 @@ heartbeat 是当前连接健康判断的基础。
 - former host reconnect 后的角色处理
 - repeated join / resync 后的身份稳定性
 - host transfer 与 heartbeat timeout 的联动验证
+- host transfer 后如何给新 host 提供明确提示
 
-### 5. Drift Correction
+### 6. Drift Correction
 
 drift correction 是当前最值得持续跟踪的核心技术点之一。
 
@@ -255,7 +286,7 @@ drift correction 是当前最值得持续跟踪的核心技术点之一。
 - 是否需要轻量 playback speed 微调
 - 不同设备性能下的 correction 观感差异
 
-### 6. Loop Prevention
+### 7. Loop Prevention
 
 当前同步实现必须避免回环。
 
