@@ -287,36 +287,175 @@ android/app/src/main/java/com/example/watch_together/
 - `INT-95`：拆分 `PlayerScreen` 为页面壳层与播放器核心壳层
 - `INT-96`：为重构后的播放器边界补测试与文档
 
+当前这一步已经完成了第一轮落地：
+
+- 已把页面壳层拆到独立的 `RoomPlayerPageShell`
+- 已把播放器核心壳层拆到独立的 `PlayerCoreShell`
+- `PlayerScreen` 现在更接近“状态 + 副作用 + 组合入口”
+- 原本堆在 `PlayerScreen.kt` 中的大量 UI 区块已经移出到独立文件
+
+## 当前实际文件落点
+
+经过前三步重构后，当前 Android 播放器相关文件已经可以按下面的方式理解：
+
+```text
+android/app/src/main/java/com/example/watch_together/
+├── config/
+│   └── AppConfig.kt
+├── sync/
+│   ├── RoomHttpClient.kt
+│   ├── RoomSessionController.kt
+│   ├── RoomSyncCoordinator.kt
+│   ├── RoomSyncState.kt
+│   ├── RoomWebSocketClient.kt
+│   ├── SyncMessageDecoder.kt
+│   └── protocol/
+└── ui/player/
+    ├── AndroidExoPlayerAdapter.kt
+    ├── PlayerAdapter.kt
+    ├── PlayerCoreShell.kt
+    ├── PlayerEvent.kt
+    ├── PlayerScreen.kt
+    ├── RoomPlayerPageShell.kt
+    └── RoomPlayerUiState.kt
+```
+
+其中：
+
+- `PlayerScreen.kt`：页面组合入口，保留状态、副作用与页面装配
+- `RoomPlayerPageShell.kt`：页面壳层，负责房间页面布局与调试区块组合
+- `PlayerCoreShell.kt`：播放器核心壳层，负责视口与控制区的布局
+- `RoomPlayerUiState.kt`：页面状态统一入口
+- `RoomSessionController.kt`：房间会话入口
+- `RoomSyncCoordinator.kt`：同步协调入口
+- `AndroidExoPlayerAdapter.kt`：本地播放器核心适配层
+
+这一步带来的直接收益：
+
+- 页面壳层和播放器核心壳层有了更清晰的文件边界
+- 后续如果继续改页面区块顺序、信息层级、调试面板位置，更多是在壳层文件里调整
+- `PlayerScreen` 不再同时承担全部 UI 区块定义
+
 ## 推荐的第二阶段重构
 
-在第一阶段边界稳定后，再做更细的拆分。
+当前已经可以进入第二阶段重构。
 
-### 1. 拆出 Room Player Feature
+这里的判断依据不是“第一阶段已经被完全验证完”，而是：
 
-把现在的 `PlayerScreen.kt` 继续拆成：
+- 当前页面状态入口已经存在
+- 当前房间会话入口已经存在
+- 页面壳层与播放器核心壳层已经拆开
+- 当前代码已经具备继续拆薄 `PlayerScreen` 的基本边界
 
-- `RoomPlayerScreen`
-- `PlayerViewport`
-- `PlaybackControls`
-- `SyncStatusPanel`
-- `JoinActionsPanel`
-- `DebugLogPanel`
+因此第二阶段的目标，不再是“先证明第一阶段绝对稳定”，而是继续把目前还残留在页面入口层的职责往外收，让后续业务开发时更容易定位问题、调整页面和替换实现。
 
-### 2. 让播放器核心更可替换
+第二阶段建议只聚焦两条主线：
 
-后续如果想做：
+1. 继续把 `PlayerScreen` 收薄，只保留更明确的页面入口职责
+2. 把“开发联调 UI”和“正式业务 UI”进一步分开
 
-- 本地媒体播放测试
-- mock player
-- Windows 侧统一抽象参考
+不要在这一阶段同时做：
 
-则播放器核心层应尽量只暴露稳定接口，不让页面直接依赖 Media3 细节。
+- UI 视觉重做
+- 协议扩展
+- 播放器内核替换
+- Windows 端抽象统一
 
-### 3. 为测试创造稳定入口
+### 1. 继续抽薄 `PlayerScreen`
 
-当前很多逻辑测试虽然已经有了，但页面层仍然过大，不利于继续加测试。
+当前 `PlayerScreen.kt` 虽然已经不再承担全部 UI 区块定义，但仍然保留了较多页面级 listener 映射和副作用组织。
 
-重构后更容易补的测试类型包括：
+第二阶段更合理的方向是继续把下面这些东西往外收：
+
+- `RoomWebSocketListener` 到页面状态的映射
+- authority state 应用后的页面级状态更新
+- 同步事件和页面状态之间的 reducer / translator
+- ended 上报与 drift correction 的页面装配代码
+
+目标不是把所有副作用都消灭，而是让 `PlayerScreen` 更接近：
+
+- 创建依赖
+- 持有顶层页面状态
+- 组织页面组合
+
+而不是继续承载大量“具体事件如何转换成页面状态”的细节。
+
+当前这一步已经完成了第一轮落地：
+
+- 已新增页面级同步事件映射入口 `RoomPlayerSyncEventHandler`
+- 已把 `room_state / play / pause / seek / set_playback_rate / ended / heartbeat / error`
+  到页面状态更新的映射从 `PlayerScreen` 中继续收口
+- `PlayerScreen` 中的大量 listener 分支判断已明显减少
+- `PlayerScreen` 现在更接近“页面入口 + 状态协调 + 壳层组合”
+
+### 2. 拆出开发联调 UI 和正式业务 UI 的边界
+
+当前 `RoomPlayerPageShell` 中仍然包含：
+
+- `Latest sync state`
+- `Sync log`
+- `Player event log`
+- 配置提示区
+
+这些内容对开发联调很有价值，但不应继续和正式业务页面长期绑定在一起。
+
+第二阶段应该开始把这两类页面意图区分开：
+
+- 开发联调壳层
+- 正式业务壳层
+
+这不要求立刻把正式 UI 做完，但至少要把结构准备成：
+
+- 调试区块可以整体拿掉
+- 不影响播放器核心壳层
+- 不影响会话与同步核心
+
+当前这一步已经完成了第一轮落地：
+
+- 已新增开发联调壳层 `RoomPlayerDebugShell`
+- `Latest sync state`、`Sync log`、`Player event log`、配置提示区
+  已从 `RoomPlayerPageShell` 中拆出
+- `RoomPlayerPageShell` 更接近正式业务壳层
+- 当前结构已经支持“业务壳层”和“调试壳层”分开演进
+
+### 3. 为后续业务开发创造稳定入口
+
+第二阶段完成后，后续业务开发更理想的状态应该是：
+
+- 改正式页面时，更多改页面壳层
+- 改同步算法时，更多改 `RoomSyncCoordinator`
+- 改会话流程时，更多改 `RoomSessionController`
+- 调试面板可以单独演进，不继续污染正式页面结构
+
+## 推荐的第二阶段任务拆分
+
+如果把第二阶段真正落成任务，建议拆成下面几项：
+
+1. 抽离页面级同步事件映射与状态更新入口
+2. 拆分开发联调壳层与正式业务壳层
+3. 为第二阶段边界补最小测试与文档
+
+这三项已经足够支撑第二阶段，不建议再一口气拆得更碎。
+
+当前这一步也已经完成了第一轮落地：
+
+- 已新增页面级同步事件映射相关最小单测
+- 已同步更新 Android 目录说明
+- 已同步更新播放器使用说明
+- 已同步更新重构分析文档
+
+## 第二阶段完成后的预期收益
+
+如果第二阶段完成，直接收益会是：
+
+- `PlayerScreen` 继续变薄，更接近真正的页面入口
+- 页面层和同步层之间的映射关系更清晰
+- 开发调试 UI 不再默认等于正式页面结构
+- 后面做 create room / join room / room player 正式页面时，可以复用现有核心层，而不是继续背着当前调试页面整体前进
+
+## 这一阶段之后再考虑的事情
+
+第二阶段之后，再考虑下面这些会更自然：
 
 - 房间会话控制器单测
 - 页面状态迁移测试

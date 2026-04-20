@@ -19,6 +19,7 @@
 当前目录内的关键职责：
 
 - `app/src/main/java/.../ui/player/`：播放器页面、播放器适配器、播放器事件与页面状态模型
+  当前也已经开始拆分为页面入口、页面壳层、调试壳层与播放器核心壳层
 - `app/src/main/java/.../sync/`：建房、入房、协议解码、heartbeat ack 和 join 后初始状态应用
 - `app/src/main/java/.../sync/protocol/`：Android 侧最小协议草案模型
 - `app/src/main/java/.../config/`：Android 配置注入入口
@@ -43,7 +44,7 @@ android/
 │       │   ├── player/
 │       │   └── theme/
 │       └── MainActivity.kt
-│   └── src/test/java/com/example/watch_together/sync/
+│   └── src/test/java/com/example/watch_together/
 ├── gradle/
 │   └── libs.versions.toml
 └── README.md
@@ -54,8 +55,8 @@ android/
 - `config/`：统一读取 `BuildConfig` 并生成 Android 端可直接使用的 URL
 - `sync/`：当前阶段的 Android 首个同步接入层，负责 create room、join room、房间会话控制、heartbeat ack、authority baseline 管理、drift correction、repeated join resync、控制事件出站、消息解码、`seq` 判断、倍速同步、ended-state 应用与播放器状态应用
 - `sync/protocol/`：保留与 `INT-19` 协议草案一致的 Android 本地协议模型
-- `ui/player/`：播放器页面、页面状态模型、Media3 适配器、播放器事件和调试面板
-- `src/test/.../sync/`：协议解码和 join-time state application 的最小单元测试
+- `ui/player/`：播放器页面入口、页面状态模型、页面壳层、开发联调壳层、Media3 适配器以及页面级同步事件映射入口
+- `src/test/.../sync/` 与 `src/test/.../ui/player/`：同步核心与播放器页面边界的最小单元测试
 
 当前实现使用的核心库：
 
@@ -88,3 +89,40 @@ android/
 - 已新增 `RoomSessionController`
 - 已把 create room / join / rejoin / close session / 控制事件出站 收口到统一会话入口
 - `PlayerScreen` 不再直接依赖 `RoomHttpClient` 与 `RoomWebSocketClient`
+
+当前已完成的第三步：
+
+- 已把页面壳层拆到独立的 `RoomPlayerPageShell`
+- 已把播放器核心壳层拆到独立的 `PlayerCoreShell`
+- `PlayerScreen` 现在更接近“状态 + 副作用 + 组合入口”
+- 原本堆在 `PlayerScreen.kt` 中的大量 UI 区块已迁出为独立文件
+
+当前已完成的第四步：
+
+- 已新增 `RoomPlayerSyncEventHandler`
+- 已将页面级同步事件映射与状态更新入口从 `PlayerScreen` 中继续收口
+- 已新增 `RoomPlayerDebugShell`
+- 已将开发联调面板从 `RoomPlayerPageShell` 中拆出
+- `PlayerScreen` 现在更接近“页面入口 + 状态协调 + 壳层组合”
+
+## Debug Boundary
+
+当前页面中可见的：
+
+- sync log
+- player event log
+- 最新同步状态面板
+- 配置提示区
+
+都主要用于开发联调和问题排查。
+
+后续进入正式产品化 UI 时，建议：
+
+- 仅保留用户真正需要的状态提示
+- 把更详细的同步与播放器信息收进日志或单独 debug 入口
+- 不把这些调试面板继续当成正式页面结构的一部分
+
+当前这条边界已经开始落实：
+
+- `RoomPlayerPageShell` 更偏正式业务壳层
+- `RoomPlayerDebugShell` 承接开发联调面板

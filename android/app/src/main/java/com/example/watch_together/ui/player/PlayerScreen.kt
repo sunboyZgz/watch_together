@@ -1,25 +1,5 @@
 package com.example.watch_together.ui.player
 
-import android.view.ViewGroup.LayoutParams.MATCH_PARENT
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.aspectRatio
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -28,22 +8,16 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.Player
-import androidx.media3.ui.PlayerView
 import com.example.watch_together.config.AppConfig
 import com.example.watch_together.sync.RoomSessionController
 import com.example.watch_together.sync.RoomSyncCoordinator
 import com.example.watch_together.sync.RoomSyncState
 import com.example.watch_together.sync.RoomWebSocketListener
-import com.example.watch_together.sync.isNewerThan
 import com.example.watch_together.ui.theme.Watch_togetherTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -57,6 +31,7 @@ fun PlayerScreen(modifier: Modifier = Modifier) {
     val adapter = rememberPlayerAdapter()
     val roomSessionController = remember { RoomSessionController() }
     val roomSyncCoordinator = remember(adapter) { RoomSyncCoordinator(adapter) }
+    val syncEventHandler = remember(roomSyncCoordinator) { RoomPlayerSyncEventHandler(roomSyncCoordinator) }
     val coroutineScope = rememberCoroutineScope()
 
     val sampleUrl = remember { AppConfig.sampleHlsUrl() }
@@ -67,6 +42,7 @@ fun PlayerScreen(modifier: Modifier = Modifier) {
     val syncLogs = remember { mutableStateListOf<String>() }
 
     var uiState by remember { mutableStateOf(RoomPlayerUiState()) }
+    val currentUiState by rememberUpdatedState(uiState)
 
     val isHostController = remember(uiState.activeUserId, uiState.latestSyncState) {
         uiState.activeUserId != null && uiState.latestSyncState?.hostUserId == uiState.activeUserId
@@ -142,29 +118,14 @@ fun PlayerScreen(modifier: Modifier = Modifier) {
         }
     }
 
-    fun applyAuthoritativeState(
-        newState: RoomSyncState,
-        status: SyncStatus,
-        reason: String
-    ) {
-        if (!newState.isNewerThan(uiState.latestSyncState)) {
-            appendLog(syncLogs, "Ignored stale $reason seq=${newState.seq}")
-            return
+    fun applySyncEventResult(result: RoomPlayerSyncEventResult) {
+        uiState = result.uiState
+        result.logs.forEach { line ->
+            appendLog(syncLogs, line)
         }
-
-        updateUiState { current ->
-            current.copy(
-                currentRoomId = newState.roomId,
-                joinRoomInput = newState.roomId,
-                latestSyncState = newState,
-                syncStatus = status,
-                player = current.player.copy(playbackSpeed = newState.playbackRate.toFloat())
-            )
-        }
-        appendLog(syncLogs, "Applied $reason seq=${newState.seq} roomId=${newState.roomId}")
     }
 
-    val syncListener = remember(roomSyncCoordinator, latestSyncState) {
+    val syncListener = remember(syncEventHandler) {
         object : RoomWebSocketListener {
             override fun onLog(message: String) {
                 coroutineScope.launch {
@@ -174,53 +135,25 @@ fun PlayerScreen(modifier: Modifier = Modifier) {
 
             override fun onRoomState(payload: RoomSyncState) {
                 coroutineScope.launch {
-                    val appliedState = roomSyncCoordinator.applyInitialState(payload)
-                    applyAuthoritativeState(appliedState, SyncStatus.RoomStateApplied, "room_state")
+                    applySyncEventResult(syncEventHandler.onRoomState(currentUiState, payload))
                 }
             }
 
             override fun onPlay(payload: com.example.watch_together.sync.protocol.PlayPayload) {
                 coroutineScope.launch {
-                    val previous = latestSyncState ?: run {
-                        appendLog(syncLogs, "Ignored play before room_state")
-                        return@launch
-                    }
-                    if (payload.seq <= previous.seq) {
-                        appendLog(syncLogs, "Ignored stale play seq=${payload.seq}")
-                        return@launch
-                    }
-                    val appliedState = roomSyncCoordinator.applyPlayEvent(previous, payload)
-                    applyAuthoritativeState(appliedState, SyncStatus.PlayApplied, "play")
+                    applySyncEventResult(syncEventHandler.onPlay(currentUiState, payload))
                 }
             }
 
             override fun onPause(payload: com.example.watch_together.sync.protocol.PausePayload) {
                 coroutineScope.launch {
-                    val previous = latestSyncState ?: run {
-                        appendLog(syncLogs, "Ignored pause before room_state")
-                        return@launch
-                    }
-                    if (payload.seq <= previous.seq) {
-                        appendLog(syncLogs, "Ignored stale pause seq=${payload.seq}")
-                        return@launch
-                    }
-                    val appliedState = roomSyncCoordinator.applyPauseEvent(previous, payload)
-                    applyAuthoritativeState(appliedState, SyncStatus.PauseApplied, "pause")
+                    applySyncEventResult(syncEventHandler.onPause(currentUiState, payload))
                 }
             }
 
             override fun onSeek(payload: com.example.watch_together.sync.protocol.SeekPayload) {
                 coroutineScope.launch {
-                    val previous = latestSyncState ?: run {
-                        appendLog(syncLogs, "Ignored seek before room_state")
-                        return@launch
-                    }
-                    if (payload.seq <= previous.seq) {
-                        appendLog(syncLogs, "Ignored stale seek seq=${payload.seq}")
-                        return@launch
-                    }
-                    val appliedState = roomSyncCoordinator.applySeekEvent(previous, payload)
-                    applyAuthoritativeState(appliedState, SyncStatus.SeekApplied, "seek")
+                    applySyncEventResult(syncEventHandler.onSeek(currentUiState, payload))
                 }
             }
 
@@ -228,57 +161,25 @@ fun PlayerScreen(modifier: Modifier = Modifier) {
                 payload: com.example.watch_together.sync.protocol.SetPlaybackRatePayload
             ) {
                 coroutineScope.launch {
-                    appendLog(
-                        syncLogs,
-                        "received set_playback_rate rate=${payload.playbackRate} seq=${payload.seq} position=${payload.positionMs}"
-                    )
-                    val previous = latestSyncState ?: run {
-                        appendLog(syncLogs, "Ignored playback rate before room_state")
-                        return@launch
-                    }
-                    if (payload.seq <= previous.seq) {
-                        appendLog(syncLogs, "Ignored stale playback rate seq=${payload.seq}")
-                        return@launch
-                    }
-                    val appliedState = roomSyncCoordinator.applyPlaybackRateEvent(previous, payload)
-                    applyAuthoritativeState(
-                        appliedState,
-                        SyncStatus.PlaybackRateApplied,
-                        "set_playback_rate"
-                    )
+                    applySyncEventResult(syncEventHandler.onPlaybackRate(currentUiState, payload))
                 }
             }
 
             override fun onEnded(payload: com.example.watch_together.sync.protocol.EndedPayload) {
                 coroutineScope.launch {
-                    appendLog(
-                        syncLogs,
-                        "received ended seq=${payload.seq} position=${payload.positionMs}"
-                    )
-                    val previous = latestSyncState ?: run {
-                        appendLog(syncLogs, "Ignored ended before room_state")
-                        return@launch
-                    }
-                    if (payload.seq <= previous.seq) {
-                        appendLog(syncLogs, "Ignored stale ended seq=${payload.seq}")
-                        return@launch
-                    }
-                    val appliedState = roomSyncCoordinator.applyEndedEvent(previous, payload)
-                    applyAuthoritativeState(appliedState, SyncStatus.EndedApplied, "ended")
+                    applySyncEventResult(syncEventHandler.onEnded(currentUiState, payload))
                 }
             }
 
             override fun onHeartbeat(serverTimeMs: Long) {
                 coroutineScope.launch {
-                    updateUiState { current -> current.copy(syncStatus = SyncStatus.Connected) }
-                    appendLog(syncLogs, "heartbeat acknowledged serverTimeMs=$serverTimeMs")
+                    applySyncEventResult(syncEventHandler.onHeartbeat(currentUiState, serverTimeMs))
                 }
             }
 
             override fun onError(message: String) {
                 coroutineScope.launch {
-                    updateUiState { current -> current.copy(syncStatus = SyncStatus.SyncFailed) }
-                    appendLog(syncLogs, "Sync error: $message")
+                    applySyncEventResult(syncEventHandler.onError(currentUiState, message))
                 }
             }
         }
@@ -469,68 +370,44 @@ fun PlayerScreen(modifier: Modifier = Modifier) {
         sendEndedSync()
     }
 
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
-    ) {
-        PlayerStatusHeader(
-            sampleUrl = sampleUrl,
-            currentRoomId = uiState.currentRoomId,
-            syncStatus = uiState.syncStatus,
-            activeUserId = uiState.activeUserId,
-            isHostController = isHostController
-        )
-        JoinSyncActionsCard(
-            hostUserId = hostUserId,
-            viewerUserId = viewerUserId,
-            currentRoomId = uiState.currentRoomId,
-            syncStatus = uiState.syncStatus,
-            joinRoomInput = uiState.joinRoomInput,
-            onJoinRoomInputChange = { value ->
-                updateUiState { current -> current.copy(joinRoomInput = value) }
-            },
-            onCreateAndJoinAsHost = ::createAndJoinAsHost,
-            onJoinAsViewer = ::joinAsViewer,
-            onRejoinCurrentUser = ::rejoinCurrentUser,
-            canRejoinCurrentUser = uiState.activeUserId != null && uiState.currentRoomId != null
-        )
-        PlayerViewport(adapter = adapter)
-        PlayerControls(
-            adapter = adapter,
-            sampleUrl = sampleUrl,
-            currentPosition = playbackSnapshot.currentPosition,
-            duration = playbackSnapshot.duration,
-            isPlaying = playbackSnapshot.isPlaying,
-            playbackSpeed = playbackSnapshot.playbackSpeed,
-            isHostController = isHostController,
-            isJoinedToRoom = uiState.isJoinedToRoom,
-            onPlaySync = ::sendPlay,
-            onPauseSync = ::sendPause,
-            onSeekSync = ::sendSeek,
-            onPlaybackSpeedChange = { speed ->
-                if (isHostController && uiState.latestSyncState != null) {
-                    appendLog(syncLogs, "playbackRate click path=sync rate=${speed}x")
-                    sendPlaybackRateSync(speed)
-                } else {
-                    appendLog(
-                        syncLogs,
-                        "playbackRate click path=local rate=${speed}x host=$isHostController joined=${uiState.latestSyncState != null}"
-                    )
-                    updateUiState { current ->
-                        current.copy(player = current.player.copy(playbackSpeed = speed))
-                    }
-                    adapter.setPlaybackSpeed(speed)
+    RoomPlayerPageShell(
+        modifier = modifier,
+        sampleUrl = sampleUrl,
+        hostUserId = hostUserId,
+        viewerUserId = viewerUserId,
+        uiState = uiState,
+        adapter = adapter,
+        isHostController = isHostController,
+        onJoinRoomInputChange = { value ->
+            updateUiState { current -> current.copy(joinRoomInput = value) }
+        },
+        onCreateAndJoinAsHost = ::createAndJoinAsHost,
+        onJoinAsViewer = ::joinAsViewer,
+        onRejoinCurrentUser = ::rejoinCurrentUser,
+        onPlaySync = ::sendPlay,
+        onPauseSync = ::sendPause,
+        onSeekSync = ::sendSeek,
+        onPlaybackSpeedChange = { speed ->
+            if (isHostController && uiState.latestSyncState != null) {
+                appendLog(syncLogs, "playbackRate click path=sync rate=${speed}x")
+                sendPlaybackRateSync(speed)
+            } else {
+                appendLog(
+                    syncLogs,
+                    "playbackRate click path=local rate=${speed}x host=$isHostController joined=${uiState.latestSyncState != null}"
+                )
+                updateUiState { current ->
+                    current.copy(player = current.player.copy(playbackSpeed = speed))
                 }
+                adapter.setPlaybackSpeed(speed)
             }
-        )
-        SyncStatePanel(latestSyncState = uiState.latestSyncState)
-        SyncDebugPanel(syncLogs = syncLogs)
-        PlayerEventDebugPanel(eventLogs = playerEventLogs)
-        ConfigInjectionHint()
-    }
+        }
+    )
+    RoomPlayerDebugShell(
+        latestSyncState = uiState.latestSyncState,
+        syncLogs = syncLogs,
+        playerEventLogs = playerEventLogs
+    )
 }
 
 @Composable
@@ -545,413 +422,6 @@ private fun rememberPlayerAdapter(): PlayerAdapter {
     }
 
     return adapter
-}
-
-@Composable
-private fun PlayerStatusHeader(
-    sampleUrl: String,
-    currentRoomId: String?,
-    syncStatus: SyncStatus,
-    activeUserId: String?,
-    isHostController: Boolean
-) {
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Text(
-                text = "watch_together",
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.SemiBold
-            )
-            Spacer(modifier = Modifier.height(4.dp))
-            Text(
-                text = "Android control sync validation",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(
-                text = "Sample HLS URL: $sampleUrl",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Text(
-                text = "Current room: ${currentRoomId ?: "(not joined yet)"}",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Text(
-                text = "Active user: ${activeUserId ?: "(none)"}",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Text(
-                text = "Control mode: ${if (isHostController) "host sync" else "local / viewer"}",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Text(
-                text = "Sync status: ${syncStatus.label}",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
-    }
-}
-
-@Composable
-private fun JoinSyncActionsCard(
-    hostUserId: String,
-    viewerUserId: String,
-    currentRoomId: String?,
-    syncStatus: SyncStatus,
-    joinRoomInput: String,
-    onJoinRoomInputChange: (String) -> Unit,
-    onCreateAndJoinAsHost: () -> Unit,
-    onJoinAsViewer: () -> Unit,
-    onRejoinCurrentUser: () -> Unit,
-    canRejoinCurrentUser: Boolean
-) {
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            Text(
-                text = "Room sync actions",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Medium
-            )
-            Text(
-                text = "Host user: $hostUserId",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Text(
-                text = "Viewer user: $viewerUserId",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Text(
-                text = "Current room: ${currentRoomId ?: "(none)"} · ${syncStatus.label}",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            OutlinedTextField(
-                value = joinRoomInput,
-                onValueChange = onJoinRoomInputChange,
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text("Room ID") },
-                singleLine = true
-            )
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = onCreateAndJoinAsHost) {
-                    Text("Create + Join as host")
-                }
-                OutlinedButton(
-                    onClick = onJoinAsViewer,
-                    enabled = joinRoomInput.isNotBlank()
-                ) {
-                    Text("Join as viewer")
-                }
-                OutlinedButton(
-                    onClick = onRejoinCurrentUser,
-                    enabled = canRejoinCurrentUser
-                ) {
-                    Text("Rejoin current user")
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun PlayerViewport(adapter: PlayerAdapter) {
-    Surface(
-        modifier = Modifier
-            .fillMaxWidth()
-            .aspectRatio(16f / 9f),
-        tonalElevation = 4.dp,
-        shape = MaterialTheme.shapes.large
-    ) {
-        AndroidView(
-            factory = { context ->
-                PlayerView(context).apply {
-                    layoutParams = android.view.ViewGroup.LayoutParams(MATCH_PARENT, MATCH_PARENT)
-                    useController = true
-                    adapter.attach(this)
-                }
-            },
-            modifier = Modifier
-                .fillMaxSize()
-                .background(
-                    brush = Brush.linearGradient(
-                        listOf(
-                            MaterialTheme.colorScheme.primary.copy(alpha = 0.18f),
-                            MaterialTheme.colorScheme.secondary.copy(alpha = 0.12f),
-                            Color.Black.copy(alpha = 0.9f)
-                        )
-                    )
-                ),
-            update = { playerView ->
-                adapter.attach(playerView)
-            }
-        )
-    }
-}
-
-@Composable
-private fun PlayerControls(
-    adapter: PlayerAdapter,
-    sampleUrl: String,
-    currentPosition: Long,
-    duration: Long,
-    isPlaying: Boolean,
-    playbackSpeed: Float,
-    isHostController: Boolean,
-    isJoinedToRoom: Boolean,
-    onPlaySync: () -> Unit,
-    onPauseSync: () -> Unit,
-    onSeekSync: (Long) -> Unit,
-    onPlaybackSpeedChange: (Float) -> Unit
-) {
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            Text(
-                text = "Player controls",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Medium
-            )
-            Text(
-                text = "Current position: ${formatMs(currentPosition)} / ${formatMs(duration)}",
-                style = MaterialTheme.typography.bodyMedium
-            )
-            Text(
-                text = "Playing: $isPlaying · Speed: ${playbackSpeed}x",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Text(
-                text = when {
-                    isHostController -> "Buttons will send sync events to the server."
-                    isJoinedToRoom -> "Viewer mode: incoming sync is applied, local control stays local."
-                    else -> "Local-only mode until you join a room."
-                },
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(onClick = { adapter.load(sampleUrl) }) {
-                        Text("Load sample")
-                    }
-                    Button(onClick = {
-                        if (isHostController) {
-                            onPlaySync()
-                        } else {
-                            adapter.play()
-                        }
-                    }) {
-                        Text(if (isHostController) "Play sync" else "Play")
-                    }
-                    OutlinedButton(onClick = {
-                        if (isHostController) {
-                            onPauseSync()
-                        } else {
-                            adapter.pause()
-                        }
-                    }) {
-                        Text(if (isHostController) "Pause sync" else "Pause")
-                    }
-                }
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(onClick = {
-                        val target = (currentPosition - 10_000L).coerceAtLeast(0L)
-                        if (isHostController) {
-                            onSeekSync(target)
-                        } else {
-                            adapter.seekTo(target)
-                        }
-                    }) {
-                        Text(if (isHostController) "-10s sync" else "-10s")
-                    }
-                    OutlinedButton(onClick = {
-                        val safeDuration = if (duration > 0L) duration else currentPosition + 10_000L
-                        val target = (currentPosition + 10_000L).coerceAtMost(safeDuration)
-                        if (isHostController) {
-                            onSeekSync(target)
-                        } else {
-                            adapter.seekTo(target)
-                        }
-                    }) {
-                        Text(if (isHostController) "+10s sync" else "+10s")
-                    }
-                }
-            }
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf(
-                    listOf(0.75f, 1.0f, 1.25f),
-                    listOf(1.5f, 2.0f)
-                ).forEach { rowSpeeds ->
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        rowSpeeds.forEach { speed ->
-                            val selected = speed == playbackSpeed
-                            val buttonText = if (selected) "${speed}x ✓" else "${speed}x"
-                            val onClick = { onPlaybackSpeedChange(speed) }
-                            if (selected) {
-                                Button(onClick = onClick) {
-                                    Text(buttonText)
-                                }
-                            } else {
-                                OutlinedButton(onClick = onClick) {
-                                    Text(buttonText)
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun SyncStatePanel(latestSyncState: RoomSyncState?) {
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp)
-        ) {
-            Text(
-                text = "Latest sync state",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Medium
-            )
-            if (latestSyncState == null) {
-                Text(
-                    text = "No synced state applied yet.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            } else {
-                Text("roomId=${latestSyncState.roomId}", style = MaterialTheme.typography.bodySmall)
-                Text("mediaId=${latestSyncState.mediaId}", style = MaterialTheme.typography.bodySmall)
-                Text("hostUserId=${latestSyncState.hostUserId}", style = MaterialTheme.typography.bodySmall)
-                Text("paused=${latestSyncState.paused}", style = MaterialTheme.typography.bodySmall)
-                Text("positionMs=${latestSyncState.positionMs}", style = MaterialTheme.typography.bodySmall)
-                Text(
-                    "playbackRate=${latestSyncState.playbackRate} · seq=${latestSyncState.seq}",
-                    style = MaterialTheme.typography.bodySmall
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun SyncDebugPanel(syncLogs: List<String>) {
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
-            Text(
-                text = "Sync log",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Medium
-            )
-            if (syncLogs.isEmpty()) {
-                Text(
-                    text = "No sync events yet.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            } else {
-                syncLogs.forEach { line ->
-                    Text(
-                        text = line,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun ConfigInjectionHint() {
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp)
-        ) {
-            Text(
-                text = "Config injection entry",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Medium
-            )
-            Text(text = "APP_ENV=${AppConfig.appEnv}", style = MaterialTheme.typography.bodyMedium)
-            Text(
-                text = "API_BASE_URL=${AppConfig.apiBaseUrl}",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Text(
-                text = "WS_BASE_URL=${AppConfig.wsBaseUrl}",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Text(
-                text = "MEDIA_BASE_URL=${AppConfig.mediaBaseUrl}",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Text(
-                text = "MEDIA_DEFAULT_ID=${AppConfig.mediaDefaultId.ifBlank { "(empty)" }}",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Text(
-                text = "DEBUG_SYNC=${AppConfig.debugSync}",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
-    }
-}
-
-@Composable
-private fun PlayerEventDebugPanel(eventLogs: List<String>) {
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
-            Text(
-                text = "Player event log",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Medium
-            )
-            if (eventLogs.isEmpty()) {
-                Text(
-                    text = "No events emitted yet.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            } else {
-                eventLogs.forEach { line ->
-                    Text(
-                        text = line,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
-        }
-    }
 }
 
 @Preview(showBackground = true, showSystemUi = true)
@@ -971,12 +441,4 @@ private fun appendLog(
     while (logs.size > maxSize) {
         logs.removeAt(logs.lastIndex)
     }
-}
-
-private fun formatMs(value: Long): String {
-    if (value <= 0L) return "00:00"
-    val totalSeconds = value / 1000
-    val minutes = totalSeconds / 60
-    val seconds = totalSeconds % 60
-    return "%02d:%02d".format(minutes, seconds)
 }

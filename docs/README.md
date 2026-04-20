@@ -15,6 +15,7 @@
 
 - [架构.png](./架构.png): 当前架构图静态资源
 - [android-player-refactor-analysis.md](./android-player-refactor-analysis.md): Android 播放器业务与同步核心逻辑分离的重构分析
+- [android-player-usage.md](./android-player-usage.md): 当前 Android 播放器的层级关系、职责边界和使用方式
 - [contributing.md](./contributing.md): 当前仓库的基础工作规约
 - [core-sync-technical-notes.md](./core-sync-technical-notes.md): 核心同步功能中的关键技术点记录
 - [environment-config.md](./environment-config.md): 当前阶段环境参数清单与归类
