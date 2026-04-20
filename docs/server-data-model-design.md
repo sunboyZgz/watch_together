@@ -1,0 +1,438 @@
+# 服务端业务对象与 PostgreSQL 数据边界设计
+
+> 目标：基于当前已经落地的房间服务实现，明确哪些对象属于业务主数据、哪些属于运行时同步对象，以及这些对象未来如何映射到 PostgreSQL 表结构。
+
+## 当前结论
+
+当前阶段已经确定：
+
+- 数据库选择：`PostgreSQL`
+- 本地 PostgreSQL 初始化方式：`server/compose.yaml + docker compose`
+- 当前服务端同步主链路继续以**内存运行时对象**驱动
+- 用户、房间、成员关系、媒体库等**业务主数据**进入 PostgreSQL
+- authority timeline、websocket 连接、heartbeat 临时状态等**高频运行时状态**继续留在内存
+
+这意味着接下来不是把当前 `Room / RoomManager / ClientConnection` 直接“硬落库”，而是要先建立一套稳定的数据边界。
+
+---
+
+## 1. 为什么不能直接把当前运行时对象映射成数据库表
+
+当前服务端已经有这些核心运行时对象：
+
+- [room.go](/Users/sunboy/Documents/my-projects/watch_together/server/internal/room/room.go)
+- [manager.go](/Users/sunboy/Documents/my-projects/watch_together/server/internal/room/manager.go)
+- [client.go](/Users/sunboy/Documents/my-projects/watch_together/server/internal/room/client.go)
+
+它们现在负责的是：
+
+- 房间内当前在线连接
+- host transfer
+- heartbeat timeout 后的断连清理
+- authority timeline
+- grace period 生命周期
+- repeated join 的单有效连接收敛
+
+这些状态有几个共同特点：
+
+- 高频变化
+- 强依赖当前内存时间线
+- 直接服务于 WebSocket 实时同步
+- 不适合现在就变成数据库里的“事实来源”
+
+所以当前阶段更合理的做法是：
+
+- **业务主数据**：持久化
+- **运行时同步状态**：保留在内存
+
+---
+
+## 2. 业务对象分层
+
+### 2.1 持久化业务对象
+
+这些对象建议进入 PostgreSQL。
+
+#### `User`
+
+当前含义：
+
+- 一个进入系统的用户身份
+
+当前阶段用途：
+
+- 作为 `Room.host_user_id` 的引用对象
+- 作为 `RoomMember.user_id` 的引用对象
+- 作为后续昵称、用户页、历史房间等功能的基础
+
+建议字段：
+
+- `id`
+- `nickname`
+- `created_at`
+- `updated_at`
+
+当前说明：
+
+- 当前还没有完整账号体系
+- 但数据库里应该先有 `users` 这个主实体
+- 后续匿名、OAuth、手机号、正式账户都可以逐步接到这层
+
+#### `MediaItem`
+
+当前含义：
+
+- 可被房间选择和播放的视频内容
+
+当前阶段用途：
+
+- 为 `02A 选择视频` 提供内容来源
+- 为房间创建时的 `media_item_id` 提供合法引用
+
+建议字段：
+
+- `id`
+- `title`
+- `subtitle`
+- `description`
+- `cover_url`
+- `media_url`
+- `category`
+- `tags`
+- `duration_ms`
+- `status`
+- `created_at`
+- `updated_at`
+
+当前说明：
+
+- `media_url` 先指向 HLS 入口
+- `tags` 和 `category` 直接服务搜索与标签筛选
+- 当前阶段不需要先引入复杂的 CMS 设计
+
+#### `Room`
+
+当前含义：
+
+- 一个放映室，是服务端的核心业务主实体
+
+当前阶段用途：
+
+- 记录房间主数据
+- 作为成员关系和媒体选择的主引用对象
+- 作为后续生命周期状态的业务事实来源
+
+建议字段：
+
+- `id`
+- `room_code`
+- `host_user_id`
+- `media_item_id`
+- `status`
+- `created_at`
+- `updated_at`
+- `last_empty_at`
+- `destroy_after`
+
+当前说明：
+
+- `status` 建议先支持：`active / grace_period / destroyed`
+- `host_user_id` 是当前业务语义里的 host
+- grace period 相关字段要能支撑“最后一个成员离开后保留 2 分钟”
+
+#### `RoomMember`
+
+当前含义：
+
+- 用户和房间之间的成员关系
+
+当前阶段用途：
+
+- 表达谁属于这个房间
+- 区分 host / member 角色
+- 支撑 repeated join / reconnect 的业务恢复语义
+
+建议字段：
+
+- `id`
+- `room_id`
+- `user_id`
+- `role`
+- `joined_at`
+- `left_at`
+- `is_active`
+
+当前说明：
+
+- 当前角色先收敛为：`host / member`
+- 这里记录的是业务成员关系，不是 websocket 连接
+- repeated join 时应该优先恢复已有 active 成员，而不是不断新插入记录
+
+---
+
+### 2.2 运行时同步对象
+
+这些对象当前继续以内存存在，不建议直接设计成第一版主表。
+
+#### `RoomRuntimeState`
+
+当前对应关系：
+
+- `room.Room.state`
+- `room.Room.authorityAt`
+
+当前内容：
+
+- `room_id`
+- `seq`
+- `position_ms`
+- `paused`
+- `ended`
+- `playback_rate`
+- `authority_updated_at`
+
+当前说明：
+
+- 这部分是 authority timeline
+- 当前最适合继续留在内存
+- 它服务的是实时同步，不是长期事实存储
+
+#### `ClientConnection`
+
+当前对应关系：
+
+- `room.ClientConnection`
+
+当前内容：
+
+- `connection_id`
+- `room_id`
+- `user_id`
+- `connected_at`
+- `last_heartbeat_at`
+
+当前说明：
+
+- 这是 websocket 运行时连接
+- 不能等价于业务成员关系
+- 当前阶段不建议落为正式业务表
+
+#### `RoomManagerLifecycleState`
+
+当前对应关系：
+
+- `room.Manager.rooms`
+- `room.Manager.emptySince`
+
+当前内容：
+
+- 房间注册表
+- 房间 empty grace period 计时
+
+当前说明：
+
+- 这部分当前也更适合留在内存
+- 后续如果要做服务重启恢复，再考虑是否需要部分持久化
+
+---
+
+## 3. PostgreSQL 持久化边界
+
+### 当前建议落库
+
+第一版建议持久化：
+
+- `users`
+- `media_items`
+- `rooms`
+- `room_members`
+
+原因：
+
+- 这些对象具备明确业务含义
+- 需要稳定主键和关系约束
+- 会直接被页面业务、房间恢复和媒体选择流程复用
+
+### 当前不建议落库
+
+第一版不建议持久化：
+
+- websocket 连接
+- heartbeat 临时状态
+- authority timeline 的实时推进值
+- drift correction 的本地/远端观测值
+
+原因：
+
+- 这些状态变化频率高
+- 生命周期短
+- 当前主要服务实时同步
+- 过早落库会让同步主链路复杂化
+
+---
+
+## 4. 推荐的表关系
+
+### 4.1 主关系
+
+- `users (1) -> (n) room_members`
+- `rooms (1) -> (n) room_members`
+- `media_items (1) -> (n) rooms`
+- `users (1) -> (n) rooms(host_user_id)`
+
+### 4.2 含义解释
+
+- `Room` 表达放映室本身
+- `RoomMember` 表达某个用户是否在这个放映室里
+- `Room.host_user_id` 表达当前业务 host
+- `Room.media_item_id` 表达当前房间选中了哪部视频
+
+### 4.3 关键约束
+
+建议第一版至少明确这些业务约束：
+
+- 一个房间同一时刻只有一个 `host_user_id`
+- 一个用户在同一房间内最多保留一个 active 成员关系
+- repeated join 优先恢复已有 active 成员关系
+- former host 在 host transfer 后重连时回到普通成员
+
+---
+
+## 5. 第一版表草案
+
+### `users`
+
+建议字段：
+
+- `id uuid primary key`
+- `nickname text not null`
+- `created_at timestamptz not null`
+- `updated_at timestamptz not null`
+
+### `media_items`
+
+建议字段：
+
+- `id uuid primary key`
+- `title text not null`
+- `subtitle text null`
+- `description text null`
+- `cover_url text null`
+- `media_url text not null`
+- `category text null`
+- `tags jsonb not null default '[]'`
+- `duration_ms bigint null`
+- `status text not null`
+- `created_at timestamptz not null`
+- `updated_at timestamptz not null`
+
+说明：
+
+- `tags` 用 `jsonb` 足够支撑当前标签筛选场景
+- 后续如果筛选逻辑变复杂，再考虑拆标签映射表
+
+### `rooms`
+
+建议字段：
+
+- `id uuid primary key`
+- `room_code text unique not null`
+- `host_user_id uuid not null references users(id)`
+- `media_item_id uuid not null references media_items(id)`
+- `status text not null`
+- `created_at timestamptz not null`
+- `updated_at timestamptz not null`
+- `last_empty_at timestamptz null`
+- `destroy_after timestamptz null`
+
+说明：
+
+- `destroy_after` 可以直接支持 grace period 清理逻辑
+- 当前阶段不急着引入更多房间统计字段
+
+### `room_members`
+
+建议字段：
+
+- `id uuid primary key`
+- `room_id uuid not null references rooms(id)`
+- `user_id uuid not null references users(id)`
+- `role text not null`
+- `joined_at timestamptz not null`
+- `left_at timestamptz null`
+- `is_active boolean not null default true`
+
+说明：
+
+- `left_at` 和 `is_active` 一起表达历史成员关系与当前成员关系
+- 未来可以加部分唯一索引，确保同一房间同一用户最多一个 active 记录
+
+---
+
+## 6. 当前不进入第一版表的设计
+
+下面这些内容，当前明确不进入第一版 schema：
+
+- `room_runtime_state`
+- `client_connections`
+- `heartbeat_events`
+- `drift_correction_history`
+- `room_events`
+
+理由：
+
+- 现在还没有强到需要做事件溯源
+- 运行时同步主链路已经能在内存里工作
+- 当前优先目标是建立主数据边界，而不是提前把所有运行时痕迹落库
+
+---
+
+## 7. 推荐任务拆分
+
+基于这份设计，下一步更适合拆成以下几类任务：
+
+### A. 设计与边界
+
+- 明确 PostgreSQL 为当前服务端数据库
+- 固化持久化对象与运行时对象边界
+- 固化第一版表关系与关键约束
+
+### B. Schema 与 Migration
+
+- 在 `server/` 内引入 SQL-first migration 机制
+- 建立 `users / media_items / rooms / room_members` 第一版 schema
+- 准备本地开发数据库初始化流程
+
+当前其中第一步已经具备基础设施：
+
+- `server/compose.yaml`
+- `server/migrations/`
+- `server/scripts/new_migration.sh`
+- `server/scripts/migrate.sh`
+- `server/Makefile`
+
+当前本地 PostgreSQL 初始化也已经有统一入口：
+
+- `cd server && docker compose up -d`
+- 默认数据库：`anime_watch_dev`
+- 默认连接串：`postgres://app:app@127.0.0.1:5432/anime_watch_dev?sslmode=disable`
+
+接下来可以直接进入 schema 与本地 PostgreSQL 初始化的实现阶段
+
+### C. 服务端接入
+
+- 先接入媒体库查询
+- 再接入建房时的数据库读写
+- 房间运行时同步逻辑继续保留内存实现
+
+---
+
+## 8. 当前建议
+
+当前最合理的推进顺序是：
+
+1. 先固化这份数据边界设计
+2. 再补一组 Linear 任务
+3. 再做 `server/` 下的第一版 PostgreSQL schema 和 migration 机制
+
+这样可以避免后面一边改 schema、一边还在讨论“哪些该落库、哪些不该落库”。

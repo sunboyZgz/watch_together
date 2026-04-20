@@ -4,15 +4,22 @@
 
 ## 当前分层
 
+当前应用入口已经不再直接从 `PlayerScreen` 开始，而是先经过 `pages/` 下的业务页面层。
+
 当前播放器相关代码可以按 4 层来理解：
 
-1. 页面入口层
-2. 页面壳层
-3. 调试壳层
-4. 播放器核心壳层与同步核心
+1. 业务页面入口层
+2. 页面入口层
+3. 页面壳层
+4. 调试壳层
+5. 播放器核心壳层与同步核心
 
 对应文件如下：
 
+- 业务页面入口层：
+  [WatchTogetherApp.kt](/Users/sunboy/Documents/my-projects/watch_together/android/app/src/main/java/com/example/watch_together/pages/WatchTogetherApp.kt),
+  [LoginPage.kt](/Users/sunboy/Documents/my-projects/watch_together/android/app/src/main/java/com/example/watch_together/pages/login/LoginPage.kt),
+  [LoginDialog.kt](/Users/sunboy/Documents/my-projects/watch_together/android/app/src/main/java/com/example/watch_together/pages/login/LoginDialog.kt)
 - 页面入口层：
   [PlayerScreen.kt](/Users/sunboy/Documents/my-projects/watch_together/android/app/src/main/java/com/example/watch_together/ui/player/PlayerScreen.kt)
 - 页面壳层：
@@ -35,7 +42,18 @@
 
 ## 各层职责
 
-### 1. `PlayerScreen`
+### 1. `WatchTogetherApp` / `LoginPage` / `LoginDialog`
+
+这一层是业务页面入口层，负责：
+
+- 当前应用的页面切换入口
+- `01 登录页` 的视觉与交互
+- 把轻量登录弹窗从页面中抽成独立组件
+- 在正式 `02 首页` 尚未落地前，把登录成功后的用户先带入现有播放器页面
+
+这一层不应该直接承担同步算法，也不应该直接操作房间协议细节。
+
+### 2. `PlayerScreen`
 
 `PlayerScreen` 是当前页面的组合入口，主要负责：
 
@@ -56,7 +74,7 @@
 
 这一层不应该继续堆太多纯 UI 区块。
 
-### 2. `RoomPlayerPageShell`
+### 3. `RoomPlayerPageShell`
 
 `RoomPlayerPageShell` 是页面壳层，负责把页面拼出来。
 
@@ -93,7 +111,7 @@
 
 而不是继续作为常驻 UI 暴露给最终用户。
 
-### 3. `RoomPlayerDebugShell`
+### 4. `RoomPlayerDebugShell`
 
 `RoomPlayerDebugShell` 是开发联调壳层，负责承接当前这些调试区块：
 
@@ -112,7 +130,7 @@
 
 优先改这一层。
 
-### 4. `PlayerCoreShell`
+### 5. `PlayerCoreShell`
 
 `PlayerCoreShell` 是播放器核心壳层，负责播放器本体附近的 UI 组合。
 
@@ -130,7 +148,7 @@
 
 如果后面要改播放器样式、控制栏布局、按钮排布，优先改这一层。
 
-### 5. `RoomPlayerUiState`
+### 6. `RoomPlayerUiState`
 
 `RoomPlayerUiState` 是页面统一状态入口。
 
@@ -147,7 +165,7 @@
 
 如果后面要新增页面级状态，优先判断是否应该加到这里，而不是继续在 `PlayerScreen` 里散落新的 `mutableStateOf`。
 
-### 6. `RoomPlayerSyncEventHandler`
+### 7. `RoomPlayerSyncEventHandler`
 
 `RoomPlayerSyncEventHandler` 是页面级同步事件映射入口。
 
@@ -168,7 +186,7 @@
 
 优先改这一层。
 
-### 7. `RoomSessionController`
+### 8. `RoomSessionController`
 
 `RoomSessionController` 是房间会话入口层。
 
@@ -185,7 +203,7 @@
 
 如果后面要扩房间会话能力，优先从这一层扩，而不是让页面直接调用 `RoomHttpClient` 或 `RoomWebSocketClient`。
 
-### 8. `RoomSyncCoordinator`
+### 9. `RoomSyncCoordinator`
 
 `RoomSyncCoordinator` 是同步协调层。
 
@@ -198,7 +216,7 @@
 
 如果后面要修改同步算法、权威状态应用、drift correction 规则，优先改这一层。
 
-### 9. `PlayerAdapter` / `AndroidExoPlayerAdapter`
+### 10. `PlayerAdapter` / `AndroidExoPlayerAdapter`
 
 这是播放器核心能力层。
 
@@ -217,6 +235,17 @@
 ## 当前组合关系
 
 当前组合链路可以概括成：
+
+`WatchTogetherApp`
+-> `LoginPage`
+-> `LoginDialog`
+-> `PlayerScreen`
+-> `RoomPlayerPageShell`
+-> `RoomPlayerDebugShell`
+-> `PlayerCoreShell`
+-> `PlayerAdapter`
+
+当前真正进入播放器后的链路是：
 
 `PlayerScreen`
 -> `RoomPlayerPageShell`
@@ -251,6 +280,7 @@
 
 这意味着：
 
+- 业务页面可以先独立推进，而不必先改播放器内部
 - 页面壳层不直接做网络和同步算法
 - 调试壳层不默认等同于正式页面结构
 - 播放器核心壳层不直接做房间业务判断

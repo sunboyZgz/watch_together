@@ -25,6 +25,15 @@
 
 因此现在适合进入播放器重构阶段。
 
+另外，当前 Android 应用已经开始从“只有播放器页”过渡到“真实业务页面入口 + 播放器核心”的结构。
+第一张正式业务页已经落地为：
+
+- `pages/WatchTogetherApp`
+- `pages/login/LoginPage`
+- `pages/login/LoginDialog`
+
+这意味着后续 `02 首页`、`02A 选择视频` 等真实业务页面，会优先在 `pages/` 层继续扩展，而不是继续堆进播放器内部。
+
 ## 当前问题
 
 ### 1. `PlayerScreen.kt` 职责过重

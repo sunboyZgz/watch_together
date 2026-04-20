@@ -141,6 +141,12 @@
 - 示例：`debug` / `info` / `warn` / `error`
 - 适用模块：Server
 
+#### `DATABASE_URL`
+
+- 用途：指定服务端连接 PostgreSQL 的完整连接串
+- 示例：`postgres://app:app@127.0.0.1:5432/anime_watch_dev?sslmode=disable`
+- 适用模块：Server
+
 #### `CORS_ALLOWED_ORIGIN` `(optional)`
 
 - 用途：限制允许访问服务端的客户端来源
@@ -195,6 +201,7 @@
 - `SERVER_HOST`
 - `SERVER_PORT`
 - `LOG_LEVEL`
+- `DATABASE_URL`
 - `CORS_ALLOWED_ORIGIN` `(optional)`
 - `MEDIA_BASE_URL`
 - `DEBUG_SYNC`

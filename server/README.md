@@ -40,6 +40,12 @@ server/
 ├── cmd/
 │   └── roomserver/
 │       └── main.go
+├── compose.yaml
+├── migrations/
+│   └── README.md
+├── scripts/
+│   ├── migrate.sh
+│   └── new_migration.sh
 ├── internal/
 │   ├── app/
 │   │   └── server.go
@@ -60,12 +66,16 @@ server/
 │       └── websocket_handler_test.go
 ├── go.mod
 ├── go.sum
+├── Makefile
 └── README.md
 ```
 
 ## Directory Responsibilities
 
 - `cmd/roomserver/`: 服务端启动入口
+- `compose.yaml`: 本地 PostgreSQL 容器初始化入口
+- `migrations/`: SQL-first migration 文件目录
+- `scripts/`: migration 辅助脚本
 - `internal/app/`: 应用组装层，负责配置和 HTTP server 初始化
 - `internal/protocol/`: 与 `INT-19` 对齐的最小协议结构，包含 create room 请求 / 响应和 WebSocket 事件模型
 - `internal/room/`: 房间、连接、房间管理器，以及房间创建与控制状态更新的内存模型
@@ -74,6 +84,11 @@ server/
 当前关键文件对应关系：
 
 - `cmd/roomserver/main.go`: 读取配置并启动服务
+- `compose.yaml`: 启动本地 PostgreSQL 16 开发实例
+- `migrations/README.md`: migration 命名规则与目录约定
+- `scripts/new_migration.sh`: 创建新的 `up/down` SQL 迁移文件
+- `scripts/migrate.sh`: 执行 `up/down/version/force` 迁移命令
+- `Makefile`: 提供 `migration-create / migration-up / migration-down / migration-version` 入口
 - `internal/app/server.go`: 注册 `/healthz`、`POST /rooms` 和 `/ws`
 - `internal/protocol/events.go`: create room、join room、room_state、ended、heartbeat、error 等最小结构
 - `internal/room/manager.go`: 房间创建、查询、唯一 `roomId` 生成和客户端清理
@@ -103,3 +118,81 @@ server/
 - 最后一个成员离开后，房间不会立即销毁，而是进入 2 分钟 grace period；若期间有人重新加入则继续保留，否则自动销毁
 
 其中 `POST /rooms`、`join_room`、`play / pause / seek / set_playback_rate / ended` 与 host transfer 的最小同步路径已通过基础测试验证。
+
+## SQL-first Migration
+
+当前 `server/` 已引入 SQL-first migration 基础设施。
+
+当前约定：
+
+- schema 变更统一以 SQL migration 文件作为唯一权威来源
+- migration 文件存放在 `server/migrations/`
+- migration 文件采用 `up/down` 成对命名
+- 当前使用 `golang-migrate` CLI 作为执行工具
+
+### Install
+
+本地可使用：
+
+```bash
+brew install golang-migrate
+```
+
+### Create Migration
+
+```bash
+cd server
+make migration-create name=create_users_table
+```
+
+### Run Migration
+
+当前本地 PostgreSQL 通过 `docker compose` 启动。
+
+#### Start Local PostgreSQL
+
+```bash
+cd server
+docker compose up -d
+```
+
+当前默认配置：
+
+- image: `postgres:16`
+- host: `127.0.0.1`
+- port: `5432`
+- user: `app`
+- password: `app`
+- database: `anime_watch_dev`
+
+#### Set Database URL
+
+先设置数据库连接：
+
+```bash
+export DATABASE_URL='postgres://app:app@127.0.0.1:5432/anime_watch_dev?sslmode=disable'
+```
+
+#### Run Migration
+
+然后执行：
+
+```bash
+cd server
+make migration-up
+```
+
+### Notes
+
+当前这一阶段只完成了 migration 基础设施引入。
+
+当前已经同时明确了本地 PostgreSQL 初始化方式：
+
+- 使用 `server/compose.yaml`
+- 使用 Docker Compose 管理本地 PostgreSQL 16 容器
+- migration 执行依赖 `DATABASE_URL`
+
+还未完成的内容包括：
+
+- 第一版业务表 schema
+- 服务端最小数据库读写接入

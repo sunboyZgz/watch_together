@@ -1,0 +1,200 @@
+package com.example.watch_together.pages.login
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+
+private val ModalBackground = Color(0xF4252744)
+private val ModalStroke = Color(0x26FFFFFF)
+private val ModalTextPrimary = Color(0xFFF9F3FB)
+private val ModalTextSecondary = Color(0xCCCFCAE4)
+private val ModalButton = Color(0xFFE675BC)
+private val ModalButtonDisabled = Color(0x667A6A82)
+private val ModalField = Color(0x1FFFFFFF)
+private val ModalFieldBorder = Color(0x24FFFFFF)
+private val AccentGlow = Brush.radialGradient(
+    colors = listOf(
+        Color(0x59C475EA),
+        Color(0x00C475EA)
+    )
+)
+
+@Composable
+fun LoginDialog(
+    nickname: String,
+    onNicknameChange: (String) -> Unit,
+    onRandomNicknameClick: () -> Unit,
+    onConfirmClick: () -> Unit,
+    onDismissClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(28.dp),
+        color = ModalBackground,
+        tonalElevation = 0.dp,
+        shadowElevation = 24.dp
+    ) {
+        Box {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(top = 8.dp, end = 8.dp)
+                    .size(140.dp)
+                    .clip(CircleShape)
+                    .background(AccentGlow)
+            )
+
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp, vertical = 22.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "轻量登录",
+                        style = MaterialTheme.typography.labelMedium.copy(
+                            fontWeight = FontWeight.SemiBold,
+                            color = Color(0xFFF6C7E6)
+                        )
+                    )
+
+                    Box(
+                        modifier = Modifier
+                            .size(28.dp)
+                            .clip(CircleShape)
+                            .background(Color(0x12FFFFFF))
+                            .clickable(onClick = onDismissClick),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "×",
+                            style = MaterialTheme.typography.titleMedium.copy(
+                                color = Color(0xB8F8F2FF),
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        )
+                    }
+                }
+
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        text = "先给自己起个昵称",
+                        style = MaterialTheme.typography.headlineSmall.copy(
+                            color = ModalTextPrimary,
+                            fontWeight = FontWeight.Bold
+                        )
+                    )
+                    Text(
+                        text = "当前阶段先用昵称进入放映室，后续再补完整账号体系。",
+                        style = MaterialTheme.typography.bodyMedium.copy(
+                            color = ModalTextSecondary
+                        )
+                    )
+                }
+
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        text = "昵称",
+                        style = MaterialTheme.typography.labelMedium.copy(
+                            color = Color(0xE5E9DFFF),
+                            fontWeight = FontWeight.Medium
+                        )
+                    )
+                    OutlinedTextField(
+                        value = nickname,
+                        onValueChange = onNicknameChange,
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        placeholder = {
+                            Text(
+                                text = "输入你的昵称",
+                                color = Color(0x90F8F2FF)
+                            )
+                        },
+                        shape = RoundedCornerShape(18.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedContainerColor = ModalField,
+                            unfocusedContainerColor = ModalField,
+                            disabledContainerColor = ModalField,
+                            focusedBorderColor = Color(0x33FFFFFF),
+                            unfocusedBorderColor = ModalFieldBorder,
+                            cursorColor = Color(0xFFF9F3FB),
+                            focusedTextColor = ModalTextPrimary,
+                            unfocusedTextColor = ModalTextPrimary
+                        )
+                    )
+                    Text(
+                        text = "会显示给房间里的其他成员",
+                        style = MaterialTheme.typography.labelMedium.copy(
+                            color = Color(0xBCA8B4D2)
+                        )
+                    )
+                }
+
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Button(
+                        onClick = onConfirmClick,
+                        enabled = nickname.trim().isNotEmpty(),
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(26.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = ModalButton,
+                            disabledContainerColor = ModalButtonDisabled,
+                            contentColor = Color(0xFFFDF8FF),
+                            disabledContentColor = Color(0x80FFF8FF)
+                        )
+                    ) {
+                        Text(
+                            text = "继续进入放映室",
+                            style = MaterialTheme.typography.titleMedium.copy(
+                                fontWeight = FontWeight.SemiBold
+                            ),
+                            modifier = Modifier.padding(vertical = 6.dp)
+                        )
+                    }
+
+                    Text(
+                        text = "随机生成昵称",
+                        style = MaterialTheme.typography.bodyMedium.copy(
+                            color = Color(0xD1CDDFFF)
+                        ),
+                        modifier = Modifier
+                            .align(Alignment.CenterHorizontally)
+                            .clip(RoundedCornerShape(999.dp))
+                            .clickable(onClick = onRandomNicknameClick)
+                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                    )
+                }
+            }
+        }
+    }
+}

@@ -4,6 +4,8 @@
 
 当前已经落地的内容包括：
 
+- `pages/` 目录下的真实业务页面入口
+- `01 登录页` 以及抽离后的轻量登录弹窗组件
 - Kotlin + Compose Android 应用工程
 - 基于 AndroidX Media3 ExoPlayer 的播放器适配层
 - 播放器事件回调与调试面板
@@ -30,6 +32,9 @@
 android/
 ├── app/
 │   └── src/main/java/com/example/watch_together/
+│       ├── pages/
+│       │   ├── WatchTogetherApp.kt
+│       │   └── login/
 │       ├── config/
 │       │   └── AppConfig.kt
 │       ├── sync/
@@ -52,6 +57,8 @@ android/
 
 各部分职责：
 
+- `pages/`：真实业务页面入口与页面级组件
+  当前已包含 `WatchTogetherApp`、`LoginPage` 与抽离后的 `LoginDialog`
 - `config/`：统一读取 `BuildConfig` 并生成 Android 端可直接使用的 URL
 - `sync/`：当前阶段的 Android 首个同步接入层，负责 create room、join room、房间会话控制、heartbeat ack、authority baseline 管理、drift correction、repeated join resync、控制事件出站、消息解码、`seq` 判断、倍速同步、ended-state 应用与播放器状态应用
 - `sync/protocol/`：保留与 `INT-19` 协议草案一致的 Android 本地协议模型
@@ -64,6 +71,17 @@ android/
 - Network: OkHttp
 
 在 Phase 1 中，这里会继续承载 Android ↔ Android 同步观影 MVP 的主要客户端实现。
+
+## Current App Entry
+
+当前 `MainActivity` 通过 `WatchTogetherApp` 作为应用入口：
+
+1. 先进入 `pages/login/LoginPage`
+2. 点击 `登录` 后弹出 `LoginDialog`
+3. 当前阶段确认昵称后，暂时进入现有 `PlayerScreen`
+
+这样做是为了让真实业务页面和已经稳定的播放器同步核心并行演进。
+后续当 `02 首页` 和 `02A 选择视频` 页面落地后，会继续把入口推进到完整业务流。
 
 ## Refactor Direction
 
