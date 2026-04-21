@@ -10,12 +10,12 @@ import com.example.watch_together.ui.player.PlayerScreen
 
 @Composable
 fun WatchTogetherApp() {
-    var nickname by rememberSaveable { mutableStateOf<String?>(null) }
+    var sessionAccount by rememberSaveable { mutableStateOf<String?>(null) }
 
-    if (nickname == null) {
+    if (sessionAccount == null) {
         LoginPage(
-            onLoginConfirmed = { confirmedNickname ->
-                nickname = confirmedNickname
+            onLoginConfirmed = { confirmedAccount ->
+                sessionAccount = confirmedAccount
             }
         )
     } else {

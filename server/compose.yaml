@@ -6,7 +6,7 @@ services:
     environment:
       POSTGRES_USER: app
       POSTGRES_PASSWORD: app
-      POSTGRES_DB: anime_watch_dev
+      POSTGRES_DB: 5
     ports:
       - "5432:5432"
     volumes:

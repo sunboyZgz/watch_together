@@ -1,7 +1,9 @@
 package com.example.watch_together.pages.login
 
+import android.annotation.SuppressLint
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -12,6 +14,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
@@ -35,7 +38,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import com.example.watch_together.ui.theme.Watch_togetherTheme
-import kotlin.random.Random
 
 private val LoginPageBackground = Color(0xFF13162A)
 private val LoginPagePrimary = Color(0xFFE675BC)
@@ -54,31 +56,45 @@ private val BackgroundGlowC = Brush.radialGradient(
     colors = listOf(Color(0xFF344A67), Color(0x00344A67))
 )
 
+@SuppressLint("UnusedBoxWithConstraintsScope")
 @Composable
 fun LoginPage(
     onLoginConfirmed: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
     var isDialogVisible by rememberSaveable { mutableStateOf(false) }
-    var nickname by rememberSaveable { mutableStateOf("星野一起看") }
+    var account by rememberSaveable { mutableStateOf("") }
+    var password by rememberSaveable { mutableStateOf("") }
 
-    Box(
+    BoxWithConstraints(
         modifier = modifier
             .fillMaxSize()
             .background(LoginPageBackground)
     ) {
+        val compactHeight = maxHeight < 760.dp
+        val compactWidth = maxWidth < 380.dp
+        val horizontalPadding = if (compactWidth) 20.dp else 28.dp
+        val verticalPadding = if (compactHeight) 24.dp else 32.dp
+        val heroSpacer = if (compactHeight) 184.dp else 280.dp
+        val ctaSpacer = if (compactHeight) 40.dp else 76.dp
+        val headlineStyle = if (compactWidth) {
+            MaterialTheme.typography.headlineLarge
+        } else {
+            MaterialTheme.typography.displaySmall
+        }
+
         DreamyBackdrop()
 
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(horizontal = 28.dp, vertical = 32.dp)
+                .padding(horizontal = horizontalPadding, vertical = verticalPadding)
         ) {
-            Spacer(modifier = Modifier.height(280.dp))
+            Spacer(modifier = Modifier.height(heroSpacer))
 
             Text(
                 text = "一起钻进\n今夜的放映室",
-                style = MaterialTheme.typography.displaySmall.copy(
+                style = headlineStyle.copy(
                     color = LoginPageTextPrimary,
                     fontWeight = FontWeight.Bold
                 )
@@ -93,11 +109,13 @@ fun LoginPage(
                 )
             )
 
-            Spacer(modifier = Modifier.height(76.dp))
+            Spacer(modifier = Modifier.height(ctaSpacer))
 
             Button(
                 onClick = { isDialogVisible = true },
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .widthIn(max = 440.dp),
                 shape = RoundedCornerShape(32.dp),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = LoginPagePrimary,
@@ -117,11 +135,20 @@ fun LoginPage(
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                horizontalArrangement = Arrangement.spacedBy(if (compactWidth) 8.dp else 10.dp)
             ) {
-                LoginFeaturePill("双人同步")
-                LoginFeaturePill("追番陪伴")
-                LoginFeaturePill("梦幻夜色")
+                LoginFeaturePill(
+                    label = "双人同步",
+                    modifier = Modifier.weight(1f)
+                )
+                LoginFeaturePill(
+                    label = "追番陪伴",
+                    modifier = Modifier.weight(1f)
+                )
+                LoginFeaturePill(
+                    label = "梦幻夜色",
+                    modifier = Modifier.weight(1f)
+                )
             }
 
             Spacer(modifier = Modifier.height(18.dp))
@@ -146,19 +173,19 @@ fun LoginPage(
                 contentAlignment = Alignment.Center
             ) {
                 LoginDialog(
-                    nickname = nickname,
-                    onNicknameChange = { nickname = it },
-                    onRandomNicknameClick = {
-                        nickname = generateRandomNickname()
-                    },
+                    account = account,
+                    password = password,
+                    onAccountChange = { account = it },
+                    onPasswordChange = { password = it },
                     onConfirmClick = {
-                        onLoginConfirmed(nickname.trim())
+                        onLoginConfirmed(account.trim())
                         isDialogVisible = false
                     },
                     onDismissClick = {
                         isDialogVisible = false
                     },
-                    modifier = Modifier.padding(horizontal = 28.dp)
+                    onRegisterClick = {},
+                    modifier = Modifier.padding(horizontal = horizontalPadding)
                 )
             }
         }
@@ -174,7 +201,7 @@ private fun DreamyBackdrop() {
                 .align(Alignment.TopStart)
                 .clip(CircleShape)
                 .background(BackgroundGlowA)
-                .alpha(0.95f)
+                .alpha(0.25f)
         )
         Box(
             modifier = Modifier
@@ -183,7 +210,7 @@ private fun DreamyBackdrop() {
                 .padding(top = 84.dp, end = 6.dp)
                 .clip(CircleShape)
                 .background(BackgroundGlowB)
-                .alpha(0.88f)
+                .alpha(0.28f)
         )
         Box(
             modifier = Modifier
@@ -192,15 +219,7 @@ private fun DreamyBackdrop() {
                 .padding(bottom = 4.dp)
                 .clip(CircleShape)
                 .background(BackgroundGlowC)
-                .alpha(0.92f)
-        )
-        Box(
-            modifier = Modifier
-                .size(150.dp)
-                .align(Alignment.TopCenter)
-                .padding(top = 112.dp)
-                .clip(CircleShape)
-                .background(Color(0x18FFFFFF))
+                .alpha(0.22f)
         )
         Box(
             modifier = Modifier
@@ -209,7 +228,7 @@ private fun DreamyBackdrop() {
                 .padding(top = 138.dp)
                 .clip(CircleShape)
                 .background(Color(0xFFD5CEDB))
-                .alpha(0.92f)
+                .alpha(0.22f)
         )
         Box(
             modifier = Modifier
@@ -219,20 +238,16 @@ private fun DreamyBackdrop() {
                 .clip(CircleShape)
                 .background(Color(0xFFF090D0))
         )
-        Box(
-            modifier = Modifier
-                .size(width = 120.dp, height = 24.dp)
-                .align(Alignment.TopCenter)
-                .padding(top = 12.dp)
-                .clip(RoundedCornerShape(999.dp))
-                .background(Color(0x1BFFFFFF))
-        )
     }
 }
 
 @Composable
-private fun LoginFeaturePill(label: String) {
+private fun LoginFeaturePill(
+    label: String,
+    modifier: Modifier = Modifier
+) {
     Surface(
+        modifier = modifier,
         shape = RoundedCornerShape(999.dp),
         color = LoginPageChip
     ) {
@@ -246,12 +261,6 @@ private fun LoginFeaturePill(label: String) {
             textAlign = TextAlign.Center
         )
     }
-}
-
-private fun generateRandomNickname(): String {
-    val prefixes = listOf("星野", "月岛", "樱井", "朝雾", "千夏", "琥珀")
-    val suffixes = listOf("一起看", "追番中", "看片会", "放映室", "深夜番", "同步中")
-    return "${prefixes.random(Random.Default)}${suffixes.random(Random.Default)}"
 }
 
 @Preview(showBackground = true, widthDp = 390, heightDp = 844)

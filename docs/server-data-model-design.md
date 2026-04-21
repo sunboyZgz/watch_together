@@ -68,16 +68,107 @@
 建议字段：
 
 - `id`
+- `account`
+- `password_hash`
 - `nickname`
+- `avatar_seed`
+- `avatar_url`
+- `bio`
 - `created_at`
 - `updated_at`
 
 当前说明：
 
-- 当前还没有完整账号体系
-- 但数据库里应该先有 `users` 这个主实体
-- 后续匿名、OAuth、手机号、正式账户都可以逐步接到这层
+- 当前数据库模型需要先具备最小账号密码登录能力
+- 密码字段不应保存明文，应保存 `password_hash`
+- 后续匿名、OAuth、手机号等能力可以继续扩在这层之上
+- 随着 `02 首页` 和后续个人中心页面推进，`User` 还会继续承载头像等资料信息
 
+当前推荐头像与资料字段策略：
+
+- `nickname`
+  - 首页欢迎语直接使用
+  - 个人中心也需要展示与编辑
+- `avatar_seed`
+  - 作为第一版默认头像来源
+  - 即使没有上传头像，也能稳定生成一个可重复头像
+- `avatar_url`
+  - 作为后续远程头像能力的扩展字段
+  - 第一版可以允许为空
+- `bio`
+  - 作为个人中心最轻量的资料扩展字段
+  - 第一版可以允许为空
+
+当前更推荐的第一版落地方式：
+
+- 先同时保留 `avatar_seed` 与 `avatar_url`
+- 页面展示逻辑优先：
+  1. 有 `avatar_url` 时显示远程头像
+  2. 否则使用 `avatar_seed` 生成默认头像
+
+这样既能满足首页右上角头像和个人中心资料展示，又不会过早把实现绑死在文件上传方案上。
+
+建议约束：
+
+- `account`：唯一、非空
+- `nickname`：非空
+- `avatar_seed`：非空
+- `avatar_url`：可空
+- `bio`：可空
+
+当前 migration 落地策略：
+
+- `avatar_seed`：新增后统一回填，再设为非空
+- `avatar_url`：可空，但若有值则不能为空白字符串
+- `bio`：可空，但若有值则不能为空白字符串
+
+### `User` 当前推荐设计
+
+推荐字段草案：
+
+- `id uuid pk`
+- `account text unique not null`
+- `password_hash text not null`
+- `nickname text not null`
+- `avatar_seed text not null`
+- `avatar_url text null`
+- `bio text null`
+- `created_at timestamptz not null`
+- `updated_at timestamptz not null`
+
+语义说明：
+
+- `avatar_seed`
+  - 当前第一版推荐作为默认头像来源
+  - 适合本地生成或第三方 avatar service
+- `avatar_url`
+  - 预留给后续用户上传头像或远程头像能力
+- `bio`
+  - 用于支撑个人中心最轻量资料展示
+
+这样一来，首页与个人中心在第一版就可以共享同一组基础资料字段，而不需要等完整账号系统成熟后再回头补。
+
+## 4. 当前新增 migration 落地情况
+
+`User` 资料字段已经落为独立 migration：
+
+- `server/migrations/20260421110000_add_user_profile_fields.up.sql`
+- `server/migrations/20260421110000_add_user_profile_fields.down.sql`
+
+当前落地内容包括：
+
+- `users.avatar_seed`
+- `users.avatar_url`
+- `users.bio`
+
+当前落地规则包括：
+
+- `avatar_seed` 统一回填后设为 `not null`
+- `avatar_seed` 不允许空白字符串
+- `avatar_url` 可空，但若存在则不允许空白字符串
+- `bio` 可空，但若存在则不允许空白字符串
+
+这意味着首页与个人中心第一版需要的最小用户资料字段，现在已经有了明确的数据库承载结构。
 #### `MediaItem`
 
 当前含义：
@@ -109,6 +200,58 @@
 - `media_url` 先指向 HLS 入口
 - `tags` 和 `category` 直接服务搜索与标签筛选
 - 当前阶段不需要先引入复杂的 CMS 设计
+
+#### `UserMediaProgress`（下一阶段高优先级候选）
+
+当前含义：
+
+- 用户针对某个媒体内容的观看进度
+
+当前阶段用途：
+
+- 支撑 `02 首页` 的“上次观看”
+- 支撑 `02 首页` 的“继续追番”
+- 为后续 resume playback 提供数据基础
+
+建议字段：
+
+- `id`
+- `user_id`
+- `media_item_id`
+- `last_position_seconds`
+- `duration_seconds`
+- `last_watched_at`
+- `completed`
+- `completion_source`
+- `updated_at`
+
+当前说明：
+
+- 当前第一版基础 schema 之外，已经新增独立 migration 负责这张表
+- 它已经成为首页业务第一批真实依赖的数据模型
+- 进度精度建议先到秒级，而不是毫秒级
+
+建议补充约束：
+
+- 同一 `user_id + media_item_id` 只保留一条当前进度记录
+- `last_position_seconds >= 0`
+- `duration_seconds > 0`
+- `last_position_seconds <= duration_seconds`
+- `completed = true` 时，`last_position_seconds` 应接近或等于 `duration_seconds`
+
+建议索引：
+
+- `unique(user_id, media_item_id)`
+- `(user_id, last_watched_at desc)`：支撑“上次观看”
+- `(user_id, completed, last_watched_at desc)`：支撑“继续追番”
+
+`completion_source` 当前建议先收敛为文本枚举，例如：
+
+- `ended`
+- `manual_mark`
+- `threshold_auto`
+
+第一版也可以先不做这列，但如果希望后续区分“自然看完”和“手动标记已看完”，保留它会更稳。
 
 #### `Room`
 
@@ -253,6 +396,140 @@
 - 需要稳定主键和关系约束
 - 会直接被页面业务、房间恢复和媒体选择流程复用
 
+### 下一轮高优先级候选
+
+随着 `02 首页与加入房间` 的业务明确，下一轮最值得进入 PostgreSQL 的候选对象是：
+
+- `user_media_progress`
+
+原因：
+
+- 首页已经明确需要“上次观看”
+- 首页已经明确需要“继续追番”
+- 这两块都要求用户维度的持久化观看进度
+- 这条对象现在已经正式进入 migration 落地阶段
+
+### `user_media_progress` 当前推荐设计
+
+当前更推荐把它设计成“每个用户、每个媒体一条当前进度记录”，而不是事件流水表。
+
+原因：
+
+- 首页只需要当前状态，不需要完整回放历史
+- `上次观看` 本质是最近一次更新的当前进度
+- `继续追番` 本质是“未完成内容”的当前进度列表
+- 这类读场景更适合状态表，而不是先上 event sourcing
+
+推荐字段草案：
+
+- `id uuid pk`
+- `user_id uuid not null references users(id)`
+- `media_item_id uuid not null references media_items(id)`
+- `last_position_seconds integer not null`
+- `duration_seconds integer not null`
+- `last_watched_at timestamptz not null`
+- `completed boolean not null default false`
+- `completion_source text null`
+- `created_at timestamptz not null`
+- `updated_at timestamptz not null`
+
+推荐唯一约束：
+
+- `unique(user_id, media_item_id)`
+
+推荐索引：
+
+- `index on (user_id, last_watched_at desc)`
+- `index on (user_id, completed, last_watched_at desc)`
+
+语义说明：
+
+- `last_position_seconds`
+  - 首页展示只需要秒级
+  - 后续放映室恢复播放时，也可以先基于秒级恢复
+- `last_watched_at`
+  - 用来判断“最近一次观看”
+  - 也能给“继续追番”排序
+- `completed`
+  - 直接决定该条记录是否进入“继续追番”
+- `completion_source`
+  - 可选
+  - 用来区分为什么被标记为完成
+
+### 查询语义建议
+
+#### 上次观看
+
+查询逻辑建议：
+
+- 从 `user_media_progress`
+- 按 `last_watched_at desc`
+- 取该用户最近一条
+- join `media_items`
+
+返回字段建议：
+
+- `media_items.id`
+- `media_items.title`
+- `media_items.cover_url`
+- `user_media_progress.last_position_seconds`
+- `user_media_progress.duration_seconds`
+
+#### 继续追番
+
+查询逻辑建议：
+
+- 从 `user_media_progress`
+- 过滤 `completed = false`
+- 按 `last_watched_at desc`
+- 取前 2 条
+- join `media_items`
+
+返回字段建议：
+
+- `media_items.id`
+- `media_items.title`
+- `media_items.cover_url`
+- `user_media_progress.last_position_seconds`
+- `user_media_progress.duration_seconds`
+
+### Completed 判断建议
+
+当前建议把“是否看完”先收成简单规则，不和播放器 ended 事件强耦合：
+
+- 服务端持久化层直接使用 `completed boolean`
+- 应用层可按以下方式更新它：
+  - 收到明确的 ended / completed 语义时置为 `true`
+  - 手动标记已看完时置为 `true`
+  - 若后续 seek 到较早位置继续观看，可重新置回 `false`
+
+这样首页查询逻辑会非常直接，也更便于后续继续演进。
+
+## 5. 当前新增 migration 落地情况
+
+`user_media_progress` 已经落为独立 migration：
+
+- `server/migrations/20260421100000_add_user_media_progress.up.sql`
+- `server/migrations/20260421100000_add_user_media_progress.down.sql`
+
+当前落地内容包括：
+
+- `user_id` / `media_item_id` 外键
+- 秒级进度字段：
+  - `last_position_seconds`
+  - `duration_seconds`
+- `last_watched_at`
+- `completed`
+- `completion_source`
+- `created_at`
+- `updated_at`
+- `unique(user_id, media_item_id)`
+- 首页查询所需索引：
+  - `(user_id, last_watched_at desc)`
+  - `(user_id, completed, last_watched_at desc)`
+
+这意味着首页“上次观看”和“继续追番”现在已经有了明确的数据库承载结构。
+
 ### 当前不建议落库
 
 第一版不建议持久化：
@@ -305,6 +582,8 @@
 建议字段：
 
 - `id uuid primary key`
+- `account text not null unique`
+- `password_hash text not null`
 - `nickname text not null`
 - `created_at timestamptz not null`
 - `updated_at timestamptz not null`
@@ -367,9 +646,35 @@
 - `left_at` 和 `is_active` 一起表达历史成员关系与当前成员关系
 - 未来可以加部分唯一索引，确保同一房间同一用户最多一个 active 记录
 
+当前这一点已经在第一版 migration 中实现为部分唯一索引：
+
+- `uniq_room_members_active_user_per_room`
+
 ---
 
-## 6. 当前不进入第一版表的设计
+## 6. 当前第一版 schema 落地情况
+
+当前第一版 schema 已经落为 migration 文件：
+
+- `server/migrations/20260420113000_create_initial_schema.up.sql`
+- `server/migrations/20260420113000_create_initial_schema.down.sql`
+- `server/migrations/20260420123000_add_account_fields_to_users.up.sql`
+- `server/migrations/20260420123000_add_account_fields_to_users.down.sql`
+
+当前已经实现的内容包括：
+
+- `users / media_items / rooms / room_members` 四张主表
+- `users.account / users.password_hash` 登录字段扩展
+- 主要外键关系
+- 房间码唯一约束
+- `room_members` active 成员关系的部分唯一索引
+- `media_items.tags` 的 GIN 索引
+
+这意味着当前数据设计文档已经不再只是草案，而是和首个 schema migration 对齐。
+
+---
+
+## 7. 当前不进入第一版表的设计
 
 下面这些内容，当前明确不进入第一版 schema：
 
@@ -387,7 +692,7 @@
 
 ---
 
-## 7. 推荐任务拆分
+## 8. 推荐任务拆分
 
 基于这份设计，下一步更适合拆成以下几类任务：
 
@@ -427,7 +732,7 @@
 
 ---
 
-## 8. 当前建议
+## 9. 当前建议
 
 当前最合理的推进顺序是：
 

@@ -194,5 +194,59 @@ make migration-up
 
 还未完成的内容包括：
 
-- 第一版业务表 schema
 - 服务端最小数据库读写接入
+
+## First Schema
+
+当前第一版业务主数据 schema 已经落为首个 migration：
+
+- `migrations/20260420113000_create_initial_schema.up.sql`
+- `migrations/20260420113000_create_initial_schema.down.sql`
+- `migrations/20260420123000_add_account_fields_to_users.up.sql`
+- `migrations/20260420123000_add_account_fields_to_users.down.sql`
+- `migrations/20260421100000_add_user_media_progress.up.sql`
+- `migrations/20260421100000_add_user_media_progress.down.sql`
+- `migrations/20260421110000_add_user_profile_fields.up.sql`
+- `migrations/20260421110000_add_user_profile_fields.down.sql`
+
+当前包含的主表：
+
+- `users`
+- `media_items`
+- `rooms`
+- `room_members`
+- `user_media_progress`
+
+当前 `users` 额外包含最小账号登录字段：
+
+- `account`
+- `password_hash`
+- `avatar_seed`
+- `avatar_url`
+- `bio`
+
+当前 `user_media_progress` 额外承载：
+
+- `last_position_seconds`
+- `duration_seconds`
+- `last_watched_at`
+- `completed`
+- `completion_source`
+
+当前包含的关键约束：
+
+- `rooms.room_code` 唯一且固定为 6 位
+- `rooms.status` 当前收敛为 `active / grace_period / destroyed`
+- `room_members.role` 当前收敛为 `host / member`
+- 同一房间同一用户最多保留一个 active 成员关系
+
+当前包含的第一版索引：
+
+- `media_items.category / status`
+- `media_items.tags` GIN 索引
+- `rooms.host_user_id / media_item_id / status / destroy_after`
+- `room_members.room_id / user_id`
+- active 成员关系相关索引
+- `user_media_progress(user_id, media_item_id)` 唯一约束
+- `user_media_progress(user_id, last_watched_at desc)`
+- `user_media_progress(user_id, completed, last_watched_at desc)`

@@ -2,7 +2,7 @@
  * @Author: sunboy
  * @LastEditors: sunboy
  * @Date: 2026-04-11 14:17:43
- * @LastEditTime: 2026-04-15 00:31:48
+ * @LastEditTime: 2026-04-21 09:45:20
 -->
 1. 项目目标、架构、产品边界和 ADR 统一在 Linear 更新
    1. 对应文件。。。
@@ -19,3 +19,6 @@
    1. 后续改动影响到环境参数类的功能时请更新docs/environment-config.md
 7. 协议后续需要扩充和更新
    1. docs/websocket-event-protocol.md可能需要进行更新
+8. 更新数据库schema和业务功能后更新文档
+   1. docs/server-data-model-design.md
+   2. business-feature-data-mapping.md

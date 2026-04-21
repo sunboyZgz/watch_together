@@ -1,5 +1,6 @@
 package com.example.watch_together.pages.login
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -9,6 +10,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
@@ -25,6 +27,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 
 private val ModalBackground = Color(0xF4252744)
@@ -44,17 +47,20 @@ private val AccentGlow = Brush.radialGradient(
 
 @Composable
 fun LoginDialog(
-    nickname: String,
-    onNicknameChange: (String) -> Unit,
-    onRandomNicknameClick: () -> Unit,
+    account: String,
+    password: String,
+    onAccountChange: (String) -> Unit,
+    onPasswordChange: (String) -> Unit,
     onConfirmClick: () -> Unit,
     onDismissClick: () -> Unit,
+    onRegisterClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Surface(
-        modifier = modifier,
+        modifier = modifier.widthIn(max = 420.dp),
         shape = RoundedCornerShape(28.dp),
         color = ModalBackground,
+        border = BorderStroke(1.dp, ModalStroke),
         tonalElevation = 0.dp,
         shadowElevation = 24.dp
     ) {
@@ -107,14 +113,14 @@ fun LoginDialog(
 
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
-                        text = "先给自己起个昵称",
+                        text = "账号登录",
                         style = MaterialTheme.typography.headlineSmall.copy(
                             color = ModalTextPrimary,
                             fontWeight = FontWeight.Bold
                         )
                     )
                     Text(
-                        text = "当前阶段先用昵称进入放映室，后续再补完整账号体系。",
+                        text = "使用账号与密码登录后继续进入我的放映室，昵称将在注册阶段设置。",
                         style = MaterialTheme.typography.bodyMedium.copy(
                             color = ModalTextSecondary
                         )
@@ -123,20 +129,20 @@ fun LoginDialog(
 
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text(
-                        text = "昵称",
+                        text = "账号",
                         style = MaterialTheme.typography.labelMedium.copy(
                             color = Color(0xE5E9DFFF),
                             fontWeight = FontWeight.Medium
                         )
                     )
                     OutlinedTextField(
-                        value = nickname,
-                        onValueChange = onNicknameChange,
+                        value = account,
+                        onValueChange = onAccountChange,
                         modifier = Modifier.fillMaxWidth(),
                         singleLine = true,
                         placeholder = {
                             Text(
-                                text = "输入你的昵称",
+                                text = "请输入账号",
                                 color = Color(0x90F8F2FF)
                             )
                         },
@@ -153,7 +159,47 @@ fun LoginDialog(
                         )
                     )
                     Text(
-                        text = "会显示给房间里的其他成员",
+                        text = "支持用户名或邮箱地址",
+                        style = MaterialTheme.typography.labelMedium.copy(
+                            color = Color(0xBCA8B4D2)
+                        )
+                    )
+                }
+
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        text = "密码",
+                        style = MaterialTheme.typography.labelMedium.copy(
+                            color = Color(0xE5E9DFFF),
+                            fontWeight = FontWeight.Medium
+                        )
+                    )
+                    OutlinedTextField(
+                        value = password,
+                        onValueChange = onPasswordChange,
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        visualTransformation = PasswordVisualTransformation(),
+                        placeholder = {
+                            Text(
+                                text = "请输入密码",
+                                color = Color(0x90F8F2FF)
+                            )
+                        },
+                        shape = RoundedCornerShape(18.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedContainerColor = ModalField,
+                            unfocusedContainerColor = ModalField,
+                            disabledContainerColor = ModalField,
+                            focusedBorderColor = Color(0x33FFFFFF),
+                            unfocusedBorderColor = ModalFieldBorder,
+                            cursorColor = Color(0xFFF9F3FB),
+                            focusedTextColor = ModalTextPrimary,
+                            unfocusedTextColor = ModalTextPrimary
+                        )
+                    )
+                    Text(
+                        text = "至少 8 位字符，区分大小写",
                         style = MaterialTheme.typography.labelMedium.copy(
                             color = Color(0xBCA8B4D2)
                         )
@@ -163,7 +209,7 @@ fun LoginDialog(
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Button(
                         onClick = onConfirmClick,
-                        enabled = nickname.trim().isNotEmpty(),
+                        enabled = account.trim().isNotEmpty() && password.isNotBlank(),
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(26.dp),
                         colors = ButtonDefaults.buttonColors(
@@ -174,7 +220,7 @@ fun LoginDialog(
                         )
                     ) {
                         Text(
-                            text = "继续进入放映室",
+                            text = "登录并继续",
                             style = MaterialTheme.typography.titleMedium.copy(
                                 fontWeight = FontWeight.SemiBold
                             ),
@@ -182,17 +228,6 @@ fun LoginDialog(
                         )
                     }
 
-                    Text(
-                        text = "随机生成昵称",
-                        style = MaterialTheme.typography.bodyMedium.copy(
-                            color = Color(0xD1CDDFFF)
-                        ),
-                        modifier = Modifier
-                            .align(Alignment.CenterHorizontally)
-                            .clip(RoundedCornerShape(999.dp))
-                            .clickable(onClick = onRandomNicknameClick)
-                            .padding(horizontal = 8.dp, vertical = 4.dp)
-                    )
                 }
             }
         }
