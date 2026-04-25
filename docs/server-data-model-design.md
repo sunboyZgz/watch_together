@@ -184,12 +184,15 @@
 
 - `id`
 - `title`
+- `original_title`
 - `subtitle`
 - `description`
 - `cover_url`
 - `media_url`
 - `category`
 - `tags`
+- `production_team`
+- `search_aliases`
 - `duration_ms`
 - `status`
 - `created_at`
@@ -198,8 +201,64 @@
 当前说明：
 
 - `media_url` 先指向 HLS 入口
-- `tags` 和 `category` 直接服务搜索与标签筛选
+- `title`、`original_title`、`production_team`、`search_aliases` 共同服务 `02A 选择视频` 的搜索框
+- `tags` 和 `category` 可以继续作为媒体展示字段存在
 - 当前阶段不需要先引入复杂的 CMS 设计
+
+#### `MediaTag`（下一阶段候选）
+
+当前含义：
+
+- 服务端可稳定返回的媒体标签目录
+
+当前阶段用途：
+
+- 支撑 `02A 选择视频` 页面的默认 5 个标签
+- 支撑 `更多` 中展开的全部标签列表
+- 为后续标签排序、显隐和数量控制提供事实来源
+
+建议字段：
+
+- `id`
+- `name`
+- `slug`
+- `sort_order`
+- `is_featured`
+- `is_active`
+- `created_at`
+- `updated_at`
+
+当前说明：
+
+- `is_featured = true` 可以直接支撑首屏默认主标签
+- `sort_order` 用于保证标签稳定顺序
+- `is_active` 用于后续下线标签而不破坏历史关联
+
+#### `MediaItemTag`（下一阶段候选）
+
+当前含义：
+
+- 媒体内容与标签目录之间的关联关系
+
+当前阶段用途：
+
+- 根据标签筛选 `media_items`
+- 保证标签查询不再只依赖 `media_items.tags jsonb`
+
+建议字段：
+
+- `media_item_id`
+- `media_tag_id`
+- `created_at`
+
+当前说明：
+
+- 如果后续进入更稳定的数据阶段，推荐用 `media_tags + media_item_tags` 逐步取代“只靠 `media_items.tags jsonb`”
+- 这样更适合：
+  - 默认主标签
+  - 最多 20 个全部标签
+  - 标签稳定排序
+  - 标签显隐控制
 
 #### `UserMediaProgress`（下一阶段高优先级候选）
 
@@ -252,6 +311,86 @@
 - `threshold_auto`
 
 第一版也可以先不做这列，但如果希望后续区分“自然看完”和“手动标记已看完”，保留它会更稳。
+
+## 3. 当前由 `02A 选择视频` 推动出的 schema 扩展建议
+
+基于当前业务描述，`02A 选择视频` 已经明确推动出两类新的数据层需求：
+
+### 3.1 `media_items` 的检索字段扩展
+
+当前更推荐补充：
+
+- `original_title`
+- `production_team`
+- `search_aliases`
+
+建议语义：
+
+- `original_title`
+  - 用于日文/英文原始标题或别名展示
+- `production_team`
+  - 用于工作团队、制作公司或主要制作信息检索
+- `search_aliases`
+  - 用于保存额外可命中的别名数组
+
+当前这部分已经落为独立 migration：
+
+- `server/migrations/20260421130000_add_media_search_fields.up.sql`
+- `server/migrations/20260421130000_add_media_search_fields.down.sql`
+
+当前落地内容包括：
+
+- `media_items.original_title`
+- `media_items.production_team`
+- `media_items.search_aliases`
+
+当前落地规则包括：
+
+- `original_title` 可空，但若存在则不允许空白字符串
+- `production_team` 可空，但若存在则不允许空白字符串
+- `search_aliases` 为 `jsonb` 数组，默认值为 `[]`
+
+当前落地索引包括：
+
+- `idx_media_items_original_title`
+- `idx_media_items_production_team`
+- `idx_media_items_search_aliases_gin`
+
+### 3.2 标签目录模型
+
+当前更推荐新增：
+
+- `media_tags`
+- `media_item_tags`
+
+这样可以稳定支撑：
+
+- 默认主标签 5 个
+- `更多` 中全部标签最多 20 个
+- 标签排序、显隐和后续运营控制
+
+当前这部分已经落为独立 migration：
+
+- `server/migrations/20260421143000_add_media_tags.up.sql`
+- `server/migrations/20260421143000_add_media_tags.down.sql`
+
+当前落地内容包括：
+
+- `media_tags`
+- `media_item_tags`
+
+当前落地规则包括：
+
+- `media_tags.slug` 唯一，且必须为小写非空白字符串
+- `media_tags.sort_order >= 0`
+- `media_item_tags` 使用 `(media_item_id, media_tag_id)` 作为联合主键
+- `media_item_tags` 通过外键与 `media_items`、`media_tags` 关联
+
+当前落地索引包括：
+
+- `idx_media_tags_active_sort`
+- `idx_media_tags_featured_active_sort`
+- `idx_media_item_tags_media_tag_id`
 
 #### `Room`
 

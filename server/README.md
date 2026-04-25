@@ -208,11 +208,17 @@ make migration-up
 - `migrations/20260421100000_add_user_media_progress.down.sql`
 - `migrations/20260421110000_add_user_profile_fields.up.sql`
 - `migrations/20260421110000_add_user_profile_fields.down.sql`
+- `migrations/20260421130000_add_media_search_fields.up.sql`
+- `migrations/20260421130000_add_media_search_fields.down.sql`
+- `migrations/20260421143000_add_media_tags.up.sql`
+- `migrations/20260421143000_add_media_tags.down.sql`
 
 当前包含的主表：
 
 - `users`
 - `media_items`
+- `media_tags`
+- `media_item_tags`
 - `rooms`
 - `room_members`
 - `user_media_progress`
@@ -233,6 +239,17 @@ make migration-up
 - `completed`
 - `completion_source`
 
+当前 `media_items` 额外承载搜索准备字段：
+
+- `original_title`
+- `production_team`
+- `search_aliases`
+
+当前标签目录与标签关联由以下表承载：
+
+- `media_tags`
+- `media_item_tags`
+
 当前包含的关键约束：
 
 - `rooms.room_code` 唯一且固定为 6 位
@@ -244,6 +261,12 @@ make migration-up
 
 - `media_items.category / status`
 - `media_items.tags` GIN 索引
+- `media_items.original_title`
+- `media_items.production_team`
+- `media_items.search_aliases` GIN 索引
+- `media_tags.is_active / sort_order`
+- `media_tags.is_featured / is_active / sort_order`
+- `media_item_tags.media_tag_id`
 - `rooms.host_user_id / media_item_id / status / destroy_after`
 - `room_members.room_id / user_id`
 - active 成员关系相关索引
