@@ -93,6 +93,7 @@ private enum class HomeFeatureDialogKind {
 @Composable
 fun HomePage(
     sessionAccount: String,
+    onCreateRoomClick: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val profile = remember(sessionAccount) { buildProfile(sessionAccount) }
@@ -157,7 +158,7 @@ fun HomePage(
 
             ActionButtonsRow(
                 compactWidth = compactWidth,
-                onCreateRoomClick = { activeFeatureDialog = HomeFeatureDialogKind.CreateRoom },
+                onCreateRoomClick = onCreateRoomClick,
                 onJoinRoomClick = { isJoinDialogVisible = true }
             )
 

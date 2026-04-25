@@ -7,6 +7,7 @@
 - `pages/` 目录下的真实业务页面入口
 - `01 登录页` 以及抽离后的轻量登录弹窗组件
 - `02 首页与加入房间` 的真实业务页面
+- `02A 选择视频` 的真实业务页面与本地交互骨架
 - Kotlin + Compose Android 应用工程
 - 基于 AndroidX Media3 ExoPlayer 的播放器适配层
 - 播放器事件回调与调试面板
@@ -35,7 +36,9 @@ android/
 │   └── src/main/java/com/example/watch_together/
 │       ├── pages/
 │       │   ├── WatchTogetherApp.kt
-│       │   └── login/
+│       │   ├── home/
+│       │   ├── login/
+│       │   └── video/
 │       ├── config/
 │       │   └── AppConfig.kt
 │       ├── sync/
@@ -59,7 +62,7 @@ android/
 各部分职责：
 
 - `pages/`：真实业务页面入口与页面级组件
-  当前已包含 `WatchTogetherApp`、`LoginPage`、`HomePage` 与抽离后的 `LoginDialog`
+  当前已包含 `WatchTogetherApp`、`LoginPage`、`LoginDialog`、`HomePage` 与 `VideoSelectionPage`
 - `config/`：统一读取 `BuildConfig` 并生成 Android 端可直接使用的 URL
 - `sync/`：当前阶段的 Android 首个同步接入层，负责 create room、join room、房间会话控制、heartbeat ack、authority baseline 管理、drift correction、repeated join resync、控制事件出站、消息解码、`seq` 判断、倍速同步、ended-state 应用与播放器状态应用
 - `sync/protocol/`：保留与 `INT-19` 协议草案一致的 Android 本地协议模型
@@ -80,9 +83,22 @@ android/
 1. 先进入 `pages/login/LoginPage`
 2. 点击 `登录` 后弹出 `LoginDialog`
 3. 当前阶段确认账号后，进入 `pages/home/HomePage`
+4. 点击 `创建放映室` 后，进入 `pages/video/VideoSelectionPage`
+5. 在选片页选择影片后，底部固定栏可进入当前播放器放映室页面
 
 这样做是为了让真实业务页面和已经稳定的播放器同步核心并行演进。
-后续当 `02A 选择视频`、个人中心与正式放映室页面落地后，会继续把入口推进到完整业务流。
+后续当个人中心、媒体检索接口与正式放映室页面落地后，会继续把入口推进到完整业务流。
+
+## Video Selection Page
+
+`pages/video/VideoSelectionPage.kt` 当前承接 `02A 选择视频` 的 Android UI：
+
+- 顶部搜索框用于按影片标题、剧场版、作品名或制作信息检索
+- 默认展示主标签，并通过右侧 `更多` 展开悬浮标签面板
+- 悬浮标签面板不挤压后续影片列表布局
+- 影片列表当前使用本地样例数据，后续会替换为 `INT-111` 的服务端检索接口
+- 底部固定栏展示当前选中影片，并提供 `创建房间` 操作
+- 小屏设备通过收紧 padding、缩短文案和两列卡片约束保持可读性
 
 ## Refactor Direction
 
