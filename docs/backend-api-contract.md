@@ -231,6 +231,15 @@ cursor=opaque_cursor
 
 ### Auth
 
+当前实现状态：
+
+- `POST /auth/register` 已落地，对应 `INT-117`
+- `POST /auth/login` 已落地，对应 `INT-116`
+- 密码使用 `bcrypt` 写入 `users.password_hash`
+- 账号写入前会做 trim + lowercase 归一化
+- 当前 `accessToken` 为 `dev_<userId>` 占位 token，后续再替换为正式 token/session 机制
+- 启动服务端前必须配置 `DATABASE_URL`，否则 auth endpoints 会返回 `503`
+
 #### `POST /auth/login`
 
 用途：账号密码登录。
@@ -264,6 +273,12 @@ cursor=opaque_cursor
 }
 ```
 
+错误：
+
+- `400 VALIDATION_ERROR`: `account` 或 `password` 为空，或请求体不是合法 JSON
+- `401 UNAUTHORIZED`: 账号不存在或密码错误
+- `503 INTERNAL_ERROR`: 服务端未连接数据库，auth service 不可用
+
 #### `POST /auth/register`
 
 用途：账号注册。
@@ -279,6 +294,12 @@ cursor=opaque_cursor
 ```
 
 响应同登录。
+
+错误：
+
+- `400 VALIDATION_ERROR`: `account`、`password` 或 `nickname` 为空，或请求体不是合法 JSON
+- `409 CONFLICT`: `account` 已存在
+- `503 INTERNAL_ERROR`: 服务端未连接数据库，auth service 不可用
 
 ### Me
 
@@ -597,15 +618,44 @@ cursor=...
 ### 联调顺序
 
 1. `GET /healthz`
-2. `POST /auth/login`
-3. `GET /home/summary`
-4. `GET /media/tags`
-5. `GET /media/items`
-6. `POST /rooms`
-7. `POST /rooms/{roomCode}/join`
-8. WebSocket `/ws` + `join_room`
-9. `GET /rooms/{roomCode}`
-10. `PUT /me/media-progress/{mediaItemId}`
+2. `POST /auth/register`
+3. `POST /auth/login`
+4. `GET /home/summary`
+5. `GET /media/tags`
+6. `GET /media/items`
+7. `POST /rooms`
+8. `POST /rooms/{roomCode}/join`
+9. WebSocket `/ws` + `join_room`
+10. `GET /rooms/{roomCode}`
+11. `PUT /me/media-progress/{mediaItemId}`
+
+### Auth 本地联调示例
+
+启动 PostgreSQL 并执行 migration：
+
+```bash
+cd server
+docker compose up -d
+export DATABASE_URL='postgres://app:app@127.0.0.1:5432/anime_watch_dev?sslmode=disable'
+make migration-up
+go run ./cmd/roomserver
+```
+
+注册：
+
+```bash
+curl -s http://127.0.0.1:8080/auth/register \
+  -H 'Content-Type: application/json' \
+  -d '{"account":"xingye","password":"secret","nickname":"Xingye"}'
+```
+
+登录：
+
+```bash
+curl -s http://127.0.0.1:8080/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"account":"xingye","password":"secret"}'
+```
 
 ## 后续任务
 
