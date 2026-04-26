@@ -33,6 +33,21 @@
 
 当前阶段先追求“最小可运行房间服务”，暂不引入 Gin / Echo / Fiber、Redis、数据库 ORM 或复杂配置中心。
 
+## HTTP API Contract
+
+当前后端业务接口进入定义阶段，统一契约记录在：
+
+- [docs/backend-api-contract.md](../docs/backend-api-contract.md)
+
+当前约定：
+
+- HTTP API 负责用户、首页、媒体库、房间主数据和观看进度。
+- WebSocket 继续负责播放同步、authority state、heartbeat 和实时房间状态。
+- HTTP 成功响应统一使用 `data + meta` envelope。
+- HTTP 错误响应统一使用 `error + meta` envelope。
+- API 字段统一使用 `camelCase`。
+- Android 与 Server 联调时优先以该文档对齐 DTO、错误码和调用顺序。
+
 ## Current Structure
 
 ```text

@@ -17,6 +17,8 @@
 
 后续每当出现新的真实业务页面、表单或服务端能力时，都应该先补这里，再决定要不要新增 migration。
 
+后端 HTTP API 的统一响应格式、错误格式和前后端联调规则见 [backend-api-contract.md](./backend-api-contract.md)。
+
 ---
 
 ## 当前数据来源分类
