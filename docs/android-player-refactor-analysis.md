@@ -298,10 +298,10 @@ android/app/src/main/java/com/example/watch_together/
 
 当前这一步已经完成了第一轮落地：
 
-- 已把页面壳层拆到独立的 `RoomPlayerPageShell`
+- 已把 `03 放映室` 业务页面壳层拆到 `pages/room/RoomTheaterPage`
 - 已把播放器核心壳层拆到独立的 `PlayerCoreShell`
 - `PlayerScreen` 现在更接近“状态 + 副作用 + 组合入口”
-- 原本堆在 `PlayerScreen.kt` 中的大量 UI 区块已经移出到独立文件
+- 原本堆在 `PlayerScreen.kt` 中的大量 UI 区块已经移出到业务页面与播放器组件
 
 ## 当前实际文件落点
 
@@ -311,6 +311,9 @@ android/app/src/main/java/com/example/watch_together/
 android/app/src/main/java/com/example/watch_together/
 ├── config/
 │   └── AppConfig.kt
+├── pages/
+│   └── room/
+│       └── RoomTheaterPage.kt
 ├── sync/
 │   ├── RoomHttpClient.kt
 │   ├── RoomSessionController.kt
@@ -325,24 +328,29 @@ android/app/src/main/java/com/example/watch_together/
     ├── PlayerCoreShell.kt
     ├── PlayerEvent.kt
     ├── PlayerScreen.kt
-    ├── RoomPlayerPageShell.kt
+    ├── RoomPlayerDebugShell.kt
+    ├── RoomPlayerSyncEventHandler.kt
     └── RoomPlayerUiState.kt
 ```
 
 其中：
 
 - `PlayerScreen.kt`：页面组合入口，保留状态、副作用与页面装配
-- `RoomPlayerPageShell.kt`：页面壳层，负责房间页面布局与调试区块组合
-- `PlayerCoreShell.kt`：播放器核心壳层，负责视口与控制区的布局
+- `pages/room/RoomTheaterPage.kt`：`03 放映室` 业务页面壳层，负责房间码、成员、同步状态和页面视觉
+- `PlayerCoreShell.kt`：播放器核心壳层，负责视口、媒体信息、进度和控制区布局
 - `RoomPlayerUiState.kt`：页面状态统一入口
+- `RoomPlayerSyncEventHandler.kt`：页面级同步事件映射入口
+- `RoomPlayerDebugShell.kt`：开发联调面板入口
 - `RoomSessionController.kt`：房间会话入口
 - `RoomSyncCoordinator.kt`：同步协调入口
 - `AndroidExoPlayerAdapter.kt`：本地播放器核心适配层
 
 这一步带来的直接收益：
 
-- 页面壳层和播放器核心壳层有了更清晰的文件边界
-- 后续如果继续改页面区块顺序、信息层级、调试面板位置，更多是在壳层文件里调整
+- 业务页面壳层和播放器核心壳层有了更清晰的文件边界
+- 后续如果继续改 `03 放映室` 页面区块顺序、信息层级、调试入口，更多是在 `pages/room` 中调整
+- 后续如果继续改播放器视口、进度、控制按钮排布，更多是在 `ui/player/PlayerCoreShell` 中调整
+- `PlayerCoreShell` 不直接知道房间码、成员、host/user 等业务信息
 - `PlayerScreen` 不再同时承担全部 UI 区块定义
 
 ## 推荐的第二阶段重构
@@ -399,7 +407,7 @@ android/app/src/main/java/com/example/watch_together/
 
 ### 2. 拆出开发联调 UI 和正式业务 UI 的边界
 
-当前 `RoomPlayerPageShell` 中仍然包含：
+当前调试内容已经集中在 `RoomPlayerDebugShell` 中：
 
 - `Latest sync state`
 - `Sync log`
@@ -422,9 +430,9 @@ android/app/src/main/java/com/example/watch_together/
 当前这一步已经完成了第一轮落地：
 
 - 已新增开发联调壳层 `RoomPlayerDebugShell`
-- `Latest sync state`、`Sync log`、`Player event log`、配置提示区
-  已从 `RoomPlayerPageShell` 中拆出
-- `RoomPlayerPageShell` 更接近正式业务壳层
+- `Latest sync state`、`Sync log`、`Player event log`、配置提示区已从正式业务页面中拆出
+- `RoomTheaterPage` 负责正式业务壳层
+- `PlayerCoreShell` 保持为播放器组件，不承载放映室业务页面
 - 当前结构已经支持“业务壳层”和“调试壳层”分开演进
 
 ### 3. 为后续业务开发创造稳定入口

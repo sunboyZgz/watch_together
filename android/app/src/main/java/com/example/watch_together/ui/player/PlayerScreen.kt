@@ -14,6 +14,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.media3.common.Player
 import com.example.watch_together.config.AppConfig
+import com.example.watch_together.pages.room.RoomTheaterPage
 import com.example.watch_together.sync.RoomSessionController
 import com.example.watch_together.sync.RoomSyncCoordinator
 import com.example.watch_together.sync.RoomSyncState
@@ -42,6 +43,7 @@ fun PlayerScreen(modifier: Modifier = Modifier) {
     val syncLogs = remember { mutableStateListOf<String>() }
 
     var uiState by remember { mutableStateOf(RoomPlayerUiState()) }
+    var loadedRoomId by remember { mutableStateOf<String?>(null) }
     val currentUiState by rememberUpdatedState(uiState)
 
     val isHostController = remember(uiState.activeUserId, uiState.latestSyncState) {
@@ -89,6 +91,15 @@ fun PlayerScreen(modifier: Modifier = Modifier) {
             }
             delay(500)
         }
+    }
+
+    LaunchedEffect(uiState.currentRoomId, sampleUrl) {
+        val roomId = uiState.currentRoomId ?: return@LaunchedEffect
+        if (loadedRoomId == roomId) return@LaunchedEffect
+
+        adapter.load(sampleUrl)
+        loadedRoomId = roomId
+        appendLog(syncLogs, "media auto-loaded for roomId=$roomId")
     }
 
     LaunchedEffect(adapter, roomSyncCoordinator) {
@@ -370,23 +381,49 @@ fun PlayerScreen(modifier: Modifier = Modifier) {
         sendEndedSync()
     }
 
-    RoomPlayerPageShell(
+    RoomTheaterPage(
         modifier = modifier,
-        sampleUrl = sampleUrl,
         hostUserId = hostUserId,
         viewerUserId = viewerUserId,
         uiState = uiState,
         adapter = adapter,
         isHostController = isHostController,
-        onJoinRoomInputChange = { value ->
-            updateUiState { current -> current.copy(joinRoomInput = value) }
+        onPlaybackToggleClick = {
+            if (uiState.player.isPlaying) {
+                if (isHostController) {
+                    sendPause()
+                } else {
+                    adapter.pause()
+                }
+            } else {
+                if (isHostController) {
+                    sendPlay()
+                } else {
+                    adapter.play()
+                }
+            }
         },
-        onCreateAndJoinAsHost = ::createAndJoinAsHost,
-        onJoinAsViewer = ::joinAsViewer,
-        onRejoinCurrentUser = ::rejoinCurrentUser,
-        onPlaySync = ::sendPlay,
-        onPauseSync = ::sendPause,
-        onSeekSync = ::sendSeek,
+        onSeekBackwardClick = {
+            val target = (uiState.player.currentPosition - 10_000L).coerceAtLeast(0L)
+            if (isHostController) {
+                sendSeek(target)
+            } else {
+                adapter.seekTo(target)
+            }
+        },
+        onSeekForwardClick = {
+            val safeDuration = if (uiState.player.duration > 0L) {
+                uiState.player.duration
+            } else {
+                uiState.player.currentPosition + 10_000L
+            }
+            val target = (uiState.player.currentPosition + 10_000L).coerceAtMost(safeDuration)
+            if (isHostController) {
+                sendSeek(target)
+            } else {
+                adapter.seekTo(target)
+            }
+        },
         onPlaybackSpeedChange = { speed ->
             if (isHostController && uiState.latestSyncState != null) {
                 appendLog(syncLogs, "playbackRate click path=sync rate=${speed}x")
@@ -401,12 +438,13 @@ fun PlayerScreen(modifier: Modifier = Modifier) {
                 }
                 adapter.setPlaybackSpeed(speed)
             }
-        }
-    )
-    RoomPlayerDebugShell(
-        latestSyncState = uiState.latestSyncState,
-        syncLogs = syncLogs,
-        playerEventLogs = playerEventLogs
+        },
+        onJoinRoomInputChange = { value ->
+            updateUiState { current -> current.copy(joinRoomInput = value) }
+        },
+        onCreateAndJoinAsHost = ::createAndJoinAsHost,
+        onJoinAsViewer = ::joinAsViewer,
+        onRejoinCurrentUser = ::rejoinCurrentUser
     )
 }
 
