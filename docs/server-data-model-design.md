@@ -193,6 +193,8 @@
 - `tags`
 - `production_team`
 - `search_aliases`
+- `season_label`
+- `episode_label`
 - `duration_ms`
 - `status`
 - `created_at`
@@ -203,7 +205,60 @@
 - `media_url` 先指向 HLS 入口
 - `title`、`original_title`、`production_team`、`search_aliases` 共同服务 `02A 选择视频` 的搜索框
 - `tags` 和 `category` 可以继续作为媒体展示字段存在
+- `subtitle` 第一版继续用于承载轻量副标题，例如“治愈冒险”“剧场版”“特别篇”
+- `season_label` 用于展示季、篇章或系列分组文案
+- `episode_label` 用于展示当前集数或单集文案，例如“第 09 集”“OVA 01”
 - 当前阶段不需要先引入复杂的 CMS 设计
+
+### `MediaItem` 播放展示元数据结论
+
+`03 放映室` 需要展示“影片名称 + 当前第几集 + 播放进度”。当前更推荐先保持 `media_items` 为单个可播放媒体条目，并在 `media_items` 上补充轻量播放展示字段，而不是立即引入独立 episode 表。
+
+当前结论：
+
+- 第一版继续使用 `media_items.title` 作为主标题
+- 第一版继续使用 `media_items.subtitle` 作为内容副标题
+- 新增 `media_items.season_label` 作为季、篇章或系列分组展示文案
+- 新增 `media_items.episode_label` 作为当前集数或单集展示文案
+- 播放进度仍由 WebSocket runtime state 的 `positionMs` 提供
+- 总时长展示使用 `media_items.duration_ms`
+- 当前不新增 `media_episodes` 独立表
+
+这样做的原因：
+
+- 当前 `02A 选择视频` 选中的对象本质上仍是“一个可播放媒体”
+- `03 放映室` 需要更清晰的季/集展示字段，但还不需要跨集导航
+- `user_media_progress` 当前也是按 `user_id + media_item_id` 记录进度
+- 先补轻量字段能支撑当前 UI，同时避免 episode 表把选片、建房、进度和同步链路一起变复杂
+
+后续触发 schema 升级的信号：
+
+- 需要在同一部作品下展示多集列表
+- 需要支持下一集自动跳转
+- 需要区分系列、季、集、OVA、剧场版
+- 需要按“番剧作品”聚合用户观看进度
+- 需要对单集分别保存播放源、封面、时长或上线状态
+
+如果出现这些信号，再考虑引入：
+
+- `media_series`：作品或系列层级
+- `media_seasons`：季或篇章层级
+- `media_episodes`：单集可播放条目
+
+当前这部分已经落为独立 migration：
+
+- `server/migrations/20260426104000_add_media_playback_display_fields.up.sql`
+- `server/migrations/20260426104000_add_media_playback_display_fields.down.sql`
+
+当前落地内容包括：
+
+- `media_items.season_label`
+- `media_items.episode_label`
+
+当前落地规则包括：
+
+- `season_label` 可空，但若存在则不允许空白字符串
+- `episode_label` 可空，但若存在则不允许空白字符串
 
 #### `MediaTag`（下一阶段候选）
 
@@ -712,6 +767,36 @@
 - repeated join 优先恢复已有 active 成员关系
 - former host 在 host transfer 后重连时回到普通成员
 
+### 4.4 `03 放映室` 页面数据边界
+
+`03 放映室` 页面会同时使用业务主数据和运行时同步状态。
+
+业务主数据来自 PostgreSQL：
+
+- `rooms.room_code`：右上角 6 位房间码，Android 后续可点击复制
+- `rooms.media_item_id`：当前房间选中的影片
+- `rooms.host_user_id`：当前业务房主
+- `room_members`：当前房间成员关系
+- `users.nickname / avatar_seed / avatar_url`：房主和成员展示信息
+- `media_items.title / subtitle / season_label / episode_label / media_url / duration_ms`：影片标题、播放展示文案、播放地址和总时长
+
+运行时同步状态继续来自 WebSocket authority state：
+
+- `positionMs`
+- `seq`
+- `playbackRate`
+- `paused`
+- `ended`
+- 在线连接、heartbeat 和 host transfer 结果
+
+当前 schema 对第一版 `03 放映室` 已经基本够用，不需要为了播放器实时状态新增表。
+
+当前影片播放展示模型：
+
+- 第一版使用 `media_items.season_label` 和 `media_items.episode_label` 展示季/集信息
+- 当前不新增 `media_episodes` 独立表
+- 如果后续需要支持系列、季、集、下一集自动跳转，再评估独立 episode 表
+
 ---
 
 ## 5. 第一版表草案
@@ -734,6 +819,8 @@
 - `id uuid primary key`
 - `title text not null`
 - `subtitle text null`
+- `season_label text null`
+- `episode_label text null`
 - `description text null`
 - `cover_url text null`
 - `media_url text not null`
@@ -746,8 +833,10 @@
 
 说明：
 
-- `tags` 用 `jsonb` 足够支撑当前标签筛选场景
-- 后续如果筛选逻辑变复杂，再考虑拆标签映射表
+- `subtitle` 用于媒体副标题或简介式补充文案
+- `season_label` 用于季、篇章或系列分组展示
+- `episode_label` 用于当前集数或单集展示
+- `tags` 已逐步从 `jsonb` 过渡到 `media_tags + media_item_tags` 关系模型
 
 ### `rooms`
 

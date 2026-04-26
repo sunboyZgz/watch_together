@@ -64,7 +64,7 @@
 | 继续追番列表 | `02 首页` | 当前登录用户 | 用户未看完内容、媒体封面、媒体标题、当前追番进度 | 用户观看进度 | 需要数据库读写 |
 | 搜索视频 | `02A 选择视频` | 搜索词、标签 | `media_items` | 无 | 需要数据库查询 |
 | 标签筛选视频 | `02A 选择视频` | 标签 | `media_items.tags`、`media_items.category` | 无 | 需要数据库查询 |
-| 进入放映室 | `03 放映室` | `room_id` / `room_code` | `rooms`、`room_members`、`media_items` | 运行时连接态 | DB + 内存协作 |
+| 进入放映室 | `03 放映室` | `room_id` / `room_code` | `rooms`、`room_members`、`media_items`、运行时 `room_state` | 运行时连接态 | DB + 内存协作 |
 | 播放同步 | `03 放映室` | host 控制操作 | room authority runtime state | room authority runtime state | 当前以内存为主 |
 | 房主转移 | 生命周期 | 无直接表单输入 | `room_members` + 运行时在线状态 | 运行时 host 切换，必要时同步 `rooms.host_user_id` | 需要内存主导 |
 | grace period 房间销毁 | 生命周期 | 无 | `rooms`、`room_members` | `rooms.status` | 需要业务表状态更新 |
@@ -700,16 +700,153 @@ UI 还未正式落地，但已经可以提前确定数据需求。
 ### 当前入口
 
 - `03 放映室`
+- 从 `02A 选择视频` 点击 `创建房间` 后进入
+- 也可以从 `02 首页` 输入房间码加入后进入
 
 ### 页面需要的信息
 
-- 当前房间
-- 当前媒体
-- 当前 host
-- 当前成员身份
-- 当前 authority state
+- 当前房间标题与房间码
+- 当前媒体标题
+- 当前集数或播放展示文案
+- 当前播放进度
+- 当前 host 与成员信息
+- 当前播放倍速
+- 当前同步状态与控制状态
+- 当前在线成员状态
 
-### 服务端需要做什么
+### 7.1 房间码
+
+#### 页面需要的信息
+
+- 右上角展示 6 位房间码
+- 后续支持点击复制到剪贴板
+
+#### 服务端需要做什么
+
+1. 创建房间时生成 `room_code`
+2. 进入房间页时返回当前房间的 `room_code`
+
+#### 数据库相关
+
+读取：
+
+- `rooms.room_code`
+
+当前对 schema 的影响：
+
+- `rooms.room_code` 已经存在，且应保持 6 位唯一约束
+- 点击复制属于 Android 交互，不新增 schema
+
+### 7.2 播放器主区域
+
+#### 页面需要的信息
+
+- 播放器应占满手机横向宽度
+- 播放地址来自当前房间选中的媒体
+
+#### 服务端需要做什么
+
+1. 根据房间读取当前 `media_item_id`
+2. 返回对应媒体的播放地址
+
+#### 数据库相关
+
+读取：
+
+- `rooms.media_item_id`
+- `media_items.media_url`
+
+当前对 schema 的影响：
+
+- `media_items.media_url` 已经能支撑第一版播放地址
+- 播放器宽度与比例属于 Android UI，不新增 schema
+
+### 7.3 影片名称、集数与播放进度
+
+#### 页面需要的信息
+
+- 影片名称
+- 当前是第几集
+- 当前播放进度
+
+#### 服务端需要做什么
+
+1. 返回当前媒体标题
+2. 返回用于展示的集数或播放展示文案
+3. 运行时同步层继续提供当前播放位置
+
+#### 数据库相关
+
+读取：
+
+- `media_items.title`
+- `media_items.subtitle`
+- `media_items.season_label`
+- `media_items.episode_label`
+- `media_items.duration_ms`
+
+运行时读取：
+
+- room authority state 中的 `positionMs`
+- room authority state 中的 `paused`
+- room authority state 中的 `ended`
+
+当前对 schema 的影响：
+
+- 第一版使用 `media_items.season_label` 承载季、篇章或系列分组文案
+- 第一版使用 `media_items.episode_label` 承载“第 09 集”这类展示文案
+- 当前不新增独立 episode 表
+- 如果后续要稳定支持多集列表或下一集自动跳转，再评估 episode model
+- 当前播放进度仍属于运行时同步状态，不建议直接落为 `rooms` 表字段
+
+### 7.4 房主、成员与倍速
+
+#### 页面需要的信息
+
+- 当前房主昵称与头像
+- 当前成员昵称与头像
+- 当前播放倍速
+
+#### 服务端需要做什么
+
+1. 根据 `room_members` 查询当前房间成员
+2. 关联 `users` 返回昵称与头像字段
+3. 返回当前 host 信息
+4. 通过运行时 `room_state.playbackRate` 表达当前倍速
+
+#### 数据库相关
+
+读取：
+
+- `room_members.room_id`
+- `room_members.user_id`
+- `room_members.role`
+- `room_members.is_active`
+- `users.nickname`
+- `users.avatar_seed`
+- `users.avatar_url`
+
+运行时读取：
+
+- `room_state.hostUserId`
+- `room_state.playbackRate`
+
+当前对 schema 的影响：
+
+- `users`、`room_members` 当前字段已经能支撑第一版展示
+- 播放倍速继续由 authority runtime state 维护，不新增持久化字段
+
+### 7.5 同步控制与在线状态
+
+#### 页面需要的信息
+
+- 同步状态提示
+- 播放/暂停/seek 等控制
+- 当前是否双端在线
+- 房主/成员身份提示
+- 重连与自动续播提示
+
+#### 服务端需要做什么
 
 分成两层：
 
@@ -717,20 +854,23 @@ UI 还未正式落地，但已经可以提前确定数据需求。
    - 查询 `rooms`
    - 查询 `room_members`
    - 查询 `media_items`
+   - 查询 `users`
 
 2. 运行时同步
    - 维护 authority state
-   - heartbeat
-   - host transfer
-   - drift correction 相关协作
+   - 维护在线连接
+   - 维护 heartbeat
+   - 维护 host transfer
+   - 广播 `room_state`
 
-### 数据库相关
+#### 数据库相关
 
 需要读取：
 
 - `rooms`
 - `room_members`
 - `media_items`
+- `users`
 
 当前不建议直接落库：
 
@@ -738,6 +878,33 @@ UI 还未正式落地，但已经可以提前确定数据需求。
 - 当前 seq
 - 当前 heartbeat 最近时间
 - websocket 在线连接
+- 当前是否双端在线
+
+### 当前结论
+
+`03 放映室` 这页需要的是“业务主数据 + 运行时同步状态”的组合视图。
+
+当前已经足够支撑第一版的 schema：
+
+- `rooms.room_code`
+- `rooms.media_item_id`
+- `rooms.host_user_id`
+- `room_members`
+- `users.nickname / avatar_seed / avatar_url`
+- `media_items.title / subtitle / season_label / episode_label / media_url / duration_ms`
+
+需要后续继续评估的 schema：
+
+- 当出现多集列表、下一集自动跳转、系列/季/集聚合时，再评估独立 episode model
+
+当前仍应保留在运行时的状态：
+
+- `positionMs`
+- `seq`
+- `playbackRate`
+- `paused`
+- `ended`
+- 在线连接与 heartbeat 状态
 
 ---
 
