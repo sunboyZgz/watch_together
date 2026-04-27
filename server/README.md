@@ -10,7 +10,10 @@
 - `GET /home/summary` 的首页用户与观看进度聚合能力
 - `GET /media/tags` 的媒体标签列表能力
 - `GET /media/items` 的媒体搜索与标签筛选能力
-- `POST /rooms` 的最小 create room 能力
+- `POST /rooms` 的 DB-backed create room 能力
+- `POST /rooms/{roomCode}/join` 的按房间码加入能力
+- `GET /rooms/{roomCode}` 的放映室首屏业务数据能力
+- `PUT /me/media-progress/{mediaItemId}` 的用户观看进度写入能力
 - `/ws` WebSocket 接入路由与正式 join room 语义
 - `play / pause / seek` 的最小控制事件处理与广播
 - `set_playback_rate` 的最小控制事件处理与广播
@@ -60,8 +63,12 @@
 - `GET /home/summary`
 - `GET /media/tags`
 - `GET /media/items`
+- `POST /rooms`
+- `POST /rooms/{roomCode}/join`
+- `GET /rooms/{roomCode}`
+- `PUT /me/media-progress/{mediaItemId}`
 
-注意：auth / home / media endpoints 依赖 `DATABASE_URL` 和已执行的 PostgreSQL migration；如果未配置数据库，接口会返回 `503`。
+注意：auth / home / media / room / progress endpoints 依赖 `DATABASE_URL` 和已执行的 PostgreSQL migration；如果未配置数据库，接口会返回 `503`。
 
 ## Current Structure
 
@@ -89,14 +96,20 @@ server/
 │   │   ├── decode.go
 │   │   ├── envelope.go
 │   │   └── events.go
+│   ├── progress/
+│   │   └── service.go
 │   ├── room/
 │   │   ├── client.go
 │   │   ├── manager.go
 │   │   ├── manager_test.go
 │   │   └── room.go
+│   ├── roomapi/
+│   │   └── service.go
 │   ├── store/
 │   │   ├── home_postgres.go
 │   │   ├── media_postgres.go
+│   │   ├── progress_postgres.go
+│   │   ├── room_postgres.go
 │   │   └── postgres.go
 │   └── transport/
 │       ├── api_response.go
@@ -107,6 +120,8 @@ server/
 │       ├── json.go
 │       ├── media_http_handler.go
 │       ├── media_http_handler_test.go
+│       ├── progress_http_handler.go
+│       ├── progress_http_handler_test.go
 │       ├── room_http_handler.go
 │       ├── room_http_handler_test.go
 │       ├── websocket_handler.go
@@ -128,8 +143,10 @@ server/
 - `internal/home/`: 首页 summary 业务聚合逻辑
 - `internal/media/`: 媒体标签、媒体搜索与分页参数处理逻辑
 - `internal/protocol/`: 与 `INT-19` 对齐的最小协议结构，包含 create room 请求 / 响应和 WebSocket 事件模型
+- `internal/progress/`: 用户媒体观看进度的低频写入业务逻辑
 - `internal/room/`: 房间、连接、房间管理器，以及房间创建与控制状态更新的内存模型
-- `internal/store/`: PostgreSQL 读写入口，当前包含用户账号、首页 summary 与媒体目录 store
+- `internal/roomapi/`: 房间业务 API 的 create/join 服务层，负责 DB 主数据与运行时房间的边界
+- `internal/store/`: PostgreSQL 读写入口，当前包含用户账号、首页 summary、媒体目录、房间业务与观看进度 store
 - `internal/transport/`: auth、home、media、`POST /rooms`、`/ws`、join room 与 `play / pause / seek / set_playback_rate / ended` 的接入层和测试
 
 当前关键文件对应关系：
@@ -140,19 +157,24 @@ server/
 - `scripts/new_migration.sh`: 创建新的 `up/down` SQL 迁移文件
 - `scripts/migrate.sh`: 执行 `up/down/version/force` 迁移命令
 - `Makefile`: 提供 `migration-create / migration-up / migration-down / migration-version` 入口
-- `internal/app/server.go`: 注册 `/healthz`、`POST /auth/register`、`POST /auth/login`、`GET /home/summary`、`GET /media/tags`、`GET /media/items`、`POST /rooms` 和 `/ws`
+- `internal/app/server.go`: 注册 `/healthz`、`POST /auth/register`、`POST /auth/login`、`GET /home/summary`、`GET /media/tags`、`GET /media/items`、`POST /rooms`、`POST /rooms/{roomCode}/join`、`GET /rooms/{roomCode}`、`PUT /me/media-progress/{mediaItemId}` 和 `/ws`
 - `internal/auth/service.go`: 注册、登录、bcrypt 密码哈希与 dev token 生成
 - `internal/home/service.go`: 首页用户信息、上次观看和继续追番聚合逻辑
 - `internal/media/service.go`: 媒体标签列表、搜索参数、分页 cursor 和结果裁剪逻辑
+- `internal/progress/service.go`: 用户媒体观看进度校验与低频写入逻辑
+- `internal/roomapi/service.go`: 6 位房间码生成、DB-backed create room 和 join room by code 业务逻辑
 - `internal/store/postgres.go`: PostgreSQL 连接与 `users` 读写
 - `internal/store/home_postgres.go`: `users`、`user_media_progress` 与 `media_items` 的首页 summary 查询
 - `internal/store/media_postgres.go`: `media_items`、`media_tags` 与 `media_item_tags` 的标签列表、搜索和筛选查询
+- `internal/store/progress_postgres.go`: `user_media_progress` 的 upsert 写入
+- `internal/store/room_postgres.go`: `rooms`、`room_members`、`media_items` 的创建房间和按房间码加入事务
 - `internal/transport/auth_http_handler.go`: auth HTTP API 入口与统一 API envelope
 - `internal/transport/home_http_handler.go`: `GET /home/summary` HTTP API 入口与 dev token 解析
 - `internal/transport/media_http_handler.go`: `GET /media/tags`、`GET /media/items` HTTP API 入口和分页 envelope
+- `internal/transport/progress_http_handler.go`: `PUT /me/media-progress/{mediaItemId}` HTTP API 入口
 - `internal/protocol/events.go`: create room、join room、room_state、ended、heartbeat、error 等最小结构
 - `internal/room/manager.go`: 房间创建、查询、唯一 `roomId` 生成和客户端清理
-- `internal/transport/room_http_handler.go`: create room HTTP 入口
+- `internal/transport/room_http_handler.go`: DB-backed create room 与 join by room code HTTP 入口
 - `internal/transport/websocket_handler.go`: join room、heartbeat、host 校验、控制事件处理和广播
 - `internal/room/room.go`: 房间成员、host 状态、authority timeline、ended completed state 和 repeated join 连接替换逻辑
 
@@ -168,8 +190,12 @@ server/
 - `GET /home/summary` 返回当前用户、最近一次观看和最近 2 条未完成观看记录
 - `GET /media/tags` 返回默认主标签和展开标签列表
 - `GET /media/items` 支持 `query / tag / limit / cursor` 的媒体搜索与筛选
+- `POST /rooms` 写入 DB 房间主数据、host 成员关系，并返回 `roomCode / media / roomState`
+- `POST /rooms/{roomCode}/join` 根据 6 位房间码写入或恢复成员关系
+- `GET /rooms/{roomCode}` 返回放映室首屏需要的 `room / media / members`
+- `PUT /me/media-progress/{mediaItemId}` 低频写入用户媒体观看进度
 - `go run ./cmd/roomserver`
-- `POST /rooms` 返回 `201 Created` 与初始 `room_state`
+- HTTP room API 返回统一 `data + meta` envelope
 - `join_room` 仅允许加入已存在房间，不存在房间时返回 `error`
 - host 发出的 `play / pause / seek` 会更新房间状态并广播
 - host 发出的 `set_playback_rate` 会更新房间权威倍率并广播

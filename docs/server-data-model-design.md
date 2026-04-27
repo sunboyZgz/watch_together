@@ -797,6 +797,15 @@
 - 当前不新增 `media_episodes` 独立表
 - 如果后续需要支持系列、季、集、下一集自动跳转，再评估独立 episode 表
 
+当前接口落地状态：
+
+- `POST /rooms` 已使用 PostgreSQL 写入 `rooms` 和 host 的 `room_members`
+- `POST /rooms/{roomCode}/join` 已使用 PostgreSQL 查询 `rooms.room_code` 并写入或恢复 `room_members`
+- HTTP API 响应中的 `room.id` 是数据库 UUID
+- HTTP API 响应中的 `room.roomCode` 是 6 位分享码
+- 当前 WebSocket `join_room.payload.roomId` 仍使用 `room.roomCode`，避免把实时同步链路和数据库 UUID 强耦合
+- 后续如果要让 WebSocket 改用数据库 UUID，需要单独做协议迁移任务，而不是在业务 API 中隐式切换
+
 ---
 
 ## 5. 第一版表草案

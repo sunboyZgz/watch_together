@@ -552,6 +552,22 @@ UI 还未正式落地，但已经可以提前确定数据需求。
 1. 查询视频列表
 2. 基于选中的 `media_item_id` 创建房间
 
+当前接口落地状态：
+
+- `POST /rooms` 已作为 `INT-121` 落地为 DB-backed create room
+- 请求使用 `Authorization: Bearer dev_<userId>` 获取 host 用户
+- 请求体使用 `mediaItemId`
+- 服务端写入 `rooms`
+- 服务端写入 host 的 `room_members`
+- 响应同时返回 `room.id` 和 `room.roomCode`
+- 当前 WebSocket 运行时仍以 `roomCode` 作为 `join_room.roomId`
+
+当前数据边界：
+
+- `rooms.id` 是数据库 UUID 主键
+- `rooms.room_code` 是 6 位分享码，也是 Android 展示和输入的房间码
+- `room_state` 仍属于运行时同步状态，HTTP create 只返回初始状态用于首屏衔接
+
 ### 4.5 加入房间
 
 #### 页面需要的信息
@@ -579,6 +595,15 @@ UI 还未正式落地，但已经可以提前确定数据需求。
 
 - 当前 `rooms.room_code` 设计已经能支撑这项功能
 - 弹窗本身不会新增 schema 需求
+
+当前接口落地状态：
+
+- `POST /rooms/{roomCode}/join` 已作为 `INT-122` 落地
+- 请求使用 `Authorization: Bearer dev_<userId>` 获取当前用户
+- 服务端根据 `roomCode` 查询可加入房间
+- 用户已有 active member 时保持幂等
+- 用户曾离开但房间仍存在时恢复成员关系
+- join 成功后 Android 仍需要连接 WebSocket `/ws` 并发送 `join_room`
 
 ### 4.6 继续追番
 
@@ -690,6 +715,12 @@ UI 还未正式落地，但已经可以提前确定数据需求。
 - `rooms.room_code` 需要唯一
 - `room_members` 需要表达 active/inactive
 
+当前 HTTP / WebSocket 分工：
+
+- HTTP `POST /rooms/{roomCode}/join` 负责业务成员关系
+- WebSocket `join_room` 负责实时连接进入、收到 `room_state`、参与播放同步
+- 当前 WebSocket `join_room.payload.roomId` 使用 6 位 `roomCode`
+
 ---
 
 ## 6. 选择视频、搜索与标签筛选
@@ -784,6 +815,13 @@ UI 还未正式落地，但已经可以提前确定数据需求。
 - `rooms.room_code` 已经存在，且应保持 6 位唯一约束
 - 点击复制属于 Android 交互，不新增 schema
 
+当前接口落地状态：
+
+- `GET /rooms/{roomCode}` 已作为 `INT-123` 落地
+- 该接口返回 `room / media / members`
+- 该接口只负责 `03 放映室` 首屏业务数据
+- 运行时同步状态仍来自 WebSocket `room_state`
+
 ### 7.2 播放器主区域
 
 #### 页面需要的信息
@@ -797,6 +835,50 @@ UI 还未正式落地，但已经可以提前确定数据需求。
 2. 返回对应媒体的播放地址
 
 #### 数据库相关
+
+读取：
+
+- `rooms.room_code`
+- `rooms.host_user_id`
+- `rooms.media_item_id`
+- `rooms.status`
+- `room_members.user_id`
+- `room_members.role`
+- `room_members.is_active`
+- `users.nickname`
+- `users.avatar_seed`
+- `users.avatar_url`
+- `media_items.title`
+- `media_items.subtitle`
+- `media_items.media_url`
+- `media_items.duration_ms`
+- `media_items.season_label`
+- `media_items.episode_label`
+
+### 7.3 观看进度持久化
+
+`03 放映室` 的实时播放同步由 WebSocket 负责，但首页的“上次观看”和“继续追番”需要低频持久化用户进度。
+
+当前接口落地状态：
+
+- `PUT /me/media-progress/{mediaItemId}` 已作为 `INT-124` 落地
+- 写入 `user_media_progress`
+- 使用当前登录用户和媒体 ID 作为唯一业务维度
+- 秒级进度用于业务展示，不用于实时同步
+
+当前写入字段：
+
+- `last_position_seconds`
+- `duration_seconds`
+- `completed`
+- `completion_source`
+- `last_watched_at`
+
+当前约束：
+
+- 普通播放进度不需要 `completion_source`
+- 完成语义才传 `ended / manual_mark / threshold_auto`
+- 不要把播放器高频 tick 直接写入数据库
 
 读取：
 

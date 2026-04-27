@@ -11,7 +11,9 @@ import (
 	"watch_together/server/internal/auth"
 	"watch_together/server/internal/home"
 	"watch_together/server/internal/media"
+	"watch_together/server/internal/progress"
 	"watch_together/server/internal/room"
+	"watch_together/server/internal/roomapi"
 	"watch_together/server/internal/store"
 	"watch_together/server/internal/transport"
 )
@@ -57,10 +59,11 @@ func NewServer(config Config) *Server {
 	roomManager := room.NewManager()
 	go roomManager.StartCleanupLoop(context.Background(), room.DefaultCleanupInterval())
 	mux := http.NewServeMux()
-	roomHTTPHandler := transport.NewRoomHTTPHandler(roomManager)
+	roomHTTPHandler := transport.NewRoomHTTPHandler(roomManager, newRoomService(config.DatabaseURL))
 	authHTTPHandler := transport.NewAuthHTTPHandler(newAuthService(config.DatabaseURL))
 	homeHTTPHandler := transport.NewHomeHTTPHandler(newHomeService(config.DatabaseURL))
 	mediaHTTPHandler := transport.NewMediaHTTPHandler(newMediaService(config.DatabaseURL))
+	progressHTTPHandler := transport.NewProgressHTTPHandler(newProgressService(config.DatabaseURL))
 
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -71,7 +74,9 @@ func NewServer(config Config) *Server {
 	mux.HandleFunc("/home/summary", homeHTTPHandler.Summary)
 	mux.HandleFunc("/media/tags", mediaHTTPHandler.Tags)
 	mux.HandleFunc("/media/items", mediaHTTPHandler.Items)
+	mux.HandleFunc("/me/media-progress/", progressHTTPHandler.Update)
 	mux.HandleFunc("/rooms", roomHTTPHandler.CreateRoom)
+	mux.HandleFunc("/rooms/", roomHTTPHandler.RoomRoute)
 	mux.Handle("/ws", transport.NewWebSocketHandler(roomManager, config.DebugSync))
 
 	httpServer := &http.Server{
@@ -126,6 +131,34 @@ func newMediaService(databaseURL string) *media.Service {
 		return nil
 	}
 	return media.NewService(store.NewPostgresMediaStore(db))
+}
+
+// newRoomService connects room business APIs to PostgreSQL when DATABASE_URL is available.
+func newRoomService(databaseURL string) *roomapi.Service {
+	if strings.TrimSpace(databaseURL) == "" {
+		log.Print("DATABASE_URL is not set; room endpoints will return service unavailable")
+		return nil
+	}
+	db, err := store.OpenPostgres(context.Background(), databaseURL)
+	if err != nil {
+		log.Printf("failed to connect database; room endpoints unavailable: %v", err)
+		return nil
+	}
+	return roomapi.NewService(store.NewPostgresRoomStore(db))
+}
+
+// newProgressService connects media progress writes to PostgreSQL when DATABASE_URL is available.
+func newProgressService(databaseURL string) *progress.Service {
+	if strings.TrimSpace(databaseURL) == "" {
+		log.Print("DATABASE_URL is not set; progress endpoints will return service unavailable")
+		return nil
+	}
+	db, err := store.OpenPostgres(context.Background(), databaseURL)
+	if err != nil {
+		log.Printf("failed to connect database; progress endpoints unavailable: %v", err)
+		return nil
+	}
+	return progress.NewService(store.NewPostgresProgressStore(db))
 }
 
 // Address exposes the listen address mainly for logging and local verification.

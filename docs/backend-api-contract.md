@@ -505,9 +505,28 @@ cursor=...
 
 ### Rooms
 
+当前实现状态：
+
+- `POST /rooms` 已调整为 DB-backed create room，对应 `INT-121`
+- `POST /rooms/{roomCode}/join` 已落地，对应 `INT-122`
+- 房间业务主数据来自 PostgreSQL `rooms / room_members / media_items`
+- 创建房间和加入房间都需要 `Authorization: Bearer dev_<userId>`
+- `room.id` 是 PostgreSQL 中的 UUID 主键
+- `room.roomCode` 是 6 位可分享房间码，也是当前 WebSocket `join_room.roomId` 使用的运行时房间 key
+- HTTP 负责创建/加入业务关系，WebSocket 仍负责实时连接、初始 `room_state` 和播放同步
+
 #### `POST /rooms`
 
 用途：根据选中的媒体创建房间。
+
+请求：
+
+```http
+POST /rooms
+Authorization: Bearer dev_user_uuid
+Content-Type: application/json
+Accept: application/json
+```
 
 请求：
 
@@ -553,12 +572,30 @@ cursor=...
 
 说明：
 
-- HTTP 创建房间负责业务主数据。
-- WebSocket `join_room` 仍负责实时连接进入房间。
+- 创建成功后会写入 `rooms` 和 host 的 `room_members` 记录。
+- 服务端会同时把 `roomCode` 注册到内存同步房间中，方便紧接着建立 WebSocket。
+- Android 创建成功后进入 `03 放映室`，后续 WebSocket `join_room.payload.roomId` 当前传 `room.roomCode`。
+- `roomState` 是新房间的初始运行时状态，用于首屏占位；真正实时状态仍以 WebSocket `room_state` 为准。
+
+错误：
+
+- `400 VALIDATION_ERROR`: `mediaItemId` 为空或请求体不是合法 JSON
+- `401 UNAUTHORIZED`: 缺少 token、token 不是当前 dev token 形态，或用户不存在
+- `404 NOT_FOUND`: 媒体不存在或不是 active
+- `409 CONFLICT`: 短时间内无法生成唯一 6 位房间码
+- `503 INTERNAL_ERROR`: 服务端未连接数据库，room service 不可用
 
 #### `POST /rooms/{roomCode}/join`
 
 用途：通过 6 位房间码加入房间业务关系。
+
+请求：
+
+```http
+POST /rooms/A7K2M9/join
+Authorization: Bearer dev_user_uuid
+Accept: application/json
+```
 
 响应：
 
@@ -583,9 +620,37 @@ cursor=...
 }
 ```
 
+说明：
+
+- 如果用户已经是该房间 active member，接口保持幂等并返回现有成员身份。
+- 如果用户之前离开过但房间仍存在，接口会恢复成员关系并将其作为 `member`。
+- 该接口只处理业务成员关系，不替代 WebSocket `join_room`。
+- Android 调用成功后仍需连接 `/ws` 并发送 `join_room`，其中 `roomId` 当前传 `room.roomCode`。
+
+错误：
+
+- `400 VALIDATION_ERROR`: 房间码格式不合法
+- `401 UNAUTHORIZED`: 缺少 token、token 不是当前 dev token 形态，或用户不存在
+- `404 NOT_FOUND`: 房间不存在、已销毁或不可加入
+- `503 INTERNAL_ERROR`: 服务端未连接数据库，room service 不可用
+
 #### `GET /rooms/{roomCode}`
 
 用途：支撑 `03 放映室` 首屏业务数据。
+
+当前实现状态：
+
+- `GET /rooms/{roomCode}` 已落地，对应 `INT-123`
+- 数据来自 PostgreSQL `rooms / room_members / users / media_items`
+- 响应只包含业务主数据，不包含实时 `positionMs / playbackRate / paused / ended / seq`
+- 实时同步状态仍必须等待 WebSocket `room_state`
+
+请求：
+
+```http
+GET /rooms/A7K2M9
+Accept: application/json
+```
 
 响应：
 
@@ -623,11 +688,41 @@ cursor=...
 }
 ```
 
+说明：
+
+- Android 进入 `03 放映室` 时可以先调用该接口拿房间码、媒体信息和成员展示信息。
+- 该接口不会返回 WebSocket 在线连接状态。
+- 该接口不会替代 WebSocket `join_room`。
+- 如果需要播放同步，客户端仍必须连接 `/ws` 并等待 `room_state`。
+
+错误：
+
+- `400 VALIDATION_ERROR`: 房间码格式不合法
+- `404 NOT_FOUND`: 房间不存在、已销毁或不可加入
+- `503 INTERNAL_ERROR`: 服务端未连接数据库，room service 不可用
+
 ### Progress
 
 #### `PUT /me/media-progress/{mediaItemId}`
 
 用途：低频写入用户观看进度。
+
+当前实现状态：
+
+- `PUT /me/media-progress/{mediaItemId}` 已落地，对应 `INT-124`
+- 写入 PostgreSQL `user_media_progress`
+- 使用 `Authorization: Bearer dev_<userId>` 识别当前用户
+- 进度以秒级写入，用于首页 `lastWatched / continueWatching`
+- 不用于实时播放同步，不替代 WebSocket authority state
+
+请求：
+
+```http
+PUT /me/media-progress/media_uuid
+Authorization: Bearer dev_user_uuid
+Content-Type: application/json
+Accept: application/json
+```
 
 请求：
 
@@ -636,7 +731,7 @@ cursor=...
   "lastPositionSeconds": 564,
   "durationSeconds": 1458,
   "completed": false,
-  "completionSource": "player_tick"
+  "completionSource": null
 }
 ```
 
@@ -656,6 +751,23 @@ cursor=...
   }
 }
 ```
+
+说明：
+
+- 普通播放进度 tick 不需要传 `completionSource`，传 `null` 或省略即可。
+- `completionSource` 仅在明确完成语义时使用。
+- 当前允许值：`ended`、`manual_mark`、`threshold_auto`。
+- `lastPositionSeconds` 必须大于等于 0。
+- `durationSeconds` 必须大于 0。
+- `lastPositionSeconds` 必须小于等于 `durationSeconds`。
+- 该接口建议低频调用，例如页面离开、暂停、播放结束、或间隔一段时间上报一次；不要按播放器帧或高频 tick 写入。
+
+错误：
+
+- `400 VALIDATION_ERROR`: 请求体非法、进度范围非法或 `completionSource` 不合法
+- `401 UNAUTHORIZED`: 缺少 token、token 不是当前 dev token 形态，或用户不存在
+- `404 NOT_FOUND`: 媒体不存在或不是 active
+- `503 INTERNAL_ERROR`: 服务端未连接数据库，progress service 不可用
 
 ## 前后端联调规则
 
@@ -699,6 +811,24 @@ export DATABASE_URL='postgres://app:app@127.0.0.1:5432/anime_watch_dev?sslmode=d
 make migration-up
 go run ./cmd/roomserver
 ```
+
+导入本地 mock 数据：
+
+```bash
+cd server
+psql "$DATABASE_URL" -f seeds/dev_seed.sql
+```
+
+当前 seed 固定数据：
+
+- host user: `00000000-0000-0000-0000-000000000001`
+- viewer user: `00000000-0000-0000-0000-000000000002`
+- test password: `secret`
+- host dev token: `dev_00000000-0000-0000-0000-000000000001`
+- viewer dev token: `dev_00000000-0000-0000-0000-000000000002`
+- media item: `10000000-0000-0000-0000-000000000001`，`紫罗兰永恒花园`
+- media item: `10000000-0000-0000-0000-000000000002`，`孤独摇滚!`
+- media item: `10000000-0000-0000-0000-000000000003`，`葬送的芙莉莲`
 
 注册：
 
@@ -756,6 +886,68 @@ Android 联调注意：
 - `nextCursor` 不为空时表示还有下一页；客户端不解析 cursor 内容，只原样传回。
 - 当前搜索仍是 PostgreSQL 第一版实现，先满足基础模糊搜索和标签筛选；如果后续体验不够，再评估 Meilisearch / OpenSearch。
 
+### Room 本地联调示例
+
+创建房间：
+
+```bash
+curl -s http://127.0.0.1:8080/rooms \
+  -H 'Content-Type: application/json' \
+  -H 'Authorization: Bearer dev_<userId>' \
+  -d '{"mediaItemId":"<mediaItemId>"}'
+```
+
+通过房间码加入：
+
+```bash
+curl -s -X POST http://127.0.0.1:8080/rooms/A7K2M9/join \
+  -H 'Authorization: Bearer dev_<userId>'
+```
+
+获取放映室首屏数据：
+
+```bash
+curl -s http://127.0.0.1:8080/rooms/A7K2M9
+```
+
+Android 联调注意：
+
+- 创建房间接口使用选片页返回的 `media.id` 作为 `mediaItemId`。
+- 创建成功后，右上角展示 `room.roomCode`，而不是 `room.id`。
+- 加入房间弹窗输入的是 6 位 `roomCode`。
+- 当前 WebSocket `join_room.payload.roomId` 继续传 `room.roomCode`，这样能复用已经稳定的运行时同步链路。
+- HTTP `room.id` 是数据库 UUID，只用于后续业务 API 和持久化关联，不直接作为当前 WebSocket join key。
+- HTTP create/join 成功不代表已经进入实时同步；Android 仍需建立 `/ws` 并等待 `room_state`。
+- `GET /rooms/{roomCode}` 只负责放映室首屏业务数据，不返回实时播放状态。
+
+### Progress 本地联调示例
+
+写入观看进度：
+
+```bash
+curl -s -X PUT http://127.0.0.1:8080/me/media-progress/10000000-0000-0000-0000-000000000001 \
+  -H 'Content-Type: application/json' \
+  -H 'Authorization: Bearer dev_00000000-0000-0000-0000-000000000001' \
+  -d '{"lastPositionSeconds":600,"durationSeconds":1458,"completed":false}'
+```
+
+播放结束时写入完成状态：
+
+```bash
+curl -s -X PUT http://127.0.0.1:8080/me/media-progress/10000000-0000-0000-0000-000000000001 \
+  -H 'Content-Type: application/json' \
+  -H 'Authorization: Bearer dev_00000000-0000-0000-0000-000000000001' \
+  -d '{"lastPositionSeconds":1458,"durationSeconds":1458,"completed":true,"completionSource":"ended"}'
+```
+
+Android 联调注意：
+
+- 该接口是低频业务进度写入，只服务首页“上次观看”和“继续追番”。
+- 不要用它驱动实时同步播放。
+- 实时播放状态继续以 WebSocket authority state 为准。
+- 普通进度上报不传 `completionSource`。
+- 只有 ended、手动标记或阈值自动完成时才传 `completionSource`。
+
 ## 后续任务
 
 - `INT-116`: 登录接口
@@ -763,8 +955,8 @@ Android 联调注意：
 - `INT-118`: 首页 summary 接口
 - `INT-119`: 媒体标签接口，已落地
 - `INT-120`: 媒体搜索接口，已落地
-- `INT-121`: DB-backed create room 接口
-- `INT-122`: room code join 接口
-- `INT-123`: room detail 接口
-- `INT-124`: 观看进度写入接口
-- `INT-125`: API 文档持续维护
+- `INT-121`: DB-backed create room 接口，已落地
+- `INT-122`: room code join 接口，已落地
+- `INT-123`: room detail 接口，已落地
+- `INT-124`: 观看进度写入接口，已落地
+- `INT-125`: API 文档持续维护，当前第一批接口已同步

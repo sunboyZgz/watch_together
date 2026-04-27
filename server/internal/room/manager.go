@@ -71,6 +71,20 @@ func (m *Manager) CreateRoom(hostUserID string, mediaID string) (*Room, error) {
 	return nil, ErrUnableToGenerateRoomID
 }
 
+// RegisterCreatedRoom mirrors a persistent room into the in-memory sync registry.
+func (m *Manager) RegisterCreatedRoom(roomID string, hostUserID string, mediaID string) *Room {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.cleanupExpiredRoomsLocked(m.now())
+
+	if existing, ok := m.rooms[roomID]; ok {
+		return existing
+	}
+	registeredRoom := NewCreatedRoom(roomID, hostUserID, mediaID)
+	m.rooms[roomID] = registeredRoom
+	return registeredRoom
+}
+
 // GetOrCreate returns an existing room or creates a new one on first join.
 func (m *Manager) GetOrCreate(roomID string) *Room {
 	m.mu.Lock()
