@@ -329,9 +329,26 @@ cursor=opaque_cursor
 
 ### Home
 
+当前实现状态：
+
+- `GET /home/summary` 已落地，对应 `INT-118`
+- 使用 `Authorization: Bearer dev_<userId>` 读取当前用户
+- 数据来自 `users` 与 `user_media_progress` join `media_items`
+- `lastWatched` 没有记录时返回 `null`
+- `continueWatching` 当前取最近 2 条未完成记录
+- 启动服务端前必须配置 `DATABASE_URL`，否则 home endpoints 会返回 `503`
+
 #### `GET /home/summary`
 
 用途：支撑 `02 首页与加入房间`。
+
+请求：
+
+```http
+GET /home/summary
+Authorization: Bearer dev_user_uuid
+Accept: application/json
+```
 
 响应：
 
@@ -366,11 +383,34 @@ cursor=opaque_cursor
 }
 ```
 
+错误：
+
+- `401 UNAUTHORIZED`: 缺少 token、token 不是当前 dev token 形态，或用户不存在
+- `503 INTERNAL_ERROR`: 服务端未连接数据库，home service 不可用
+
 ### Media
+
+当前实现状态：
+
+- `GET /media/tags` 已落地，对应 `INT-119`
+- `GET /media/items` 已落地，对应 `INT-120`
+- 数据来自 `media_items`、`media_tags`、`media_item_tags`
+- `featuredTags` 当前返回最多 5 个 `is_featured = true` 且 `is_active = true` 的标签
+- `allTags` 当前返回最多 20 个 `is_active = true` 的标签
+- `GET /media/items` 支持 `query`、`tag`、`limit`、`cursor`
+- 当前 cursor 为服务端不透明字符串，第一版内部使用 offset 表达
+- 启动服务端前必须配置 `DATABASE_URL`，否则 media endpoints 会返回 `503`
 
 #### `GET /media/tags`
 
 用途：支撑 `02A 选择视频` 标签筛选。
+
+请求：
+
+```http
+GET /media/tags
+Accept: application/json
+```
 
 响应：
 
@@ -396,6 +436,12 @@ cursor=opaque_cursor
 
 - `featuredTags` 用于默认展示，建议最多 5 个。
 - `allTags` 用于点击 `更多` 后的浮层，当前最多返回 20 个。
+- Android 默认标签行优先使用 `featuredTags`。
+- Android 点击 `更多` 后使用 `allTags` 渲染悬浮标签面板。
+
+错误：
+
+- `503 INTERNAL_ERROR`: 服务端未连接数据库，media service 不可用
 
 #### `GET /media/items`
 
@@ -409,6 +455,14 @@ tag=healing
 limit=20
 cursor=...
 ```
+
+说明：
+
+- `query` 可为空；为空时返回默认媒体列表。
+- `query` 当前会命中 `title / subtitle / description / original_title / production_team / search_aliases`。
+- `tag` 使用 `media_tags.slug`，可为空。
+- `limit` 默认 20，最大 50。
+- `cursor` 对客户端不透明；Android 只需要原样带回下一页请求。
 
 响应：
 
@@ -443,6 +497,11 @@ cursor=...
   }
 }
 ```
+
+错误：
+
+- `400 VALIDATION_ERROR`: `limit` 或 `cursor` 格式不合法
+- `503 INTERNAL_ERROR`: 服务端未连接数据库，media service 不可用
 
 ### Rooms
 
@@ -657,13 +716,53 @@ curl -s http://127.0.0.1:8080/auth/login \
   -d '{"account":"xingye","password":"secret"}'
 ```
 
+### Media 本地联调示例
+
+获取标签：
+
+```bash
+curl -s http://127.0.0.1:8080/media/tags
+```
+
+默认媒体列表：
+
+```bash
+curl -s 'http://127.0.0.1:8080/media/items?limit=20'
+```
+
+按搜索词检索：
+
+```bash
+curl -s 'http://127.0.0.1:8080/media/items?query=紫罗兰&limit=20'
+```
+
+按标签筛选：
+
+```bash
+curl -s 'http://127.0.0.1:8080/media/items?tag=healing&limit=20'
+```
+
+分页：
+
+```bash
+curl -s 'http://127.0.0.1:8080/media/items?limit=20&cursor=<nextCursor>'
+```
+
+Android 联调注意：
+
+- `featuredTags` 用于默认显示的一行标签。
+- `allTags` 用于点击 `更多` 后的悬浮标签列表。
+- `tag` 参数传 `slug`，不要传中文 `name`。
+- `nextCursor` 不为空时表示还有下一页；客户端不解析 cursor 内容，只原样传回。
+- 当前搜索仍是 PostgreSQL 第一版实现，先满足基础模糊搜索和标签筛选；如果后续体验不够，再评估 Meilisearch / OpenSearch。
+
 ## 后续任务
 
 - `INT-116`: 登录接口
 - `INT-117`: 注册接口
 - `INT-118`: 首页 summary 接口
-- `INT-119`: 媒体标签接口
-- `INT-120`: 媒体搜索接口
+- `INT-119`: 媒体标签接口，已落地
+- `INT-120`: 媒体搜索接口，已落地
 - `INT-121`: DB-backed create room 接口
 - `INT-122`: room code join 接口
 - `INT-123`: room detail 接口

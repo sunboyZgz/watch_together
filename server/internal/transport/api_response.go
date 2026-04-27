@@ -40,6 +40,18 @@ func writeAPISuccess(w http.ResponseWriter, statusCode int, data any) {
 	})
 }
 
+func writeAPISuccessWithPage(w http.ResponseWriter, statusCode int, data any, page apiPage) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(statusCode)
+	_ = json.NewEncoder(w).Encode(apiResponse{
+		Data: data,
+		Meta: apiMeta{
+			RequestID: "local",
+			Page:      &page,
+		},
+	})
+}
+
 func writeAPIError(w http.ResponseWriter, statusCode int, code string, message string, details map[string]any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(statusCode)

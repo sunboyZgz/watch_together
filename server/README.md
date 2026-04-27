@@ -7,6 +7,9 @@
 - 可启动的 Go HTTP / WebSocket 服务入口
 - `POST /auth/register` 的最小账号注册能力
 - `POST /auth/login` 的最小账号密码登录能力
+- `GET /home/summary` 的首页用户与观看进度聚合能力
+- `GET /media/tags` 的媒体标签列表能力
+- `GET /media/items` 的媒体搜索与标签筛选能力
 - `POST /rooms` 的最小 create room 能力
 - `/ws` WebSocket 接入路由与正式 join room 语义
 - `play / pause / seek` 的最小控制事件处理与广播
@@ -54,8 +57,11 @@
 
 - `POST /auth/register`
 - `POST /auth/login`
+- `GET /home/summary`
+- `GET /media/tags`
+- `GET /media/items`
 
-注意：auth endpoints 依赖 `DATABASE_URL` 和已执行的 PostgreSQL migration；如果未配置数据库，接口会返回 `503`。
+注意：auth / home / media endpoints 依赖 `DATABASE_URL` 和已执行的 PostgreSQL migration；如果未配置数据库，接口会返回 `503`。
 
 ## Current Structure
 
@@ -75,6 +81,10 @@ server/
 │   │   └── server.go
 │   ├── auth/
 │   │   └── service.go
+│   ├── home/
+│   │   └── service.go
+│   ├── media/
+│   │   └── service.go
 │   ├── protocol/
 │   │   ├── decode.go
 │   │   ├── envelope.go
@@ -85,12 +95,18 @@ server/
 │   │   ├── manager_test.go
 │   │   └── room.go
 │   ├── store/
+│   │   ├── home_postgres.go
+│   │   ├── media_postgres.go
 │   │   └── postgres.go
 │   └── transport/
 │       ├── api_response.go
 │       ├── auth_http_handler.go
 │       ├── auth_http_handler_test.go
+│       ├── home_http_handler.go
+│       ├── home_http_handler_test.go
 │       ├── json.go
+│       ├── media_http_handler.go
+│       ├── media_http_handler_test.go
 │       ├── room_http_handler.go
 │       ├── room_http_handler_test.go
 │       ├── websocket_handler.go
@@ -109,10 +125,12 @@ server/
 - `scripts/`: migration 辅助脚本
 - `internal/app/`: 应用组装层，负责配置和 HTTP server 初始化
 - `internal/auth/`: 最小账号注册、登录、密码校验与 token 占位逻辑
+- `internal/home/`: 首页 summary 业务聚合逻辑
+- `internal/media/`: 媒体标签、媒体搜索与分页参数处理逻辑
 - `internal/protocol/`: 与 `INT-19` 对齐的最小协议结构，包含 create room 请求 / 响应和 WebSocket 事件模型
 - `internal/room/`: 房间、连接、房间管理器，以及房间创建与控制状态更新的内存模型
-- `internal/store/`: PostgreSQL 读写入口，当前先包含用户账号 store
-- `internal/transport/`: `POST /rooms`、`/ws`、join room 与 `play / pause / seek / set_playback_rate / ended` 的接入层和测试
+- `internal/store/`: PostgreSQL 读写入口，当前包含用户账号、首页 summary 与媒体目录 store
+- `internal/transport/`: auth、home、media、`POST /rooms`、`/ws`、join room 与 `play / pause / seek / set_playback_rate / ended` 的接入层和测试
 
 当前关键文件对应关系：
 
@@ -122,10 +140,16 @@ server/
 - `scripts/new_migration.sh`: 创建新的 `up/down` SQL 迁移文件
 - `scripts/migrate.sh`: 执行 `up/down/version/force` 迁移命令
 - `Makefile`: 提供 `migration-create / migration-up / migration-down / migration-version` 入口
-- `internal/app/server.go`: 注册 `/healthz`、`POST /auth/register`、`POST /auth/login`、`POST /rooms` 和 `/ws`
+- `internal/app/server.go`: 注册 `/healthz`、`POST /auth/register`、`POST /auth/login`、`GET /home/summary`、`GET /media/tags`、`GET /media/items`、`POST /rooms` 和 `/ws`
 - `internal/auth/service.go`: 注册、登录、bcrypt 密码哈希与 dev token 生成
+- `internal/home/service.go`: 首页用户信息、上次观看和继续追番聚合逻辑
+- `internal/media/service.go`: 媒体标签列表、搜索参数、分页 cursor 和结果裁剪逻辑
 - `internal/store/postgres.go`: PostgreSQL 连接与 `users` 读写
+- `internal/store/home_postgres.go`: `users`、`user_media_progress` 与 `media_items` 的首页 summary 查询
+- `internal/store/media_postgres.go`: `media_items`、`media_tags` 与 `media_item_tags` 的标签列表、搜索和筛选查询
 - `internal/transport/auth_http_handler.go`: auth HTTP API 入口与统一 API envelope
+- `internal/transport/home_http_handler.go`: `GET /home/summary` HTTP API 入口与 dev token 解析
+- `internal/transport/media_http_handler.go`: `GET /media/tags`、`GET /media/items` HTTP API 入口和分页 envelope
 - `internal/protocol/events.go`: create room、join room、room_state、ended、heartbeat、error 等最小结构
 - `internal/room/manager.go`: 房间创建、查询、唯一 `roomId` 生成和客户端清理
 - `internal/transport/room_http_handler.go`: create room HTTP 入口
@@ -141,6 +165,9 @@ server/
 - `POST /auth/login` 校验 bcrypt 密码并返回统一 envelope
 - 重复注册同一账号返回 `409 CONFLICT`
 - 错误密码登录返回 `401 UNAUTHORIZED`
+- `GET /home/summary` 返回当前用户、最近一次观看和最近 2 条未完成观看记录
+- `GET /media/tags` 返回默认主标签和展开标签列表
+- `GET /media/items` 支持 `query / tag / limit / cursor` 的媒体搜索与筛选
 - `go run ./cmd/roomserver`
 - `POST /rooms` 返回 `201 Created` 与初始 `room_state`
 - `join_room` 仅允许加入已存在房间，不存在房间时返回 `error`

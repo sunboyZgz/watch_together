@@ -9,6 +9,8 @@ import (
 	"strings"
 
 	"watch_together/server/internal/auth"
+	"watch_together/server/internal/home"
+	"watch_together/server/internal/media"
 	"watch_together/server/internal/room"
 	"watch_together/server/internal/store"
 	"watch_together/server/internal/transport"
@@ -57,6 +59,8 @@ func NewServer(config Config) *Server {
 	mux := http.NewServeMux()
 	roomHTTPHandler := transport.NewRoomHTTPHandler(roomManager)
 	authHTTPHandler := transport.NewAuthHTTPHandler(newAuthService(config.DatabaseURL))
+	homeHTTPHandler := transport.NewHomeHTTPHandler(newHomeService(config.DatabaseURL))
+	mediaHTTPHandler := transport.NewMediaHTTPHandler(newMediaService(config.DatabaseURL))
 
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -64,6 +68,9 @@ func NewServer(config Config) *Server {
 	})
 	mux.HandleFunc("/auth/login", authHTTPHandler.Login)
 	mux.HandleFunc("/auth/register", authHTTPHandler.Register)
+	mux.HandleFunc("/home/summary", homeHTTPHandler.Summary)
+	mux.HandleFunc("/media/tags", mediaHTTPHandler.Tags)
+	mux.HandleFunc("/media/items", mediaHTTPHandler.Items)
 	mux.HandleFunc("/rooms", roomHTTPHandler.CreateRoom)
 	mux.Handle("/ws", transport.NewWebSocketHandler(roomManager, config.DebugSync))
 
@@ -91,6 +98,34 @@ func newAuthService(databaseURL string) *auth.Service {
 		return nil
 	}
 	return auth.NewService(store.NewPostgresUserStore(db))
+}
+
+// newHomeService connects home summary reads to PostgreSQL when DATABASE_URL is available.
+func newHomeService(databaseURL string) *home.Service {
+	if strings.TrimSpace(databaseURL) == "" {
+		log.Print("DATABASE_URL is not set; home endpoints will return service unavailable")
+		return nil
+	}
+	db, err := store.OpenPostgres(context.Background(), databaseURL)
+	if err != nil {
+		log.Printf("failed to connect database; home endpoints unavailable: %v", err)
+		return nil
+	}
+	return home.NewService(store.NewPostgresHomeStore(db))
+}
+
+// newMediaService connects media catalog APIs to PostgreSQL when DATABASE_URL is available.
+func newMediaService(databaseURL string) *media.Service {
+	if strings.TrimSpace(databaseURL) == "" {
+		log.Print("DATABASE_URL is not set; media endpoints will return service unavailable")
+		return nil
+	}
+	db, err := store.OpenPostgres(context.Background(), databaseURL)
+	if err != nil {
+		log.Printf("failed to connect database; media endpoints unavailable: %v", err)
+		return nil
+	}
+	return media.NewService(store.NewPostgresMediaStore(db))
 }
 
 // Address exposes the listen address mainly for logging and local verification.

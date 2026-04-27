@@ -221,6 +221,28 @@ UI 还未正式落地，但已经可以提前确定数据需求。
 - 用户观看历史/进度
 - 媒体主数据
 
+### 当前接口落地状态
+
+`GET /home/summary` 已作为 `INT-118` 落地，当前用于一次性返回首页首屏需要的最小数据：
+
+- `user.nickname`
+- `user.avatarSeed`
+- `user.avatarUrl`
+- `lastWatched`
+- `continueWatching`
+
+当前读取来源：
+
+- `users`
+- `user_media_progress`
+- `media_items`
+
+当前约束：
+
+- `lastWatched` 没有观看记录时返回 `null`
+- `continueWatching` 当前返回最近 2 条 `completed = false` 的记录
+- 登录态暂时使用 `Authorization: Bearer dev_<userId>` 占位 token
+
 ---
 
 ## 5. 02A 选择视频
@@ -273,6 +295,14 @@ UI 还未正式落地，但已经可以提前确定数据需求。
 - `media_items.production_team`
 - `media_items.search_aliases`
 
+当前接口落地状态：
+
+- `GET /media/items` 已作为 `INT-120` 落地
+- `query` 会检索 `title / subtitle / description / original_title / production_team / search_aliases`
+- `tag` 使用 `media_tags.slug`
+- `limit` 默认 20，最大 50
+- `cursor` 由服务端返回，Android 不解析内容，只原样传回
+
 ### 5.2 标签筛选
 
 #### 页面需要的信息
@@ -308,6 +338,15 @@ UI 还未正式落地，但已经可以提前确定数据需求。
 - `media_tags`
 - `media_item_tags`
 
+当前接口落地状态：
+
+- `GET /media/tags` 已作为 `INT-119` 落地
+- `featuredTags` 返回最多 5 个默认主标签
+- `allTags` 返回最多 20 个可展开标签
+- `featuredTags / allTags` 都只返回 `is_active = true` 的标签
+- Android 默认标签行使用 `featuredTags`
+- Android 点击 `更多` 后使用 `allTags`
+
 ### 5.3 影片列表
 
 #### 页面需要的信息
@@ -333,6 +372,12 @@ UI 还未正式落地，但已经可以提前确定数据需求。
 - `media_items.cover_url`
 - `media_items.description`
 - `media_items.category`
+- `media_items.subtitle`
+- `media_items.duration_ms`
+- `media_items.season_label`
+- `media_items.episode_label`
+- `media_tags.slug`
+- `media_tags.name`
 
 以及后续的标签关系表
 
