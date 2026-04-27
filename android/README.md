@@ -84,12 +84,21 @@ android/
 
 1. 先进入 `pages/login/LoginPage`
 2. 点击 `登录` 后弹出 `LoginDialog`
-3. 当前阶段确认账号后，进入 `pages/home/HomePage`
-4. 点击 `创建放映室` 后，进入 `pages/video/VideoSelectionPage`
-5. 在选片页选择影片后，底部固定栏可进入当前播放器放映室页面
+3. 输入账号密码后调用 `POST /auth/login`
+4. 登录成功后保存当前运行时 `AuthSession`，并进入 `pages/home/HomePage`
+5. 点击 `创建放映室` 后，进入 `pages/video/VideoSelectionPage`
+6. 在选片页选择影片后，底部固定栏可进入当前播放器放映室页面
 
 这样做是为了让真实业务页面和已经稳定的播放器同步核心并行演进。
 后续当个人中心、媒体检索接口与正式放映室页面落地后，会继续把入口推进到完整业务流。
+
+当前登录接入状态：
+
+- `auth/AuthHttpClient.kt` 负责调用 `POST /auth/login`
+- `auth/AuthModels.kt` 保存 `AuthSession` 与最小用户信息
+- 登录成功后首页优先使用服务端返回的 `nickname`
+- 当前 access token 仍为后端约定的 `dev_<userId>` 占位 token
+- token 暂时只保存在 Compose 运行时状态中，后续再接正式持久化/session 方案
 
 ## Video Selection Page
 

@@ -10,6 +10,8 @@ object AppConfig {
     val mediaDefaultId: String = BuildConfig.MEDIA_DEFAULT_ID
     val debugSync: Boolean = BuildConfig.DEBUG_SYNC
 
+    fun authLoginUrl(): String = "${apiBaseUrl.trimEnd('/')}/auth/login"
+
     fun roomsUrl(): String = "${apiBaseUrl.trimEnd('/')}/rooms"
 
     fun defaultMediaIdForRoom(): String = mediaDefaultId.ifBlank { "sample_001" }

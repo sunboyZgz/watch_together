@@ -15,6 +15,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
@@ -54,6 +55,8 @@ fun LoginDialog(
     onConfirmClick: () -> Unit,
     onDismissClick: () -> Unit,
     onRegisterClick: () -> Unit,
+    isLoading: Boolean = false,
+    errorMessage: String? = null,
     modifier: Modifier = Modifier
 ) {
     Surface(
@@ -98,7 +101,7 @@ fun LoginDialog(
                             .size(28.dp)
                             .clip(CircleShape)
                             .background(Color(0x12FFFFFF))
-                            .clickable(onClick = onDismissClick),
+                            .clickable(enabled = !isLoading, onClick = onDismissClick),
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
@@ -138,6 +141,7 @@ fun LoginDialog(
                     OutlinedTextField(
                         value = account,
                         onValueChange = onAccountChange,
+                        enabled = !isLoading,
                         modifier = Modifier.fillMaxWidth(),
                         singleLine = true,
                         placeholder = {
@@ -177,6 +181,7 @@ fun LoginDialog(
                     OutlinedTextField(
                         value = password,
                         onValueChange = onPasswordChange,
+                        enabled = !isLoading,
                         modifier = Modifier.fillMaxWidth(),
                         singleLine = true,
                         visualTransformation = PasswordVisualTransformation(),
@@ -207,9 +212,19 @@ fun LoginDialog(
                 }
 
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    if (!errorMessage.isNullOrBlank()) {
+                        Text(
+                            text = errorMessage,
+                            style = MaterialTheme.typography.bodyMedium.copy(
+                                color = Color(0xFFFFB4C8),
+                                fontWeight = FontWeight.Medium
+                            )
+                        )
+                    }
+
                     Button(
                         onClick = onConfirmClick,
-                        enabled = account.trim().isNotEmpty() && password.isNotBlank(),
+                        enabled = !isLoading && account.trim().isNotEmpty() && password.isNotBlank(),
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(26.dp),
                         colors = ButtonDefaults.buttonColors(
@@ -219,13 +234,21 @@ fun LoginDialog(
                             disabledContentColor = Color(0x80FFF8FF)
                         )
                     ) {
-                        Text(
-                            text = "登录并继续",
-                            style = MaterialTheme.typography.titleMedium.copy(
-                                fontWeight = FontWeight.SemiBold
-                            ),
-                            modifier = Modifier.padding(vertical = 6.dp)
-                        )
+                        if (isLoading) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(22.dp),
+                                strokeWidth = 2.dp,
+                                color = Color(0xFFFDF8FF)
+                            )
+                        } else {
+                            Text(
+                                text = "登录并继续",
+                                style = MaterialTheme.typography.titleMedium.copy(
+                                    fontWeight = FontWeight.SemiBold
+                                ),
+                                modifier = Modifier.padding(vertical = 6.dp)
+                            )
+                        }
                     }
 
                 }

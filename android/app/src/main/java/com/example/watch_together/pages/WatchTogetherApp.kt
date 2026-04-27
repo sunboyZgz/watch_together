@@ -11,6 +11,7 @@ import com.example.watch_together.pages.video.VideoSelectionPage
 import com.example.watch_together.ui.player.PlayerScreen
 
 private enum class AppScreen {
+    Login,
     Home,
     VideoSelection,
     Player
@@ -18,29 +19,38 @@ private enum class AppScreen {
 
 @Composable
 fun WatchTogetherApp() {
-    var sessionAccount by rememberSaveable { mutableStateOf<String?>(null) }
-    var currentScreen by rememberSaveable { mutableStateOf(AppScreen.Home) }
+    var currentScreen by rememberSaveable { mutableStateOf(AppScreen.Login) }
+    var sessionUserId by rememberSaveable { mutableStateOf("") }
+    var sessionAccount by rememberSaveable { mutableStateOf("") }
+    var sessionNickname by rememberSaveable { mutableStateOf("") }
+    var sessionAccessToken by rememberSaveable { mutableStateOf("") }
 
-    if (sessionAccount == null) {
-        LoginPage(
-            onLoginConfirmed = { confirmedAccount ->
-                sessionAccount = confirmedAccount
+    when (currentScreen) {
+        AppScreen.Login -> LoginPage(
+            onLoginConfirmed = { session ->
+                sessionUserId = session.user.id
+                sessionAccount = session.user.account
+                sessionNickname = session.user.nickname
+                sessionAccessToken = session.accessToken
                 currentScreen = AppScreen.Home
             }
         )
-    } else {
-        when (currentScreen) {
-            AppScreen.Home -> HomePage(
-                sessionAccount = sessionAccount.orEmpty(),
-                onCreateRoomClick = { currentScreen = AppScreen.VideoSelection }
-            )
 
-            AppScreen.VideoSelection -> VideoSelectionPage(
-                onBackClick = { currentScreen = AppScreen.Home },
-                onCreateRoomClick = { currentScreen = AppScreen.Player }
-            )
+        AppScreen.Home -> HomePage(
+            sessionAccount = sessionNickname.ifBlank { sessionAccount },
+            onCreateRoomClick = { currentScreen = AppScreen.VideoSelection }
+        )
 
-            AppScreen.Player -> PlayerScreen()
-        }
+        AppScreen.VideoSelection -> VideoSelectionPage(
+            onBackClick = { currentScreen = AppScreen.Home },
+            onCreateRoomClick = { currentScreen = AppScreen.Player }
+        )
+
+        AppScreen.Player -> PlayerScreen()
     }
+
+    // Keep these values in the root state for the upcoming API integration tasks.
+    // Later screens will consume the token directly instead of keeping local mock state.
+    sessionUserId
+    sessionAccessToken
 }

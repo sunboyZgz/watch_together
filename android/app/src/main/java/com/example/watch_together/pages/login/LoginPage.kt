@@ -1,6 +1,7 @@
 package com.example.watch_together.pages.login
 
 import android.annotation.SuppressLint
+import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -25,6 +26,8 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -33,11 +36,18 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import com.example.watch_together.auth.AuthHttpClient
+import com.example.watch_together.auth.AuthRequestException
+import com.example.watch_together.auth.AuthSession
 import com.example.watch_together.ui.theme.Watch_togetherTheme
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 private val LoginPageBackground = Color(0xFF13162A)
 private val LoginPagePrimary = Color(0xFFE675BC)
@@ -59,12 +69,17 @@ private val BackgroundGlowC = Brush.radialGradient(
 @SuppressLint("UnusedBoxWithConstraintsScope")
 @Composable
 fun LoginPage(
-    onLoginConfirmed: (String) -> Unit,
+    onLoginConfirmed: (AuthSession) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
+    val authHttpClient = remember { AuthHttpClient() }
     var isDialogVisible by rememberSaveable { mutableStateOf(false) }
     var account by rememberSaveable { mutableStateOf("") }
     var password by rememberSaveable { mutableStateOf("") }
+    var isLoggingIn by rememberSaveable { mutableStateOf(false) }
+    var loginError by rememberSaveable { mutableStateOf<String?>(null) }
 
     BoxWithConstraints(
         modifier = modifier
@@ -112,7 +127,10 @@ fun LoginPage(
             Spacer(modifier = Modifier.height(ctaSpacer))
 
             Button(
-                onClick = { isDialogVisible = true },
+                onClick = {
+                    loginError = null
+                    isDialogVisible = true
+                },
                 modifier = Modifier
                     .fillMaxWidth()
                     .widthIn(max = 440.dp),
@@ -176,19 +194,56 @@ fun LoginPage(
                     account = account,
                     password = password,
                     onAccountChange = { account = it },
-                    onPasswordChange = { password = it },
+                    onPasswordChange = {
+                        password = it
+                        loginError = null
+                    },
                     onConfirmClick = {
-                        onLoginConfirmed(account.trim())
-                        isDialogVisible = false
+                        val loginAccount = account.trim()
+                        coroutineScope.launch {
+                            isLoggingIn = true
+                            loginError = null
+                            runCatching {
+                                withContext(Dispatchers.IO) {
+                                    authHttpClient.login(loginAccount, password)
+                                }
+                            }.onSuccess { session ->
+                                password = ""
+                                isDialogVisible = false
+                                Toast.makeText(
+                                    context,
+                                    "登录成功，欢迎回来 ${session.user.nickname}",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                                onLoginConfirmed(session)
+                            }.onFailure { error ->
+                                loginError = error.toLoginErrorMessage()
+                            }
+                            isLoggingIn = false
+                        }
                     },
                     onDismissClick = {
+                        if (isLoggingIn) return@LoginDialog
                         isDialogVisible = false
                     },
                     onRegisterClick = {},
+                    isLoading = isLoggingIn,
+                    errorMessage = loginError,
                     modifier = Modifier.padding(horizontal = horizontalPadding)
                 )
             }
         }
+    }
+}
+
+private fun Throwable.toLoginErrorMessage(): String {
+    return when (this) {
+        is AuthRequestException -> when (statusCode) {
+            401 -> "账号或密码不正确"
+            503 -> "服务暂时不可用，请确认本地服务已启动"
+            else -> message.ifBlank { "登录失败，请稍后重试" }
+        }
+        else -> "无法连接服务器，请确认 API_BASE_URL 与后端服务"
     }
 }
 
