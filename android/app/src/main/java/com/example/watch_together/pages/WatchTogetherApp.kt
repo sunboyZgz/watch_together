@@ -20,7 +20,6 @@ private enum class AppScreen {
 @Composable
 fun WatchTogetherApp() {
     var currentScreen by rememberSaveable { mutableStateOf(AppScreen.Login) }
-    var sessionUserId by rememberSaveable { mutableStateOf("") }
     var sessionAccount by rememberSaveable { mutableStateOf("") }
     var sessionNickname by rememberSaveable { mutableStateOf("") }
     var sessionAccessToken by rememberSaveable { mutableStateOf("") }
@@ -28,7 +27,6 @@ fun WatchTogetherApp() {
     when (currentScreen) {
         AppScreen.Login -> LoginPage(
             onLoginConfirmed = { session ->
-                sessionUserId = session.user.id
                 sessionAccount = session.user.account
                 sessionNickname = session.user.nickname
                 sessionAccessToken = session.accessToken
@@ -38,6 +36,7 @@ fun WatchTogetherApp() {
 
         AppScreen.Home -> HomePage(
             sessionAccount = sessionNickname.ifBlank { sessionAccount },
+            accessToken = sessionAccessToken,
             onCreateRoomClick = { currentScreen = AppScreen.VideoSelection }
         )
 
@@ -48,9 +47,4 @@ fun WatchTogetherApp() {
 
         AppScreen.Player -> PlayerScreen()
     }
-
-    // Keep these values in the root state for the upcoming API integration tasks.
-    // Later screens will consume the token directly instead of keeping local mock state.
-    sessionUserId
-    sessionAccessToken
 }

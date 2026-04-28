@@ -12,6 +12,8 @@ object AppConfig {
 
     fun authLoginUrl(): String = "${apiBaseUrl.trimEnd('/')}/auth/login"
 
+    fun homeSummaryUrl(): String = "${apiBaseUrl.trimEnd('/')}/home/summary"
+
     fun roomsUrl(): String = "${apiBaseUrl.trimEnd('/')}/rooms"
 
     fun defaultMediaIdForRoom(): String = mediaDefaultId.ifBlank { "sample_001" }

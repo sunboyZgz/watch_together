@@ -388,6 +388,18 @@ Accept: application/json
 - `401 UNAUTHORIZED`: 缺少 token、token 不是当前 dev token 形态，或用户不存在
 - `503 INTERNAL_ERROR`: 服务端未连接数据库，home service 不可用
 
+Android 联调状态：
+
+- `INT-127` 已接入 Android 首页
+- 登录成功后，`WatchTogetherApp` 会把 `AuthSession.accessToken` 传给 `HomePage`
+- `HomePage` 进入后调用 `GET /home/summary`
+- 欢迎语使用 `user.nickname`
+- 头像缩写优先使用 `user.avatarSeed`
+- “上次观看”和“继续追番”使用 `lastWatched / continueWatching`
+- Android 当前将进度展示为秒级 `mm:ss`
+- Android 当前暂不加载远程 `coverUrl`，封面仍使用本地渐变占位
+- 该接口失败不会阻断首页进入，只展示轻量错误提示
+
 ### Media
 
 当前实现状态：

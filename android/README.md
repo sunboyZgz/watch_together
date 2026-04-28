@@ -100,6 +100,16 @@ android/
 - 当前 access token 仍为后端约定的 `dev_<userId>` 占位 token
 - token 暂时只保存在 Compose 运行时状态中，后续再接正式持久化/session 方案
 
+当前首页接入状态：
+
+- `pages/home/HomeSummaryClient.kt` 负责调用 `GET /home/summary`
+- 请求使用登录后保存的 `Authorization: Bearer dev_<userId>` token
+- `HomePage` 会用接口返回的 `user.nickname / avatarSeed` 更新欢迎语和头像缩写
+- `HomePage` 会用 `lastWatched` 和 `continueWatching` 更新“上次观看”和“继续追番”
+- `lastPositionSeconds / durationSeconds` 在 Android 侧展示为秒级 `mm:ss` 进度
+- 当前 cover 图仍使用本地渐变占位，后续接入图片加载库后再消费 `coverUrl`
+- 首页接口加载失败时保留页面可用，并展示轻量错误提示
+
 ## Video Selection Page
 
 `pages/video/VideoSelectionPage.kt` 当前承接 `02A 选择视频` 的 Android UI：

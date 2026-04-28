@@ -31,6 +31,7 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -49,6 +50,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import com.example.watch_together.ui.theme.Watch_togetherTheme
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 private val HomeBackground = Color(0xFF171A31)
 private val HomeCard = Color(0xFF2A2F4C)
@@ -93,27 +96,54 @@ private enum class HomeFeatureDialogKind {
 @Composable
 fun HomePage(
     sessionAccount: String,
+    accessToken: String,
     onCreateRoomClick: () -> Unit = {},
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    enableRemoteLoad: Boolean = true
 ) {
-    val profile = remember(sessionAccount) { buildProfile(sessionAccount) }
-    val continueItems = remember {
-        listOf(
-            ContinueWatchItem(
-                title = "孤独摇滚！",
-                progress = "上次看到第 06 集",
-                coverBrush = Brush.linearGradient(
-                    listOf(Color(0xFF5D4CA4), Color(0xFF4F4A8D))
-                )
-            ),
-            ContinueWatchItem(
-                title = "请和我结婚",
-                progress = "上次看到第 03 集",
-                coverBrush = Brush.linearGradient(
-                    listOf(Color(0xFF456B87), Color(0xFF3B5E77))
-                )
+    val homeSummaryClient = remember { HomeSummaryClient() }
+    var homeSummary by remember { mutableStateOf<HomeSummary?>(null) }
+    var isHomeSummaryLoading by rememberSaveable { mutableStateOf(false) }
+    var homeSummaryError by rememberSaveable { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(accessToken, enableRemoteLoad) {
+        if (!enableRemoteLoad) return@LaunchedEffect
+        if (accessToken.isBlank()) {
+            homeSummaryError = "登录状态缺失，请重新登录"
+            return@LaunchedEffect
+        }
+
+        isHomeSummaryLoading = true
+        homeSummaryError = null
+        runCatching {
+            withContext(Dispatchers.IO) {
+                homeSummaryClient.fetch(accessToken)
+            }
+        }.onSuccess { summary ->
+            homeSummary = summary
+        }.onFailure { throwable ->
+            homeSummaryError = throwable.message ?: "首页数据加载失败，请稍后重试"
+        }
+        isHomeSummaryLoading = false
+    }
+
+    val profile = remember(sessionAccount, homeSummary) {
+        homeSummary?.user?.let { user ->
+            buildProfileFromSummary(
+                account = sessionAccount,
+                nickname = user.nickname,
+                avatarSeed = user.avatarSeed
             )
-        )
+        } ?: buildProfile(sessionAccount)
+    }
+    val lastWatchedItem = remember(homeSummary) {
+        homeSummary?.lastWatched?.toContinueWatchItem(index = 0)
+    }
+    val continueItems = remember(homeSummary, enableRemoteLoad) {
+        homeSummary?.continueWatching
+            ?.take(2)
+            ?.mapIndexed { index, item -> item.toContinueWatchItem(index = index + 1) }
+            ?: if (enableRemoteLoad) emptyList() else fallbackContinueItems()
     }
 
     var joinRoomCode by rememberSaveable { mutableStateOf("") }
@@ -147,11 +177,19 @@ fun HomePage(
                 onAvatarClick = { activeFeatureDialog = HomeFeatureDialogKind.Profile }
             )
 
+            if (isHomeSummaryLoading || homeSummaryError != null) {
+                HomeSummaryStatusBanner(
+                    isLoading = isHomeSummaryLoading,
+                    error = homeSummaryError
+                )
+            }
+
             LastWatchCard(
+                item = lastWatchedItem,
                 compactWidth = compactWidth,
                 compactHeight = compactHeight,
                 onClick = {
-                    activeResumeTitle = "紫罗兰永恒花园"
+                    activeResumeTitle = lastWatchedItem?.title ?: "上次观看"
                     activeFeatureDialog = HomeFeatureDialogKind.ResumeWatch
                 }
             )
@@ -174,20 +212,24 @@ fun HomePage(
                 )
             )
 
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(if (compactWidth) 12.dp else 16.dp)
-            ) {
-                continueItems.forEach { item ->
-                    ContinueWatchCard(
-                        item = item,
-                        modifier = Modifier.weight(1f),
-                        compactHeight = compactHeight,
-                        onClick = {
-                            activeResumeTitle = item.title
-                            activeFeatureDialog = HomeFeatureDialogKind.ResumeWatch
-                        }
-                    )
+            if (continueItems.isEmpty()) {
+                EmptyContinueWatchingCard()
+            } else {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(if (compactWidth) 12.dp else 16.dp)
+                ) {
+                    continueItems.forEach { item ->
+                        ContinueWatchCard(
+                            item = item,
+                            modifier = Modifier.weight(1f),
+                            compactHeight = compactHeight,
+                            onClick = {
+                                activeResumeTitle = item.title
+                                activeFeatureDialog = HomeFeatureDialogKind.ResumeWatch
+                            }
+                        )
+                    }
                 }
             }
 
@@ -298,7 +340,34 @@ private fun HomeGreetingHeader(
 }
 
 @Composable
+private fun HomeSummaryStatusBanner(
+    isLoading: Boolean,
+    error: String?
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(18.dp),
+        color = Color(0x332A86A8),
+        border = BorderStroke(1.dp, Color(0x22FFFFFF))
+    ) {
+        Text(
+            text = if (isLoading) {
+                "正在同步首页数据..."
+            } else {
+                error.orEmpty()
+            },
+            style = MaterialTheme.typography.bodyMedium.copy(
+                color = HomeTextSecondary,
+                fontWeight = FontWeight.SemiBold
+            ),
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)
+        )
+    }
+}
+
+@Composable
 private fun LastWatchCard(
+    item: ContinueWatchItem?,
     compactWidth: Boolean,
     compactHeight: Boolean,
     onClick: () -> Unit
@@ -343,7 +412,7 @@ private fun LastWatchCard(
 
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
-                        text = "紫罗兰永恒花园",
+                        text = item?.title ?: "还没有上次观看",
                         style = if (compactWidth) {
                             MaterialTheme.typography.headlineSmall
                         } else {
@@ -356,7 +425,7 @@ private fun LastWatchCard(
                         overflow = TextOverflow.Ellipsis
                     )
                     Text(
-                        text = "和搭子一起继续看到第 09 集，房间会自动同步进度与倍速。",
+                        text = item?.progress ?: "创建放映室后，这里会显示你最近一次看到的秒级进度。",
                         style = if (compactWidth) {
                             MaterialTheme.typography.bodyMedium
                         } else {
@@ -379,7 +448,7 @@ private fun LastWatchCard(
                     .aspectRatio(if (compactHeight) 0.82f else 0.9f)
                     .clip(RoundedCornerShape(24.dp))
                     .background(
-                        Brush.linearGradient(
+                        item?.coverBrush ?: Brush.linearGradient(
                             listOf(Color(0xFF5762A5), Color(0xFF445584))
                         )
                     )
@@ -481,6 +550,25 @@ private fun ContinueWatchCard(
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun EmptyContinueWatchingCard() {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(24.dp),
+        color = HomeCardMuted,
+        border = BorderStroke(1.dp, HomeOutlineStroke)
+    ) {
+        Text(
+            text = "暂无继续追番。创建一个放映室，新的观看进度会在这里出现。",
+            style = MaterialTheme.typography.bodyLarge.copy(
+                color = HomeTextSecondary,
+                fontWeight = FontWeight.SemiBold
+            ),
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 18.dp)
+        )
     }
 }
 
@@ -781,10 +869,68 @@ private fun buildProfile(account: String): HomeUserProfile {
     )
 }
 
+private fun buildProfileFromSummary(
+    account: String,
+    nickname: String,
+    avatarSeed: String
+): HomeUserProfile {
+    val displayName = nickname.ifBlank { account.substringBefore('@').ifBlank { "星野" } }
+    return HomeUserProfile(
+        account = account,
+        nickname = displayName.take(10),
+        initials = avatarSeed.ifBlank { displayName }.take(2).uppercase(),
+        bio = "想把每一个夜晚都变成刚刚好的放映时间。"
+    )
+}
+
+private fun HomeWatchProgress.toContinueWatchItem(index: Int): ContinueWatchItem {
+    return ContinueWatchItem(
+        title = title,
+        progress = "上次看到 ${formatProgressTime(lastPositionSeconds)} / ${formatProgressTime(durationSeconds)}",
+        coverBrush = coverBrushFor(index)
+    )
+}
+
+private fun fallbackContinueItems(): List<ContinueWatchItem> {
+    return listOf(
+        ContinueWatchItem(
+            title = "孤独摇滚！",
+            progress = "上次看到第 06 集",
+            coverBrush = coverBrushFor(1)
+        ),
+        ContinueWatchItem(
+            title = "请和我结婚",
+            progress = "上次看到第 03 集",
+            coverBrush = coverBrushFor(2)
+        )
+    )
+}
+
+private fun formatProgressTime(seconds: Int): String {
+    val safeSeconds = seconds.coerceAtLeast(0)
+    val minutes = safeSeconds / 60
+    val remainingSeconds = safeSeconds % 60
+    return "%02d:%02d".format(minutes, remainingSeconds)
+}
+
+private fun coverBrushFor(index: Int): Brush {
+    val palettes = listOf(
+        listOf(Color(0xFF5762A5), Color(0xFF445584)),
+        listOf(Color(0xFF5D4CA4), Color(0xFF4F4A8D)),
+        listOf(Color(0xFF456B87), Color(0xFF3B5E77)),
+        listOf(Color(0xFF6C4A7C), Color(0xFF4B426A))
+    )
+    return Brush.linearGradient(palettes[index % palettes.size])
+}
+
 @Preview(showBackground = true, widthDp = 390, heightDp = 844)
 @Composable
 private fun HomePagePreview() {
     Watch_togetherTheme {
-        HomePage(sessionAccount = "xingye@example.com")
+        HomePage(
+            sessionAccount = "xingye@example.com",
+            accessToken = "preview-token",
+            enableRemoteLoad = false
+        )
     }
 }

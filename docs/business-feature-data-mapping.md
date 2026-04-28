@@ -243,6 +243,14 @@ UI 还未正式落地，但已经可以提前确定数据需求。
 - `continueWatching` 当前返回最近 2 条 `completed = false` 的记录
 - 登录态暂时使用 `Authorization: Bearer dev_<userId>` 占位 token
 
+Android 接入状态：
+
+- `INT-127` 已把 `02 首页与加入房间` 接到 `GET /home/summary`
+- 登录成功后的运行时 token 会传入首页
+- 首页欢迎语、头像缩写、上次观看和继续追番不再只依赖本地 mock
+- 观看进度展示到秒级，不展示毫秒级
+- 当前封面仍是本地渐变占位，后续图片加载方案确定后再渲染 `coverUrl`
+
 ---
 
 ## 5. 02A 选择视频
