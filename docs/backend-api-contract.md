@@ -607,6 +607,10 @@ Accept: application/json
 - 服务端会同时把 `roomCode` 注册到内存同步房间中，方便紧接着建立 WebSocket。
 - Android 创建成功后进入 `03 放映室`，后续 WebSocket `join_room.payload.roomId` 当前传 `room.roomCode`。
 - `roomState` 是新房间的初始运行时状态，用于首屏占位；真正实时状态仍以 WebSocket `room_state` 为准。
+- Android `INT-129` 已接入该接口。
+- Android 从 `02A 选择视频` 点击创建房间时，会使用当前选中的 `mediaItemId` 请求该接口。
+- Android 会使用响应中的 `media.title / media.episodeLabel / media.mediaUrl` 更新 `03 放映室` 与播放器载入地址。
+- Android 不再使用默认样例媒体创建真实业务房间。
 
 错误：
 

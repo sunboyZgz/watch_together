@@ -5,6 +5,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import com.example.watch_together.config.AppConfig
 import com.example.watch_together.pages.home.HomePage
 import com.example.watch_together.pages.login.LoginPage
 import com.example.watch_together.pages.video.VideoSelectionPage
@@ -20,13 +21,16 @@ private enum class AppScreen {
 @Composable
 fun WatchTogetherApp() {
     var currentScreen by rememberSaveable { mutableStateOf(AppScreen.Login) }
+    var sessionUserId by rememberSaveable { mutableStateOf("") }
     var sessionAccount by rememberSaveable { mutableStateOf("") }
     var sessionNickname by rememberSaveable { mutableStateOf("") }
     var sessionAccessToken by rememberSaveable { mutableStateOf("") }
+    var selectedMediaItemId by rememberSaveable { mutableStateOf(AppConfig.defaultMediaIdForRoom()) }
 
     when (currentScreen) {
         AppScreen.Login -> LoginPage(
             onLoginConfirmed = { session ->
+                sessionUserId = session.user.id
                 sessionAccount = session.user.account
                 sessionNickname = session.user.nickname
                 sessionAccessToken = session.accessToken
@@ -42,9 +46,17 @@ fun WatchTogetherApp() {
 
         AppScreen.VideoSelection -> VideoSelectionPage(
             onBackClick = { currentScreen = AppScreen.Home },
-            onCreateRoomClick = { _ -> currentScreen = AppScreen.Player }
+            onCreateRoomClick = { mediaItemId ->
+                selectedMediaItemId = mediaItemId
+                currentScreen = AppScreen.Player
+            }
         )
 
-        AppScreen.Player -> PlayerScreen()
+        AppScreen.Player -> PlayerScreen(
+            accessToken = sessionAccessToken,
+            currentUserId = sessionUserId,
+            selectedMediaItemId = selectedMediaItemId,
+            autoCreateAsHost = true
+        )
     }
 }

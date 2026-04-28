@@ -75,6 +75,8 @@ internal fun RoomTheaterPage(
     adapter: PlayerAdapter,
     hostUserId: String,
     viewerUserId: String,
+    mediaTitle: String,
+    mediaEpisodeLabel: String?,
     isHostController: Boolean,
     onPlaybackToggleClick: () -> Unit,
     onSeekBackwardClick: () -> Unit,
@@ -97,7 +99,7 @@ internal fun RoomTheaterPage(
         val sectionGap = if (compactHeight) 14.dp else 18.dp
         val roomCode = uiState.currentRoomId?.take(6)?.uppercase() ?: "A7K2M9"
         val mediaMeta = buildString {
-            append("第 09 集")
+            append(mediaEpisodeLabel ?: "当前影片")
             append(" · ")
             append(if (uiState.player.isPlaying) "正在播放" else "等待同步")
         }
@@ -119,7 +121,7 @@ internal fun RoomTheaterPage(
 
             PlayerCoreShell(
                 adapter = adapter,
-                mediaTitle = "紫罗兰永恒花园",
+                mediaTitle = mediaTitle,
                 mediaMeta = mediaMeta,
                 currentPosition = uiState.player.currentPosition,
                 duration = uiState.player.duration,
@@ -542,6 +544,8 @@ private fun RoomTheaterPagePreview() {
             adapter = PreviewPlayerAdapter,
             hostUserId = "android_host_xi",
             viewerUserId = "android_viewer_yuki",
+            mediaTitle = "紫罗兰永恒花园",
+            mediaEpisodeLabel = "第 09 集",
             isHostController = true,
             onPlaybackToggleClick = {},
             onSeekBackwardClick = {},

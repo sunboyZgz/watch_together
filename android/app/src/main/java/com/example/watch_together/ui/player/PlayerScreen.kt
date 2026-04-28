@@ -9,12 +9,14 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.media3.common.Player
 import com.example.watch_together.config.AppConfig
 import com.example.watch_together.pages.room.RoomTheaterPage
+import com.example.watch_together.sync.RoomMedia
 import com.example.watch_together.sync.RoomSessionController
 import com.example.watch_together.sync.RoomSyncCoordinator
 import com.example.watch_together.sync.RoomSyncState
@@ -28,15 +30,33 @@ import kotlinx.coroutines.withContext
 import java.util.UUID
 
 @Composable
-fun PlayerScreen(modifier: Modifier = Modifier) {
+fun PlayerScreen(
+    accessToken: String = "",
+    currentUserId: String = "",
+    selectedMediaItemId: String = AppConfig.defaultMediaIdForRoom(),
+    autoCreateAsHost: Boolean = false,
+    modifier: Modifier = Modifier
+) {
     val adapter = rememberPlayerAdapter()
     val roomSessionController = remember { RoomSessionController() }
-    val roomSyncCoordinator = remember(adapter) { RoomSyncCoordinator(adapter) }
+    var currentRoomMedia by remember { mutableStateOf<RoomMedia?>(null) }
+    val mediaUrlResolver = remember(currentRoomMedia) {
+        { mediaId: String ->
+            currentRoomMedia
+                ?.takeIf { it.id == mediaId }
+                ?.mediaUrl
+                ?: AppConfig.mediaUrlFor(mediaId)
+        }
+    }
+    val roomSyncCoordinator = remember(adapter, mediaUrlResolver) {
+        RoomSyncCoordinator(adapter, mediaUrlResolver)
+    }
     val syncEventHandler = remember(roomSyncCoordinator) { RoomPlayerSyncEventHandler(roomSyncCoordinator) }
     val coroutineScope = rememberCoroutineScope()
 
-    val sampleUrl = remember { AppConfig.sampleHlsUrl() }
-    val hostUserId = remember { "android_host_${UUID.randomUUID().toString().take(4)}" }
+    val hostUserId = remember(currentUserId) {
+        currentUserId.ifBlank { "android_host_${UUID.randomUUID().toString().take(4)}" }
+    }
     val viewerUserId = remember { "android_viewer_${UUID.randomUUID().toString().take(4)}" }
 
     val playerEventLogs = remember { mutableStateListOf<String>() }
@@ -44,6 +64,7 @@ fun PlayerScreen(modifier: Modifier = Modifier) {
 
     var uiState by remember { mutableStateOf(RoomPlayerUiState()) }
     var loadedRoomId by remember { mutableStateOf<String?>(null) }
+    var autoCreatedMediaItemId by rememberSaveable { mutableStateOf<String?>(null) }
     val currentUiState by rememberUpdatedState(uiState)
 
     val isHostController = remember(uiState.activeUserId, uiState.latestSyncState) {
@@ -93,13 +114,14 @@ fun PlayerScreen(modifier: Modifier = Modifier) {
         }
     }
 
-    LaunchedEffect(uiState.currentRoomId, sampleUrl) {
+    LaunchedEffect(uiState.currentRoomId, currentRoomMedia?.mediaUrl) {
         val roomId = uiState.currentRoomId ?: return@LaunchedEffect
+        val mediaUrl = currentRoomMedia?.mediaUrl ?: return@LaunchedEffect
         if (loadedRoomId == roomId) return@LaunchedEffect
 
-        adapter.load(sampleUrl)
+        adapter.load(mediaUrl)
         loadedRoomId = roomId
-        appendLog(syncLogs, "media auto-loaded for roomId=$roomId")
+        appendLog(syncLogs, "media auto-loaded for roomId=$roomId url=$mediaUrl")
     }
 
     LaunchedEffect(adapter, roomSyncCoordinator) {
@@ -224,31 +246,35 @@ fun PlayerScreen(modifier: Modifier = Modifier) {
     fun createAndJoinAsHost() {
         coroutineScope.launch {
             runCatching {
+                if (accessToken.isBlank()) {
+                    error("Missing access token for DB-backed room creation")
+                }
                 updateUiState { current ->
                     current.copy(syncStatus = SyncStatus.CreatingRoom)
                 }
-                appendLog(syncLogs, "POST /rooms for hostUserId=$hostUserId")
+                appendLog(syncLogs, "POST /rooms mediaItemId=$selectedMediaItemId hostUserId=$hostUserId")
                 val createResult = withContext(Dispatchers.IO) {
                     roomSessionController.createRoom(
-                        userId = hostUserId,
-                        mediaId = AppConfig.defaultMediaIdForRoom()
+                        accessToken = accessToken,
+                        mediaItemId = selectedMediaItemId
                     )
                 }
 
+                currentRoomMedia = createResult.media
                 updateUiState { current ->
                     current.copy(
                         currentRoomId = createResult.roomId,
                         joinRoomInput = createResult.roomId,
-                        activeUserId = hostUserId
+                        activeUserId = createResult.roomState.hostUserId
                     )
                 }
                 appendLog(
                     syncLogs,
-                    "Created roomId=${createResult.roomId} mediaId=${createResult.roomState.mediaId}"
+                    "Created roomId=${createResult.roomId} media=${createResult.media.title} mediaId=${createResult.media.id}"
                 )
                 joinCurrentRoomAsUser(
                     roomId = createResult.roomId,
-                    userId = hostUserId,
+                    userId = createResult.roomState.hostUserId,
                     status = SyncStatus.JoiningAsHost,
                     reason = "host join"
                 )
@@ -259,6 +285,15 @@ fun PlayerScreen(modifier: Modifier = Modifier) {
                 appendLog(syncLogs, "Create and join failed: ${error.message}")
             }
         }
+    }
+
+    LaunchedEffect(autoCreateAsHost, selectedMediaItemId, accessToken) {
+        if (!autoCreateAsHost) return@LaunchedEffect
+        if (selectedMediaItemId.isBlank()) return@LaunchedEffect
+        if (autoCreatedMediaItemId == selectedMediaItemId) return@LaunchedEffect
+
+        autoCreatedMediaItemId = selectedMediaItemId
+        createAndJoinAsHost()
     }
 
     fun joinAsViewer() {
@@ -385,6 +420,8 @@ fun PlayerScreen(modifier: Modifier = Modifier) {
         modifier = modifier,
         hostUserId = hostUserId,
         viewerUserId = viewerUserId,
+        mediaTitle = currentRoomMedia?.title ?: "等待选择影片",
+        mediaEpisodeLabel = currentRoomMedia?.episodeLabel,
         uiState = uiState,
         adapter = adapter,
         isHostController = isHostController,

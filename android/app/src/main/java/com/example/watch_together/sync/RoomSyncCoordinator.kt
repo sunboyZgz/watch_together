@@ -19,7 +19,8 @@ data class DriftCheck(
 )
 
 class RoomSyncCoordinator(
-    private val playerAdapter: PlayerAdapter
+    private val playerAdapter: PlayerAdapter,
+    private val mediaUrlFor: (String) -> String = AppConfig::mediaUrlFor
 ) {
 
     companion object {
@@ -33,7 +34,7 @@ class RoomSyncCoordinator(
         roomState: RoomSyncState,
         appliedAtMs: Long = System.currentTimeMillis()
     ): RoomSyncState {
-        playerAdapter.load(AppConfig.mediaUrlFor(roomState.mediaId))
+        playerAdapter.load(mediaUrlFor(roomState.mediaId))
         playerAdapter.seekTo(roomState.positionMs)
         playerAdapter.setPlaybackSpeed(roomState.playbackRate.toFloat())
 

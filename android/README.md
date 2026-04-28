@@ -125,6 +125,17 @@ android/
 - 当前 cover 图仍使用本地渐变占位，后续接入图片加载库后再消费 `coverUrl`
 - 小屏设备通过收紧 padding、缩短文案和两列卡片约束保持可读性
 
+当前创建房间接入状态：
+
+- 点击 `创建房间` 后，`VideoSelectionPage` 会把选中的 `mediaItemId` 交给 `WatchTogetherApp`
+- `WatchTogetherApp` 进入 `PlayerScreen` 时会传入 `accessToken / currentUserId / selectedMediaItemId`
+- `PlayerScreen` 会自动调用 DB-backed `POST /rooms`
+- 请求体使用 `{ "mediaItemId": "<selected-media-id>" }`
+- 请求头使用 `Authorization: Bearer dev_<userId>`
+- 创建成功后使用响应中的 `room.roomCode` 建立 WebSocket `join_room`
+- 创建成功后使用响应中的 `media.title / media.episodeLabel / media.mediaUrl` 更新 `03 放映室`
+- 播放器会优先使用 `media.mediaUrl` 载入选中的影片
+
 ## Room Player Page
 
 `02A 选择视频` 点击 `创建房间` 后，会进入 `03 放映室` 对应的播放器页面。

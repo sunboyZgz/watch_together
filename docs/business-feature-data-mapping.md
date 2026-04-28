@@ -406,6 +406,8 @@ Android 接入状态：
 - 当前阶段不需要额外查询
 - 真正点击“创建房间”时，使用选中的 `media_item_id`
 - Android 当前已经能从选中的媒体卡片拿到 `mediaItemId`
+- `INT-129` 已把该 `mediaItemId` 接到 DB-backed `POST /rooms`
+- 创建成功后，Android 会使用接口返回的房间码与媒体信息进入 `03 放映室`
 
 #### 数据库相关
 
