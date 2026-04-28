@@ -24,6 +24,23 @@ data class RoomMedia(
     val episodeLabel: String?
 )
 
+data class RoomMember(
+    val userId: String,
+    val nickname: String,
+    val avatarSeed: String,
+    val avatarUrl: String?,
+    val role: String
+)
+
+data class RoomDetailResult(
+    val roomId: String,
+    val roomCode: String,
+    val hostUserId: String,
+    val status: String,
+    val media: RoomMedia,
+    val members: List<RoomMember>
+)
+
 class RoomHttpClient(
     private val okHttpClient: OkHttpClient = OkHttpClient()
 ) {
@@ -79,6 +96,40 @@ class RoomHttpClient(
         }
     }
 
+    // getRoomDetail reads business bootstrap data for the theater page.
+    // Runtime playback authority still comes from WebSocket room_state.
+    fun getRoomDetail(roomCode: String): RoomDetailResult {
+        val normalizedRoomCode = roomCode.trim().uppercase()
+        val request = Request.Builder()
+            .url(AppConfig.roomDetailUrl(normalizedRoomCode))
+            .get()
+            .build()
+
+        okHttpClient.newCall(request).execute().use { response ->
+            val responseBody = response.body?.string().orEmpty()
+            if (!response.isSuccessful) {
+                throw RoomHttpRequestException(
+                    message = errorMessageFrom(responseBody) ?: "Get room detail failed with ${response.code}",
+                    statusCode = response.code
+                )
+            }
+            if (responseBody.isBlank()) {
+                throw RoomHttpRequestException("Get room detail returned an empty body", response.code)
+            }
+
+            val data = JSONObject(responseBody).getJSONObject("data")
+            val roomJson = data.getJSONObject("room")
+            return RoomDetailResult(
+                roomId = roomJson.getString("id"),
+                roomCode = roomJson.getString("roomCode"),
+                hostUserId = roomJson.getString("hostUserId"),
+                status = roomJson.getString("status"),
+                media = data.getJSONObject("media").toRoomMedia(),
+                members = data.optJSONArray("members").toRoomMembers()
+            )
+        }
+    }
+
     private fun errorMessageFrom(responseBody: String): String? {
         if (responseBody.isBlank()) return null
         return runCatching {
@@ -103,6 +154,24 @@ private fun JSONObject.toRoomMedia(): RoomMedia {
         seasonLabel = optNullableString("seasonLabel"),
         episodeLabel = optNullableString("episodeLabel")
     )
+}
+
+private fun org.json.JSONArray?.toRoomMembers(): List<RoomMember> {
+    if (this == null) return emptyList()
+    return buildList {
+        for (index in 0 until length()) {
+            val member = getJSONObject(index)
+            add(
+                RoomMember(
+                    userId = member.getString("userId"),
+                    nickname = member.optString("nickname"),
+                    avatarSeed = member.optString("avatarSeed"),
+                    avatarUrl = member.optNullableString("avatarUrl"),
+                    role = member.getString("role")
+                )
+            )
+        }
+    }
 }
 
 private fun JSONObject.optNullableString(name: String): String? {

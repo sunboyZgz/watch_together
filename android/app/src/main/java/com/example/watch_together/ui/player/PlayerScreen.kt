@@ -16,6 +16,7 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.media3.common.Player
 import com.example.watch_together.config.AppConfig
 import com.example.watch_together.pages.room.RoomTheaterPage
+import com.example.watch_together.sync.ProgressHttpClient
 import com.example.watch_together.sync.RoomMedia
 import com.example.watch_together.sync.RoomSessionController
 import com.example.watch_together.sync.RoomSyncCoordinator
@@ -39,6 +40,7 @@ fun PlayerScreen(
 ) {
     val adapter = rememberPlayerAdapter()
     val roomSessionController = remember { RoomSessionController() }
+    val progressHttpClient = remember { ProgressHttpClient() }
     var currentRoomMedia by remember { mutableStateOf<RoomMedia?>(null) }
     val mediaUrlResolver = remember(currentRoomMedia) {
         { mediaId: String ->
@@ -65,6 +67,9 @@ fun PlayerScreen(
     var uiState by remember { mutableStateOf(RoomPlayerUiState()) }
     var loadedRoomId by remember { mutableStateOf<String?>(null) }
     var autoCreatedMediaItemId by rememberSaveable { mutableStateOf<String?>(null) }
+    var loadedRoomDetailCode by rememberSaveable { mutableStateOf<String?>(null) }
+    var lastProgressReportAtMs by rememberSaveable { mutableStateOf(0L) }
+    var lastProgressReportPositionSeconds by rememberSaveable { mutableStateOf(-1L) }
     val currentUiState by rememberUpdatedState(uiState)
 
     val isHostController = remember(uiState.activeUserId, uiState.latestSyncState) {
@@ -75,6 +80,24 @@ fun PlayerScreen(
 
     fun updateUiState(transform: (RoomPlayerUiState) -> RoomPlayerUiState) {
         uiState = transform(uiState)
+    }
+
+    suspend fun loadRoomDetail(roomCode: String): Boolean {
+        if (loadedRoomDetailCode == roomCode && currentRoomMedia != null) return true
+        return runCatching {
+            withContext(Dispatchers.IO) {
+                roomSessionController.getRoomDetail(roomCode)
+            }
+        }.onSuccess { detail ->
+            loadedRoomDetailCode = roomCode
+            currentRoomMedia = detail.media
+            appendLog(
+                syncLogs,
+                "room detail loaded roomCode=${detail.roomCode} media=${detail.media.title}"
+            )
+        }.onFailure { error ->
+            appendLog(syncLogs, "room detail failed: ${error.message}")
+        }.isSuccess
     }
 
     DisposableEffect(adapter) {
@@ -124,6 +147,11 @@ fun PlayerScreen(
         appendLog(syncLogs, "media auto-loaded for roomId=$roomId url=$mediaUrl")
     }
 
+    LaunchedEffect(uiState.currentRoomId) {
+        val roomCode = uiState.currentRoomId ?: return@LaunchedEffect
+        loadRoomDetail(roomCode)
+    }
+
     LaunchedEffect(adapter, roomSyncCoordinator) {
         while (isActive) {
             delay(RoomSyncCoordinator.DEFAULT_CORRECTION_INTERVAL_MS)
@@ -155,6 +183,56 @@ fun PlayerScreen(
         uiState = result.uiState
         result.logs.forEach { line ->
             appendLog(syncLogs, line)
+        }
+    }
+
+    fun reportProgress(
+        completed: Boolean = false,
+        completionSource: String? = null,
+        force: Boolean = false
+    ) {
+        val media = currentRoomMedia ?: return
+        if (accessToken.isBlank()) return
+
+        val nowMs = System.currentTimeMillis()
+        val currentPositionSeconds = (currentUiState.player.currentPosition / 1_000L).coerceAtLeast(0L)
+        val durationSeconds = (
+            currentUiState.player.duration
+                .takeIf { it > 0L }
+                ?: media.durationMs
+                ?: 1L
+            ) / 1_000L
+        val safeDurationSeconds = durationSeconds.coerceAtLeast(1L)
+        val safePositionSeconds = currentPositionSeconds.coerceAtMost(safeDurationSeconds)
+
+        if (!force) {
+            val tooSoon = nowMs - lastProgressReportAtMs < 30_000L
+            val sameSecond = safePositionSeconds == lastProgressReportPositionSeconds
+            if (tooSoon || sameSecond) return
+        }
+
+        lastProgressReportAtMs = nowMs
+        lastProgressReportPositionSeconds = safePositionSeconds
+        coroutineScope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    progressHttpClient.updateProgress(
+                        accessToken = accessToken,
+                        mediaItemId = media.id,
+                        lastPositionSeconds = safePositionSeconds,
+                        durationSeconds = safeDurationSeconds,
+                        completed = completed,
+                        completionSource = completionSource
+                    )
+                }
+            }.onSuccess {
+                appendLog(
+                    syncLogs,
+                    "progress reported mediaId=${it.mediaItemId} pos=${it.lastPositionSeconds}s completed=${it.completed}"
+                )
+            }.onFailure { error ->
+                appendLog(syncLogs, "progress report failed: ${error.message}")
+            }
         }
     }
 
@@ -236,11 +314,15 @@ fun PlayerScreen(
         }
         appendLog(syncLogs, "$reason starting roomId=$roomId userId=$userId")
 
-        roomSessionController.startSession(
-            roomId = roomId,
-            userId = userId,
-            listener = syncListener
-        )
+        coroutineScope.launch {
+            // Load business media metadata before WebSocket room_state can trigger player loading.
+            loadRoomDetail(roomId)
+            roomSessionController.startSession(
+                roomId = roomId,
+                userId = userId,
+                listener = syncListener
+            )
+        }
     }
 
     fun createAndJoinAsHost() {
@@ -261,6 +343,7 @@ fun PlayerScreen(
                 }
 
                 currentRoomMedia = createResult.media
+                loadedRoomDetailCode = createResult.roomId
                 updateUiState { current ->
                     current.copy(
                         currentRoomId = createResult.roomId,
@@ -348,6 +431,7 @@ fun PlayerScreen(
             seq = currentState.seq
         )
         appendLog(syncLogs, "pause sent=$sent at ${uiState.player.currentPosition}ms")
+        reportProgress(force = true)
     }
 
     fun sendSeek(targetPositionMs: Long) {
@@ -400,6 +484,14 @@ fun PlayerScreen(
         if (sent) {
             updateUiState { current -> current.copy(lastEndedReportedSeq = currentState.seq) }
         }
+        reportProgress(completed = true, completionSource = "ended", force = true)
+    }
+
+    LaunchedEffect(accessToken, currentRoomMedia?.id) {
+        while (isActive) {
+            delay(30_000L)
+            reportProgress()
+        }
     }
 
     LaunchedEffect(
@@ -431,6 +523,7 @@ fun PlayerScreen(
                     sendPause()
                 } else {
                     adapter.pause()
+                    reportProgress(force = true)
                 }
             } else {
                 if (isHostController) {

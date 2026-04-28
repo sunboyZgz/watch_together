@@ -15,6 +15,10 @@ class RoomSessionController(
         return roomHttpClient.createRoom(accessToken = accessToken, mediaItemId = mediaItemId)
     }
 
+    suspend fun getRoomDetail(roomCode: String): RoomDetailResult {
+        return roomHttpClient.getRoomDetail(roomCode = roomCode)
+    }
+
     fun startSession(
         roomId: String,
         userId: String,

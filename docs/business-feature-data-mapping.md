@@ -834,9 +834,12 @@ Android 接入状态：
 当前接口落地状态：
 
 - `GET /rooms/{roomCode}` 已作为 `INT-123` 落地
+- `INT-130` 已在 Android `03 放映室` 中接入该接口
 - 该接口返回 `room / media / members`
 - 该接口只负责 `03 放映室` 首屏业务数据
 - 运行时同步状态仍来自 WebSocket `room_state`
+- Android 会使用该接口返回的 `media.title / media.episodeLabel / media.mediaUrl`
+- Android 会先尽量加载 room detail，再启动 WebSocket `join_room`，确保 `room_state.mediaId` 能对齐真实媒体资源
 
 ### 7.2 播放器主区域
 
@@ -878,9 +881,12 @@ Android 接入状态：
 当前接口落地状态：
 
 - `PUT /me/media-progress/{mediaItemId}` 已作为 `INT-124` 落地
+- `INT-131` 已在 Android 播放器中接入该接口
 - 写入 `user_media_progress`
 - 使用当前登录用户和媒体 ID 作为唯一业务维度
 - 秒级进度用于业务展示，不用于实时同步
+- Android 当前低频上报时机包括暂停、播放结束、以及约 30 秒一次的低频 tick
+- Android 播放结束时上报 `completed=true` 和 `completionSource=ended`
 
 当前写入字段：
 

@@ -183,6 +183,83 @@
 - 示例：`sample_001`
 - 适用模块：Windows、Android
 
+#### `MEDIA_STORAGE_DRIVER`
+
+- 用途：指定媒体入库 CLI 使用的存储后端
+- 示例：`local` / `minio` / `s3`
+- 默认：`local`
+- 适用模块：Server / CLI
+
+#### `MEDIA_LOCAL_ROOT`
+
+- 用途：本地静态媒体资源根目录
+- 示例：`../media/tmp`
+- 说明：`local` driver 会把 HLS 和封面输出到该目录下
+- 适用模块：Server / CLI
+
+#### `MEDIA_PUBLIC_BASE_URL`
+
+- 用途：媒体资源对客户端可访问的公开 URL 根地址
+- 示例：`http://127.0.0.1:9000/media/tmp`
+- 说明：CLI 写入 PostgreSQL 的 `media_url / cover_url` 会基于该值生成
+- 适用模块：Server / CLI
+
+#### `MEDIA_OBJECT_KEY_PREFIX`
+
+- 用途：媒体资源 object key 前缀
+- 示例：`media`
+- 说明：推荐 key 形态为 `media/{mediaItemId}/hls/index.m3u8`
+- 适用模块：Server / CLI
+
+#### `MEDIA_STORAGE_ENDPOINT`
+
+- 用途：MinIO 或 S3-compatible 对象存储 endpoint
+- 示例：`http://127.0.0.1:9001`
+- 适用模块：Server / CLI
+
+#### `MEDIA_STORAGE_BUCKET`
+
+- 用途：对象存储 bucket 名称
+- 示例：`watch-together-media`
+- 适用模块：Server / CLI
+
+#### `MEDIA_STORAGE_REGION`
+
+- 用途：对象存储 region
+- 示例：`auto` / `oss-cn-hangzhou` / `ap-shanghai`
+- 适用模块：Server / CLI
+
+#### `MEDIA_STORAGE_ACCESS_KEY_ID`
+
+- 用途：对象存储 access key id
+- 提交规则：真实值不提交
+- 适用模块：Server / CLI
+
+#### `MEDIA_STORAGE_SECRET_ACCESS_KEY`
+
+- 用途：对象存储 secret access key
+- 提交规则：真实值不提交
+- 适用模块：Server / CLI
+
+#### `MEDIA_STORAGE_FORCE_PATH_STYLE`
+
+- 用途：S3-compatible 客户端是否使用 path-style 访问
+- 示例：`true` / `false`
+- 说明：MinIO 本地开发通常需要 `true`
+- 适用模块：Server / CLI
+
+#### `FFMPEG_BIN`
+
+- 用途：指定 `ffmpeg` 可执行文件路径
+- 示例：`ffmpeg` / `/opt/homebrew/bin/ffmpeg`
+- 适用模块：Server / CLI
+
+#### `FFPROBE_BIN`
+
+- 用途：指定 `ffprobe` 可执行文件路径，用于读取媒体源文件时长
+- 示例：`ffprobe` / `/opt/homebrew/bin/ffprobe`
+- 适用模块：Server / CLI
+
 ### 4. Debug
 
 #### `DEBUG_SYNC`
@@ -204,6 +281,18 @@
 - `DATABASE_URL`
 - `CORS_ALLOWED_ORIGIN` `(optional)`
 - `MEDIA_BASE_URL`
+- `MEDIA_STORAGE_DRIVER`
+- `MEDIA_LOCAL_ROOT`
+- `MEDIA_PUBLIC_BASE_URL`
+- `MEDIA_OBJECT_KEY_PREFIX`
+- `MEDIA_STORAGE_ENDPOINT`
+- `MEDIA_STORAGE_BUCKET`
+- `MEDIA_STORAGE_REGION`
+- `MEDIA_STORAGE_ACCESS_KEY_ID`
+- `MEDIA_STORAGE_SECRET_ACCESS_KEY`
+- `MEDIA_STORAGE_FORCE_PATH_STYLE`
+- `FFMPEG_BIN`
+- `FFPROBE_BIN`
 - `DEBUG_SYNC`
 
 ### Windows Uses

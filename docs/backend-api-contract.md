@@ -729,6 +729,11 @@ Accept: application/json
 - 该接口不会返回 WebSocket 在线连接状态。
 - 该接口不会替代 WebSocket `join_room`。
 - 如果需要播放同步，客户端仍必须连接 `/ws` 并等待 `room_state`。
+- Android `INT-130` 已接入该接口。
+- Android 在进入或加入放映室时会调用 `GET /rooms/{roomCode}` 补齐业务首屏数据。
+- Android 会先尽量加载 room detail，再启动 WebSocket `join_room`，避免 `room_state.mediaId` 到达时缺少真实 `media.mediaUrl`。
+- Android 使用该接口返回的 `media.title / media.episodeLabel / media.mediaUrl` 展示和载入影片。
+- WebSocket `room_state` 仍是 `positionMs / playbackRate / paused / ended / seq` 的实时权威。
 
 错误：
 
@@ -796,6 +801,11 @@ Accept: application/json
 - `durationSeconds` 必须大于 0。
 - `lastPositionSeconds` 必须小于等于 `durationSeconds`。
 - 该接口建议低频调用，例如页面离开、暂停、播放结束、或间隔一段时间上报一次；不要按播放器帧或高频 tick 写入。
+- Android `INT-131` 已接入该接口。
+- Android 当前在暂停、播放结束、以及约 30 秒一次的低频 tick 上报进度。
+- Android 上报秒级 `lastPositionSeconds / durationSeconds`，不上传毫秒。
+- Android 播放结束时上报 `completed=true` 和 `completionSource=ended`。
+- 该接口只服务业务观看历史，不参与 WebSocket 实时同步。
 
 错误：
 

@@ -20,6 +20,11 @@ object AppConfig {
 
     fun roomsUrl(): String = "${apiBaseUrl.trimEnd('/')}/rooms"
 
+    fun roomDetailUrl(roomCode: String): String = "${roomsUrl()}/${roomCode.trim().uppercase()}"
+
+    fun mediaProgressUrl(mediaItemId: String): String =
+        "${apiBaseUrl.trimEnd('/')}/me/media-progress/$mediaItemId"
+
     fun defaultMediaIdForRoom(): String = mediaDefaultId.ifBlank { "sample_001" }
 
     fun mediaUrlFor(mediaId: String): String {

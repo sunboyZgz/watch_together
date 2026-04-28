@@ -136,6 +136,24 @@ android/
 - 创建成功后使用响应中的 `media.title / media.episodeLabel / media.mediaUrl` 更新 `03 放映室`
 - 播放器会优先使用 `media.mediaUrl` 载入选中的影片
 
+当前放映室详情接入状态：
+
+- `PlayerScreen` 会在进入或加入房间时调用 `GET /rooms/{roomCode}`
+- `GET /rooms/{roomCode}` 返回的业务数据用于 `03 放映室` 首屏展示
+- `media.title / media.episodeLabel / media.mediaUrl` 来自 room detail 或 create room response
+- WebSocket `room_state` 仍是 `positionMs / playbackRate / paused / ended / seq` 的实时权威
+- 加入 WebSocket 前会先尽量加载 room detail，避免收到 `room_state` 时缺少真实 `mediaUrl`
+- 如果 room detail 加载失败，会保留同步日志提示，不阻断后续调试入口
+
+当前观看进度上报状态：
+
+- `ProgressHttpClient` 会调用 `PUT /me/media-progress/{mediaItemId}`
+- 上报使用登录后的 `Authorization: Bearer dev_<userId>` token
+- 上报单位为秒，不上传毫秒
+- 当前低频上报时机包括暂停、播放结束，以及每 30 秒一次的低频后台 tick
+- `completed=true` 时会带上 `completionSource=ended`
+- 该接口只更新首页 `lastWatched / continueWatching` 所需的业务进度，不参与 WebSocket 实时同步
+
 ## Room Player Page
 
 `02A 选择视频` 点击 `创建房间` 后，会进入 `03 放映室` 对应的播放器页面。
