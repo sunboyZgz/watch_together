@@ -306,10 +306,13 @@ Android 接入状态：
 当前接口落地状态：
 
 - `GET /media/items` 已作为 `INT-120` 落地
+- `INT-128` 已在 Android `02A 选择视频` 中接入该接口
 - `query` 会检索 `title / subtitle / description / original_title / production_team / search_aliases`
 - `tag` 使用 `media_tags.slug`
 - `limit` 默认 20，最大 50
 - `cursor` 由服务端返回，Android 不解析内容，只原样传回
+- Android 默认进入页面后展示服务端媒体列表，而不是只使用本地样例数据
+- Android 搜索词或标签变化后会重新请求媒体列表
 
 ### 5.2 标签筛选
 
@@ -349,11 +352,13 @@ Android 接入状态：
 当前接口落地状态：
 
 - `GET /media/tags` 已作为 `INT-119` 落地
+- `INT-128` 已在 Android `02A 选择视频` 中接入该接口
 - `featuredTags` 返回最多 5 个默认主标签
 - `allTags` 返回最多 20 个可展开标签
 - `featuredTags / allTags` 都只返回 `is_active = true` 的标签
 - Android 默认标签行使用 `featuredTags`
 - Android 点击 `更多` 后使用 `allTags`
+- Android 保留本地 `全部` 伪标签，选中时不传 `tag`
 
 ### 5.3 影片列表
 
@@ -400,6 +405,7 @@ Android 接入状态：
 
 - 当前阶段不需要额外查询
 - 真正点击“创建房间”时，使用选中的 `media_item_id`
+- Android 当前已经能从选中的媒体卡片拿到 `mediaItemId`
 
 #### 数据库相关
 

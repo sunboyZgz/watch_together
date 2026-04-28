@@ -14,6 +14,10 @@ object AppConfig {
 
     fun homeSummaryUrl(): String = "${apiBaseUrl.trimEnd('/')}/home/summary"
 
+    fun mediaTagsUrl(): String = "${apiBaseUrl.trimEnd('/')}/media/tags"
+
+    fun mediaItemsUrl(): String = "${apiBaseUrl.trimEnd('/')}/media/items"
+
     fun roomsUrl(): String = "${apiBaseUrl.trimEnd('/')}/rooms"
 
     fun defaultMediaIdForRoom(): String = mediaDefaultId.ifBlank { "sample_001" }

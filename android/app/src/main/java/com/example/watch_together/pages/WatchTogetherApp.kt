@@ -42,7 +42,7 @@ fun WatchTogetherApp() {
 
         AppScreen.VideoSelection -> VideoSelectionPage(
             onBackClick = { currentScreen = AppScreen.Home },
-            onCreateRoomClick = { currentScreen = AppScreen.Player }
+            onCreateRoomClick = { _ -> currentScreen = AppScreen.Player }
         )
 
         AppScreen.Player -> PlayerScreen()

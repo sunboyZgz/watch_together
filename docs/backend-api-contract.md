@@ -455,6 +455,15 @@ Accept: application/json
 
 - `503 INTERNAL_ERROR`: 服务端未连接数据库，media service 不可用
 
+Android 联调状态：
+
+- `INT-128` 已接入 Android `02A 选择视频`
+- Android 进入选片页后会调用 `GET /media/tags`
+- 默认标签行优先使用 `featuredTags`
+- 点击 `更多` 后使用 `allTags` 渲染悬浮标签面板
+- Android 会保留一个本地 `全部` 伪标签，选中时不传 `tag`
+- 标签接口失败时会显示轻量错误提示
+
 #### `GET /media/items`
 
 用途：媒体搜索与标签筛选。
@@ -514,6 +523,16 @@ cursor=...
 
 - `400 VALIDATION_ERROR`: `limit` 或 `cursor` 格式不合法
 - `503 INTERNAL_ERROR`: 服务端未连接数据库，media service 不可用
+
+Android 联调状态：
+
+- `INT-128` 已接入 Android `02A 选择视频`
+- Android 默认进入页面后会调用 `GET /media/items?limit=20`
+- 搜索框变化后会用 `query` 重新请求媒体列表
+- 标签变化后会用 `tag=<media_tags.slug>` 重新请求媒体列表
+- Android 当前会展示接口返回的 `title` 和 `subtitle / episodeLabel / description` 中的首个可用描述
+- Android 当前已把选中的 `mediaItemId` 传到创建房间入口回调，后续 `POST /rooms` 接入时直接使用
+- Android 当前暂不加载远程 `coverUrl`，封面仍使用本地渐变占位
 
 ### Rooms
 

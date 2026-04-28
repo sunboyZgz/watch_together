@@ -117,8 +117,12 @@ android/
 - 顶部搜索框用于按影片标题、剧场版、作品名或制作信息检索
 - 默认展示主标签，并通过右侧 `更多` 展开悬浮标签面板
 - 悬浮标签面板不挤压后续影片列表布局
-- 影片列表当前使用本地样例数据，后续会替换为 `INT-111` 的服务端检索接口
+- `MediaCatalogClient` 会调用 `GET /media/tags` 获取默认标签和全部标签
+- `MediaCatalogClient` 会调用 `GET /media/items` 获取默认片单、搜索结果和标签筛选结果
+- 搜索词或标签变化后，Android 会重新请求媒体列表
 - 底部固定栏展示当前选中影片，并提供 `创建房间` 操作
+- 当前创建房间入口已经拿到选中的 `mediaItemId`，后续接入 DB-backed `POST /rooms` 时直接使用该 ID
+- 当前 cover 图仍使用本地渐变占位，后续接入图片加载库后再消费 `coverUrl`
 - 小屏设备通过收紧 padding、缩短文案和两列卡片约束保持可读性
 
 ## Room Player Page

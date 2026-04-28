@@ -29,6 +29,7 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -48,6 +49,9 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import com.example.watch_together.ui.theme.Watch_togetherTheme
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 
 private val VideoBackground = Color(0xFF111528)
 private val VideoCard = Color(0xFF282E49)
@@ -58,7 +62,7 @@ private val VideoTextSecondary = Color(0xC9D8D0E6)
 private val VideoOutline = Color(0x22FFFFFF)
 private val VideoSearchFill = Color(0x1AFFFFFF)
 private val VideoBottomBar = Color(0xF41E243D)
-private val DefaultVisibleTagCount = 4
+private val DefaultVisibleTagCount = 3
 private val ExpandedTagColumnCount = 5
 
 private val VideoGlowA = Brush.radialGradient(
@@ -79,8 +83,10 @@ private data class VideoCandidate(
     val coverBrush: Brush
 )
 
-private val primaryTags = listOf("全部", "热血", "治愈", "校园", "剧场版")
-private val moreTags = listOf("恋爱", "悬疑", "奇幻", "科幻", "搞笑", "公路", "群像", "百合")
+private data class VideoTagOption(
+    val slug: String?,
+    val name: String
+)
 
 private val sampleVideos = listOf(
     VideoCandidate(
@@ -117,24 +123,97 @@ private val sampleVideos = listOf(
 @Composable
 fun VideoSelectionPage(
     onBackClick: () -> Unit,
-    onCreateRoomClick: () -> Unit,
-    modifier: Modifier = Modifier
+    onCreateRoomClick: (mediaItemId: String) -> Unit,
+    modifier: Modifier = Modifier,
+    enableRemoteLoad: Boolean = true
 ) {
+    val mediaCatalogClient = remember { MediaCatalogClient() }
     var query by rememberSaveable { mutableStateOf("") }
-    var selectedTag by rememberSaveable { mutableStateOf("全部") }
+    var selectedTagSlug by rememberSaveable { mutableStateOf<String?>(null) }
     var isMoreTagsExpanded by rememberSaveable { mutableStateOf(false) }
     var selectedVideoId by rememberSaveable { mutableStateOf(sampleVideos.first().id) }
+    var featuredTags by remember { mutableStateOf<List<MediaTag>>(emptyList()) }
+    var allTags by remember { mutableStateOf<List<MediaTag>>(emptyList()) }
+    var mediaItems by remember { mutableStateOf<List<MediaItem>>(emptyList()) }
+    var isTagsLoading by rememberSaveable { mutableStateOf(false) }
+    var isItemsLoading by rememberSaveable { mutableStateOf(false) }
+    var catalogError by rememberSaveable { mutableStateOf<String?>(null) }
 
-    val filteredVideos = remember(query, selectedTag) {
-        sampleVideos.filter { video ->
-            val queryMatch = query.isBlank() ||
-                video.title.contains(query.trim(), ignoreCase = true) ||
-                video.description.contains(query.trim(), ignoreCase = true)
-            val tagMatch = selectedTag == "全部" || video.tags.contains(selectedTag)
-            queryMatch && tagMatch
+    LaunchedEffect(enableRemoteLoad) {
+        if (!enableRemoteLoad) return@LaunchedEffect
+
+        isTagsLoading = true
+        catalogError = null
+        runCatching {
+            withContext(Dispatchers.IO) {
+                mediaCatalogClient.fetchTags()
+            }
+        }.onSuccess { tags ->
+            featuredTags = tags.featuredTags
+            allTags = tags.allTags
+        }.onFailure { throwable ->
+            catalogError = throwable.message ?: "标签加载失败，请稍后重试"
+        }
+        isTagsLoading = false
+    }
+
+    LaunchedEffect(query, selectedTagSlug, enableRemoteLoad) {
+        if (!enableRemoteLoad) return@LaunchedEffect
+
+        delay(300)
+        isItemsLoading = true
+        catalogError = null
+        runCatching {
+            withContext(Dispatchers.IO) {
+                mediaCatalogClient.fetchItems(
+                    query = query,
+                    tagSlug = selectedTagSlug,
+                    limit = 20
+                )
+            }
+        }.onSuccess { page ->
+            mediaItems = page.items
+            if (page.items.none { it.id == selectedVideoId }) {
+                selectedVideoId = page.items.firstOrNull()?.id.orEmpty()
+            }
+        }.onFailure { throwable ->
+            catalogError = throwable.message ?: "影片加载失败，请稍后重试"
+        }
+        isItemsLoading = false
+    }
+
+    val tagOptions = remember(featuredTags, enableRemoteLoad) {
+        val source = if (enableRemoteLoad) {
+            featuredTags.map { it.toOption() }
+        } else {
+            fallbackTagOptions().drop(1)
+        }
+        listOf(VideoTagOption(slug = null, name = "全部")) + source.take(DefaultVisibleTagCount - 1)
+    }
+    val expandedTagOptions = remember(allTags, featuredTags, enableRemoteLoad) {
+        if (enableRemoteLoad) {
+            listOf(VideoTagOption(slug = null, name = "全部")) +
+                allTags.ifEmpty { featuredTags }.map { it.toOption() }.distinctBy { it.slug }
+        } else {
+            fallbackTagOptions()
         }
     }
-    val selectedVideo = sampleVideos.firstOrNull { it.id == selectedVideoId }
+    val selectedTagName = expandedTagOptions.firstOrNull { it.slug == selectedTagSlug }?.name ?: "全部"
+    val videos = remember(mediaItems, query, selectedTagSlug, enableRemoteLoad) {
+        if (enableRemoteLoad) {
+            mediaItems.mapIndexed { index, item -> item.toVideoCandidate(index) }
+        } else {
+            sampleVideos.filter { video ->
+                val queryMatch = query.isBlank() ||
+                    video.title.contains(query.trim(), ignoreCase = true) ||
+                    video.description.contains(query.trim(), ignoreCase = true)
+                val tagMatch = selectedTagSlug == null ||
+                    video.tags.contains(selectedTagName)
+                queryMatch && tagMatch
+            }
+        }
+    }
+    val selectedVideo = videos.firstOrNull { it.id == selectedVideoId }
 
     BoxWithConstraints(
         modifier = modifier
@@ -168,18 +247,27 @@ fun VideoSelectionPage(
             )
 
             TagFilterSection(
-                selectedTag = selectedTag,
+                tags = tagOptions,
+                expandedTags = expandedTagOptions,
+                selectedTagSlug = selectedTagSlug,
                 isMoreTagsExpanded = isMoreTagsExpanded,
                 compactWidth = compactWidth,
                 onTagClick = { tag ->
-                    selectedTag = tag
+                    selectedTagSlug = tag.slug
                     isMoreTagsExpanded = false
                 },
                 onMoreClick = { isMoreTagsExpanded = !isMoreTagsExpanded }
             )
 
+            if (isTagsLoading || isItemsLoading || catalogError != null) {
+                CatalogStatusBanner(
+                    isLoading = isTagsLoading || isItemsLoading,
+                    error = catalogError
+                )
+            }
+
             Text(
-                text = if (selectedTag == "全部") "推荐片单" else "$selectedTag 片单",
+                text = if (selectedTagSlug == null) "推荐片单" else "$selectedTagName 片单",
                 style = if (compactWidth) {
                     androidx.compose.material3.MaterialTheme.typography.headlineSmall
                 } else {
@@ -190,11 +278,11 @@ fun VideoSelectionPage(
                 )
             )
 
-            if (filteredVideos.isEmpty()) {
+            if (videos.isEmpty()) {
                 EmptyResultCard()
             } else {
                 VideoGrid(
-                    videos = filteredVideos,
+                    videos = videos,
                     selectedVideoId = selectedVideoId,
                     compactWidth = compactWidth,
                     onVideoClick = { selectedVideoId = it }
@@ -206,7 +294,9 @@ fun VideoSelectionPage(
             selectedTitle = selectedVideo?.title ?: "未选择",
             enabled = selectedVideo != null,
             compactWidth = compactWidth,
-            onCreateRoomClick = onCreateRoomClick,
+            onCreateRoomClick = {
+                selectedVideo?.let { onCreateRoomClick(it.id) }
+            },
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .padding(horizontal = pagePadding, vertical = 16.dp)
@@ -283,10 +373,12 @@ private fun SearchField(
 
 @Composable
 private fun TagFilterSection(
-    selectedTag: String,
+    tags: List<VideoTagOption>,
+    expandedTags: List<VideoTagOption>,
+    selectedTagSlug: String?,
     isMoreTagsExpanded: Boolean,
     compactWidth: Boolean,
-    onTagClick: (String) -> Unit,
+    onTagClick: (VideoTagOption) -> Unit,
     onMoreClick: () -> Unit
 ) {
     Box(modifier = Modifier.fillMaxWidth()) {
@@ -296,10 +388,10 @@ private fun TagFilterSection(
                 horizontalArrangement = Arrangement.spacedBy(if (compactWidth) 8.dp else 10.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                primaryTags.take(DefaultVisibleTagCount).forEach { tag ->
+                tags.forEach { tag ->
                     TagChip(
-                        label = tag,
-                        selected = selectedTag == tag,
+                        label = tag.name,
+                        selected = selectedTagSlug == tag.slug,
                         compactWidth = compactWidth,
                         onClick = { onTagClick(tag) },
                         modifier = Modifier.weight(1f)
@@ -316,7 +408,8 @@ private fun TagFilterSection(
 
         if (isMoreTagsExpanded) {
             MoreTagsPopup(
-                selectedTag = selectedTag,
+                tags = expandedTags,
+                selectedTagSlug = selectedTagSlug,
                 compactWidth = compactWidth,
                 onTagClick = onTagClick,
                 modifier = Modifier
@@ -391,9 +484,10 @@ private fun MoreTagChip(
 
 @Composable
 private fun MoreTagsPopup(
-    selectedTag: String,
+    tags: List<VideoTagOption>,
+    selectedTagSlug: String?,
     compactWidth: Boolean,
-    onTagClick: (String) -> Unit,
+    onTagClick: (VideoTagOption) -> Unit,
     modifier: Modifier = Modifier
 ) {
     Surface(
@@ -414,15 +508,15 @@ private fun MoreTagsPopup(
                     fontWeight = FontWeight.SemiBold
                 )
             )
-            allExpandedTags().chunked(ExpandedTagColumnCount).forEach { rowTags ->
+            tags.chunked(ExpandedTagColumnCount).forEach { rowTags ->
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(if (compactWidth) 6.dp else 8.dp)
                 ) {
                     rowTags.forEach { tag ->
                         TagChip(
-                            label = tag,
-                            selected = selectedTag == tag,
+                            label = tag.name,
+                            selected = selectedTagSlug == tag.slug,
                             compactWidth = compactWidth,
                             onClick = { onTagClick(tag) },
                             modifier = Modifier.weight(1f)
@@ -437,8 +531,30 @@ private fun MoreTagsPopup(
     }
 }
 
-private fun allExpandedTags(): List<String> {
-    return (primaryTags + moreTags).distinct()
+@Composable
+private fun CatalogStatusBanner(
+    isLoading: Boolean,
+    error: String?
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(18.dp),
+        color = Color(0x332A86A8),
+        border = BorderStroke(1.dp, Color(0x22FFFFFF))
+    ) {
+        Text(
+            text = if (isLoading) {
+                "正在加载片单..."
+            } else {
+                error.orEmpty()
+            },
+            style = androidx.compose.material3.MaterialTheme.typography.bodyMedium.copy(
+                color = VideoTextSecondary,
+                fontWeight = FontWeight.SemiBold
+            ),
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)
+        )
+    }
 }
 
 @Composable
@@ -667,7 +783,49 @@ private fun VideoSelectionPagePreview() {
     Watch_togetherTheme {
         VideoSelectionPage(
             onBackClick = {},
-            onCreateRoomClick = {}
+            onCreateRoomClick = {},
+            enableRemoteLoad = false
         )
     }
+}
+
+private fun MediaTag.toOption(): VideoTagOption {
+    return VideoTagOption(slug = slug, name = name)
+}
+
+private fun MediaItem.toVideoCandidate(index: Int): VideoCandidate {
+    val descriptionText = listOfNotNull(
+        subtitle,
+        episodeLabel,
+        description
+    ).firstOrNull { it.isNotBlank() } ?: "适合一起看的片单"
+
+    return VideoCandidate(
+        id = id,
+        title = title,
+        description = descriptionText,
+        tags = tags.map { it.name } + "全部",
+        coverBrush = coverBrushFor(index)
+    )
+}
+
+private fun fallbackTagOptions(): List<VideoTagOption> {
+    return listOf("全部", "热血", "治愈", "校园", "剧场版", "恋爱", "悬疑", "奇幻", "科幻", "搞笑", "公路", "群像", "百合")
+        .map { name ->
+            VideoTagOption(
+                slug = if (name == "全部") null else name,
+                name = name
+            )
+        }
+}
+
+private fun coverBrushFor(index: Int): Brush {
+    val palettes = listOf(
+        listOf(Color(0xFF6252AA), Color(0xFF463C7E)),
+        listOf(Color(0xFF5749A0), Color(0xFF3E396D)),
+        listOf(Color(0xFF6B53B0), Color(0xFF475A8C)),
+        listOf(Color(0xFF47728D), Color(0xFF394E78)),
+        listOf(Color(0xFF72518E), Color(0xFF4B416F))
+    )
+    return Brush.linearGradient(palettes[index % palettes.size])
 }
