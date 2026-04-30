@@ -225,7 +225,8 @@ ffmpeg -i input.mp4 \
 - 输出 `index.m3u8`。
 - 输出 `segment_%05d.ts`。
 - 使用 `ffprobe` 读取源视频时长，后续写入 `media_items.duration_ms`。
-- 不负责上传与数据库写入，这两步分别由 `INT-141` 与 `INT-140` 补齐。
+- 不负责上传，上传由 `INT-141` 补齐。
+- 传入 `--write-db` 后可写入 PostgreSQL，当前由 `INT-140` 落地。
 
 ## CLI-first 入库工具
 
@@ -265,10 +266,10 @@ mediactl ingest \
 - 输出 dry-run summary。
 - 在 `--dry-run=false` 时调用 `ffmpeg` 输出单码率 HLS。
 - 在 `--dry-run=false` 时调用 `ffprobe` 读取源视频时长。
+- 在 `--dry-run=false --write-db` 时写入或更新 `media_items`，并写入 `media_tags / media_item_tags`。
 
 后续任务继续补齐：
 
-- `INT-140`: 写入或更新 `media_items`，并写入 `media_tags / media_item_tags`。
 - `INT-141`: 上传 HLS 和封面到目标存储。
 
 ## 配置建议

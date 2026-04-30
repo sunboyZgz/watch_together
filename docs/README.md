@@ -21,6 +21,7 @@
 - [contributing.md](./contributing.md): 当前仓库的基础工作规约
 - [core-sync-technical-notes.md](./core-sync-technical-notes.md): 核心同步功能中的关键技术点记录
 - [environment-config.md](./environment-config.md): 当前阶段环境参数清单与归类
+- [mediactl-operations.md](./mediactl-operations.md): `mediactl` CLI 的本地 HLS 生成、参数、验证和后续入库操作说明
 - [media-storage-and-delivery.md](./media-storage-and-delivery.md): 媒体资源存储、HLS 分发、对象存储和后续入库 CLI 的技术选型
 - [server-data-model-design.md](./server-data-model-design.md): 服务端业务对象、PostgreSQL 表设计与运行时数据边界
 - [websocket-event-protocol.md](./websocket-event-protocol.md): Phase 1 最小 WebSocket 事件协议草案

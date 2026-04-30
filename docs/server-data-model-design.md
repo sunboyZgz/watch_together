@@ -169,7 +169,7 @@
 - `bio` 可空，但若存在则不允许空白字符串
 
 这意味着首页与个人中心第一版需要的最小用户资料字段，现在已经有了明确的数据库承载结构。
-#### `MediaItem`
+#### `MediaItem`（兼容期旧模型）
 
 当前含义：
 
@@ -208,57 +208,126 @@
 - `subtitle` 第一版继续用于承载轻量副标题，例如“治愈冒险”“剧场版”“特别篇”
 - `season_label` 用于展示季、篇章或系列分组文案
 - `episode_label` 用于展示当前集数或单集文案，例如“第 09 集”“OVA 01”
-- 当前阶段不需要先引入复杂的 CMS 设计
+- 当前 `media_items` 仍保留为兼容期旧模型，避免一次性打断已经落地的房间 API、进度 API 和 Android 联调
+- 新的媒体内容主模型已经开始迁移到 `media_seasons + media_episodes`
 
-### `MediaItem` 播放展示元数据结论
+### `MediaSeason / MediaEpisode` 媒体层级结论
 
-`03 放映室` 需要展示“影片名称 + 当前第几集 + 播放进度”。当前更推荐先保持 `media_items` 为单个可播放媒体条目，并在 `media_items` 上补充轻量播放展示字段，而不是立即引入独立 episode 表。
+随着 `02A 选择视频`、`03 放映室`、媒体导入 CLI 和后续多集管理逐步推进，单独依赖 `media_items` 已经不能很好表达“一季内容下有多集可播放资源”的结构。
 
 当前结论：
 
-- 第一版继续使用 `media_items.title` 作为主标题
-- 第一版继续使用 `media_items.subtitle` 作为内容副标题
-- 新增 `media_items.season_label` 作为季、篇章或系列分组展示文案
-- 新增 `media_items.episode_label` 作为当前集数或单集展示文案
-- 播放进度仍由 WebSocket runtime state 的 `positionMs` 提供
-- 总时长展示使用 `media_items.duration_ms`
-- 当前不新增 `media_episodes` 独立表
+- 不引入 `media_series`
+- 使用 `media_seasons` 表达一季、篇章或一个作品容器
+- 使用 `media_episodes` 表达真正可播放的一集或一个视频资源
+- `media_seasons` 承载标题、封面、分类、制作团队、搜索别名、标签等偏作品/季的信息
+- `media_episodes` 承载播放地址、时长、第几集、源文件身份、源文件 hash 等偏单集播放的信息
+- `media_items` 暂时保留，用于兼容已经落地的 API 和 Android 客户端
 
 这样做的原因：
 
-- 当前 `02A 选择视频` 选中的对象本质上仍是“一个可播放媒体”
-- `03 放映室` 需要更清晰的季/集展示字段，但还不需要跨集导航
-- `user_media_progress` 当前也是按 `user_id + media_item_id` 记录进度
-- 先补轻量字段能支撑当前 UI，同时避免 episode 表把选片、建房、进度和同步链路一起变复杂
+- 目录结构通常是“作品/季/集”，而不是“一个扁平 media_items 列表”
+- 标签和资料描述更适合挂在 season 层，避免同一季下每一集重复维护同样的标签和介绍
+- HLS 播放地址、时长、episode number、source hash 则天然属于 episode 层
+- 不增加 `media_series` 可以让当前阶段模型保持足够轻，避免过早 CMS 化
 
-后续触发 schema 升级的信号：
+当前落地策略：
 
-- 需要在同一部作品下展示多集列表
-- 需要支持下一集自动跳转
-- 需要区分系列、季、集、OVA、剧场版
-- 需要按“番剧作品”聚合用户观看进度
-- 需要对单集分别保存播放源、封面、时长或上线状态
+- `INT-146` 已新增 `media_seasons / media_episodes / media_season_tags`
+- 旧 `media_items` 会安全 backfill 成一条 `media_seasons` 与一条 `media_episodes`
+- `media_episodes.legacy_media_item_id` 用于过渡期关联旧表
+- `INT-147` 再将服务端 API 查询切到新模型
+- `INT-148` 再将 Android 客户端语义从 `mediaItemId` 逐步迁移到 episode-backed API
 
-如果出现这些信号，再考虑引入：
+#### `MediaSeason`
 
-- `media_series`：作品或系列层级
-- `media_seasons`：季或篇章层级
-- `media_episodes`：单集可播放条目
+当前含义：
+
+- 一季、一个篇章或一个作品容器
+- 当前不再额外拆 `media_series`
+
+建议字段：
+
+- `id`
+- `slug`
+- `title`
+- `original_title`
+- `description`
+- `cover_url`
+- `category`
+- `production_team`
+- `search_aliases`
+- `season_number`
+- `season_label`
+- `sort_order`
+- `status`
+- `created_at`
+- `updated_at`
+
+关键语义：
+
+- `slug` 是 season 层稳定业务标识，第一版由导入目录推导
+- `search_aliases` 用于标题别名、译名、简称等搜索命中
+- `season_number / season_label` 用于排序与展示，例如 `1` / `第 1 季`
+- 标签关系迁移到 `media_season_tags`
+
+#### `MediaEpisode`
+
+当前含义：
+
+- season 下的一集，是真正可播放的视频资源
+
+建议字段：
+
+- `id`
+- `season_id`
+- `legacy_media_item_id`
+- `title`
+- `subtitle`
+- `description`
+- `cover_url`
+- `media_url`
+- `duration_ms`
+- `episode_number`
+- `episode_label`
+- `source_key`
+- `source_hash`
+- `sort_order`
+- `status`
+- `created_at`
+- `updated_at`
+
+关键语义：
+
+- `media_url` 指向 HLS `index.m3u8`
+- `duration_ms` 是该集源视频或 HLS 的总时长
+- `episode_number / episode_label` 用于排序与展示，例如 `9` / `第 09 集`
+- `source_key` 由规范媒体库目录结构自动推导，不作为常规人工输入
+- `source_hash` 由源文件内容自动计算，第一版使用 SHA-256
+- `legacy_media_item_id` 只服务兼容期，方便旧 API 到新模型的迁移
 
 当前这部分已经落为独立 migration：
 
 - `server/migrations/20260426104000_add_media_playback_display_fields.up.sql`
 - `server/migrations/20260426104000_add_media_playback_display_fields.down.sql`
+- `server/migrations/20260429101000_add_media_season_episode_schema.up.sql`
+- `server/migrations/20260429101000_add_media_season_episode_schema.down.sql`
 
 当前落地内容包括：
 
 - `media_items.season_label`
 - `media_items.episode_label`
+- `media_seasons`
+- `media_episodes`
+- `media_season_tags`
 
 当前落地规则包括：
 
 - `season_label` 可空，但若存在则不允许空白字符串
 - `episode_label` 可空，但若存在则不允许空白字符串
+- `media_seasons.slug` 唯一且小写
+- `media_episodes.source_key` 唯一且非空
+- `media_episodes.source_hash` 可空，但若存在则不能为空白字符串
 
 #### `MediaTag`（下一阶段候选）
 
@@ -371,7 +440,7 @@
 
 基于当前业务描述，`02A 选择视频` 已经明确推动出两类新的数据层需求：
 
-### 3.1 `media_items` 的检索字段扩展
+### 3.1 媒体检索字段扩展
 
 当前更推荐补充：
 
@@ -411,6 +480,13 @@
 - `idx_media_items_production_team`
 - `idx_media_items_search_aliases_gin`
 
+当前迁移说明：
+
+- 这些检索字段最初落在 `media_items`
+- 新模型中对应字段已经迁移到 `media_seasons`
+- 后续 `INT-147` 会将媒体列表与搜索 API 改为查询 `media_seasons + media_episodes`
+- 兼容期内旧 API 仍可继续读取 `media_items`
+
 ### 3.2 标签目录模型
 
 当前更推荐新增：
@@ -446,6 +522,13 @@
 - `idx_media_tags_active_sort`
 - `idx_media_tags_featured_active_sort`
 - `idx_media_item_tags_media_tag_id`
+
+当前迁移说明：
+
+- 旧模型使用 `media_item_tags`
+- 新模型新增 `media_season_tags`
+- 标签语义优先挂在 season 层，用于表达一季或一个作品容器的类型
+- 如果后续确实需要单集特殊标签，再单独评估 `media_episode_tags`
 
 #### `Room`
 
@@ -749,6 +832,8 @@
 - `users (1) -> (n) room_members`
 - `rooms (1) -> (n) room_members`
 - `media_items (1) -> (n) rooms`
+- `media_seasons (1) -> (n) media_episodes`
+- `media_seasons (n) -> (n) media_tags`
 - `users (1) -> (n) rooms(host_user_id)`
 
 ### 4.2 含义解释
@@ -756,7 +841,10 @@
 - `Room` 表达放映室本身
 - `RoomMember` 表达某个用户是否在这个放映室里
 - `Room.host_user_id` 表达当前业务 host
-- `Room.media_item_id` 表达当前房间选中了哪部视频
+- `Room.media_item_id` 当前仍表达房间选中的旧模型可播放视频
+- 新模型迁移完成后，房间选中的对象会逐步切换为 episode 语义
+- `MediaSeason` 表达一季或一个作品容器
+- `MediaEpisode` 表达 season 下的一集可播放资源
 
 ### 4.3 关键约束
 
@@ -779,6 +867,7 @@
 - `room_members`：当前房间成员关系
 - `users.nickname / avatar_seed / avatar_url`：房主和成员展示信息
 - `media_items.title / subtitle / season_label / episode_label / media_url / duration_ms`：影片标题、播放展示文案、播放地址和总时长
+- 后续迁移后改为 `media_seasons.title / cover_url` 加 `media_episodes.episode_label / media_url / duration_ms`
 
 运行时同步状态继续来自 WebSocket authority state：
 
@@ -793,9 +882,10 @@
 
 当前影片播放展示模型：
 
-- 第一版使用 `media_items.season_label` 和 `media_items.episode_label` 展示季/集信息
-- 当前不新增 `media_episodes` 独立表
-- 如果后续需要支持系列、季、集、下一集自动跳转，再评估独立 episode 表
+- 兼容期内仍可使用 `media_items.season_label` 和 `media_items.episode_label`
+- 新模型已经新增 `media_seasons + media_episodes`
+- 不引入 `media_series`
+- 后续 `INT-147` 会把 API 读取迁移到 episode-backed 查询
 
 当前接口落地状态：
 
@@ -821,7 +911,7 @@
 - `created_at timestamptz not null`
 - `updated_at timestamptz not null`
 
-### `media_items`
+### `media_items`（兼容期旧表）
 
 建议字段：
 
@@ -846,6 +936,62 @@
 - `season_label` 用于季、篇章或系列分组展示
 - `episode_label` 用于当前集数或单集展示
 - `tags` 已逐步从 `jsonb` 过渡到 `media_tags + media_item_tags` 关系模型
+- 当前保留该表是为了兼容已经落地的 API 与 Android 客户端
+
+### `media_seasons`
+
+建议字段：
+
+- `id uuid primary key`
+- `slug text not null unique`
+- `title text not null`
+- `original_title text null`
+- `description text null`
+- `cover_url text null`
+- `category text null`
+- `production_team text null`
+- `search_aliases jsonb not null default '[]'`
+- `season_number integer null`
+- `season_label text null`
+- `sort_order integer not null default 0`
+- `status text not null`
+- `created_at timestamptz not null`
+- `updated_at timestamptz not null`
+
+说明：
+
+- 不新增 `media_series`
+- `media_seasons` 直接作为作品/季/篇章容器
+- 标签优先通过 `media_season_tags` 挂在 season 层
+
+### `media_episodes`
+
+建议字段：
+
+- `id uuid primary key`
+- `season_id uuid not null references media_seasons(id)`
+- `legacy_media_item_id uuid unique references media_items(id)`
+- `title text not null`
+- `subtitle text null`
+- `description text null`
+- `cover_url text null`
+- `media_url text not null`
+- `duration_ms bigint null`
+- `episode_number integer null`
+- `episode_label text null`
+- `source_key text not null unique`
+- `source_hash text null`
+- `sort_order integer not null default 0`
+- `status text not null`
+- `created_at timestamptz not null`
+- `updated_at timestamptz not null`
+
+说明：
+
+- `media_episodes` 是真正可播放资源
+- `source_key` 由规范目录自动推导
+- `source_hash` 由源文件内容自动计算
+- `legacy_media_item_id` 是兼容期桥接字段，后续迁移完成后可以再评估是否保留
 
 ### `rooms`
 

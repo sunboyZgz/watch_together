@@ -39,6 +39,8 @@
 
 - `users`
 - `media_items`
+- `media_seasons`
+- `media_episodes`
 - `rooms`
 - `room_members`
 
@@ -64,9 +66,9 @@
 | 首页创建放映室 | `02 首页` | 当前登录用户 | `users`、默认媒体或选片结果 | `rooms`、`room_members` | 需要数据库写入 |
 | 输入房间码加入 | `02 首页` | `room_code` | `rooms`、`room_members` | `room_members` | 需要数据库读写 |
 | 继续追番列表 | `02 首页` | 当前登录用户 | 用户未看完内容、媒体封面、媒体标题、当前追番进度 | 用户观看进度 | 需要数据库读写 |
-| 搜索视频 | `02A 选择视频` | 搜索词、标签 | `media_items` | 无 | 需要数据库查询 |
-| 标签筛选视频 | `02A 选择视频` | 标签 | `media_items.tags`、`media_items.category` | 无 | 需要数据库查询 |
-| 进入放映室 | `03 放映室` | `room_id` / `room_code` | `rooms`、`room_members`、`media_items`、运行时 `room_state` | 运行时连接态 | DB + 内存协作 |
+| 搜索视频 | `02A 选择视频` | 搜索词、标签 | 兼容期 `media_items`，新模型 `media_seasons + media_episodes` | 无 | 需要数据库查询 |
+| 标签筛选视频 | `02A 选择视频` | 标签 | 兼容期 `media_item_tags`，新模型 `media_season_tags` | 无 | 需要数据库查询 |
+| 进入放映室 | `03 放映室` | `room_id` / `room_code` | `rooms`、`room_members`、兼容期 `media_items`、新模型 `media_episodes`、运行时 `room_state` | 运行时连接态 | DB + 内存协作 |
 | 播放同步 | `03 放映室` | host 控制操作 | room authority runtime state | room authority runtime state | 当前以内存为主 |
 | 房主转移 | 生命周期 | 无直接表单输入 | `room_members` + 运行时在线状态 | 运行时 host 切换，必要时同步 `rooms.host_user_id` | 需要内存主导 |
 | grace period 房间销毁 | 生命周期 | 无 | `rooms`、`room_members` | `rooms.status` | 需要业务表状态更新 |
@@ -762,9 +764,10 @@ Android 接入状态：
 
 ### 服务端需要做什么
 
-1. 按搜索词查询 `media_items.title / subtitle / description`
-2. 按标签或分类筛选
-3. 返回适合卡片展示的列表字段
+1. 兼容期按搜索词查询 `media_items.title / subtitle / description`
+2. 新模型按搜索词查询 `media_seasons.title / original_title / production_team / search_aliases`，并 join `media_episodes` 取可播放条目
+3. 按标签或分类筛选
+4. 返回适合卡片展示的列表字段
 
 ### 数据库相关
 
@@ -779,6 +782,15 @@ Android 接入状态：
 - `media_items.tags`
 - `media_items.duration_ms`
 - `media_items.status`
+- `media_seasons.title`
+- `media_seasons.cover_url`
+- `media_seasons.category`
+- `media_seasons.search_aliases`
+- `media_episodes.id`
+- `media_episodes.media_url`
+- `media_episodes.duration_ms`
+- `media_episodes.episode_label`
+- `media_season_tags`
 
 ### 当前对 schema 的影响
 
@@ -786,6 +798,8 @@ Android 接入状态：
 
 - `media_items` 不能只保存一个 `media_url`
 - 它必须能支撑列表页面、搜索和标签筛选
+- 新增 `media_seasons + media_episodes` 后，`02A 选择视频` 的长期选择对象应逐步从扁平 `media_items` 迁移为 episode-backed 结果
+- 不新增 `media_series`，避免当前阶段过早引入三层 CMS 结构
 
 ---
 
@@ -935,6 +949,11 @@ Android 接入状态：
 - `media_items.season_label`
 - `media_items.episode_label`
 - `media_items.duration_ms`
+- `media_seasons.title`
+- `media_seasons.season_label`
+- `media_episodes.title`
+- `media_episodes.episode_label`
+- `media_episodes.duration_ms`
 
 运行时读取：
 
@@ -946,8 +965,9 @@ Android 接入状态：
 
 - 第一版使用 `media_items.season_label` 承载季、篇章或系列分组文案
 - 第一版使用 `media_items.episode_label` 承载“第 09 集”这类展示文案
-- 当前不新增独立 episode 表
-- 如果后续要稳定支持多集列表或下一集自动跳转，再评估 episode model
+- 当前已新增 `media_seasons + media_episodes` 作为后续长期模型
+- 不新增 `media_series`
+- 兼容期内 `rooms.media_item_id` 和 Android 入参仍可能沿用 `mediaItemId` 命名，但语义会在后续 API 迁移中逐步切到 episode id
 - 当前播放进度仍属于运行时同步状态，不建议直接落为 `rooms` 表字段
 
 ### 7.4 房主、成员与倍速
@@ -1091,8 +1111,10 @@ Android 接入状态：
    - 围绕登录、注册、昵称与头像
 2. 新增用户观看进度模型
    - 围绕 `02 首页` 的“上次观看”和“继续追番”
-3. 完善 `media_items`
-   - 围绕选片页搜索、标签筛选与首页推荐内容
+3. 完善媒体内容模型
+   - 兼容期保留 `media_items`
+   - 长期使用 `media_seasons + media_episodes`
+   - 围绕选片页搜索、标签筛选、首页推荐内容和单集播放资源
 4. 将 create/join room 的 DB 读写路径落地
    - 围绕 `rooms` 和 `room_members`
 5. 再决定哪些生命周期字段需要从运行时同步到业务表

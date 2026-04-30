@@ -259,7 +259,7 @@ server/
 
 `mediactl` 是后续媒体资源制作、上传和入库的 CLI 入口。
 
-当前 `INT-139` 阶段已经支持本地单码率 HLS 生成；上传文件和写入 PostgreSQL 仍由后续任务补齐。
+当前 `INT-140` 阶段已经支持本地单码率 HLS 生成和 PostgreSQL 媒体元数据写入；上传文件仍由后续任务补齐。
 
 示例：
 
@@ -273,7 +273,8 @@ go run ./cmd/mediactl ingest \
   --episode-label "第 09 集" \
   --tags healing,anime \
   --cover ../media/source/cover.jpg \
-  --dry-run=false
+  --dry-run=false \
+  --write-db
 ```
 
 当前命令会完成：
@@ -285,10 +286,10 @@ go run ./cmd/mediactl ingest \
 - 默认输出 dry-run summary
 - `--dry-run=false` 时调用 `ffmpeg` 生成 `index.m3u8` 和 `.ts` 分片
 - `--dry-run=false` 时调用 `ffprobe` 读取源视频时长
+- `--dry-run=false --write-db` 时写入 `media_items / media_tags / media_item_tags`
 
 后续任务会继续补充：
 
-- `INT-140`: 写入 PostgreSQL 媒体元数据
 - `INT-141`: 接入 local / MinIO 上传抽象
 
 ## SQL-first Migration

@@ -130,6 +130,24 @@ func TestParseIngestOptionsRequiresStableOutputForNonDryRun(t *testing.T) {
 	}
 }
 
+func TestParseIngestOptionsRequiresDatabaseURLForWriteDB(t *testing.T) {
+	input := writeTempFile(t, "source.mp4")
+
+	_, err := ParseIngestOptions([]string{
+		"--media-id", "10000000-0000-0000-0000-000000000099",
+		"--input", input,
+		"--title", "测试视频",
+		"--dry-run=false",
+		"--write-db",
+	}, envLookup(nil), &bytes.Buffer{})
+	if err == nil {
+		t.Fatalf("expected missing database url to fail")
+	}
+	if !strings.Contains(err.Error(), "--write-db requires DATABASE_URL") {
+		t.Fatalf("expected database url error, got %v", err)
+	}
+}
+
 func TestBuildFFmpegHLSArgs(t *testing.T) {
 	args := BuildFFmpegHLSArgs(
 		"input.mp4",
@@ -151,6 +169,22 @@ func TestBuildFFmpegHLSArgs(t *testing.T) {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("expected ffmpeg args to contain %q, got %q", want, joined)
 		}
+	}
+}
+
+func TestPlannedMediaURLUsesStableObjectKey(t *testing.T) {
+	options := IngestOptions{
+		MediaID: "10000000-0000-0000-0000-000000000099",
+		Storage: StorageConfig{
+			PublicBaseURL:   "http://127.0.0.1:9000/media/tmp/",
+			ObjectKeyPrefix: "media",
+		},
+	}
+
+	got := plannedMediaURL(options)
+	want := "http://127.0.0.1:9000/media/tmp/media/10000000-0000-0000-0000-000000000099/hls/index.m3u8"
+	if got != want {
+		t.Fatalf("expected media url %q, got %q", want, got)
 	}
 }
 
