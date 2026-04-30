@@ -239,6 +239,14 @@
 - `INT-147` 再将服务端 API 查询切到新模型
 - `INT-148` 再将 Android 客户端语义从 `mediaItemId` 逐步迁移到 episode-backed API
 
+`INT-147` 当前已经落地服务端 API 过渡：
+
+- `GET /media/items` 优先查询 `media_seasons + media_episodes`
+- `POST /rooms` 的 `mediaItemId` 字段暂时保留，但语义改为 episode-backed id
+- `GET /rooms/{roomCode}` 返回的 `media.id` 优先为 `media_episodes.id`
+- `PUT /me/media-progress/{mediaItemId}` 优先写入 `user_media_progress.media_episode_id`
+- `rooms.media_episode_id` 和 `user_media_progress.media_episode_id` 已作为过渡引用字段加入
+
 #### `MediaSeason`
 
 当前含义：

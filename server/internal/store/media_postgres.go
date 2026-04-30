@@ -68,50 +68,55 @@ func (s *PostgresMediaStore) listTags(ctx context.Context, featuredOnly bool, li
 	return tags, nil
 }
 
-// SearchItems applies optional text search and tag filtering to active media items.
+// SearchItems applies optional text search and tag filtering to active episode-backed media.
 func (s *PostgresMediaStore) SearchItems(ctx context.Context, params media.StoreSearchParams) ([]media.Item, error) {
 	const query = `
 		SELECT
-			item.id::text,
-			item.title,
-			item.subtitle,
-			item.description,
-			item.cover_url,
-			item.duration_ms,
-			item.season_label,
-			item.episode_label,
+			episode.id::text,
+			season.title,
+			episode.subtitle,
+			COALESCE(episode.description, season.description) AS description,
+			COALESCE(episode.cover_url, season.cover_url) AS cover_url,
+			episode.duration_ms,
+			season.season_label,
+			episode.episode_label,
 			COALESCE(
 				jsonb_agg(
 					DISTINCT jsonb_build_object('slug', tag.slug, 'name', tag.name)
 				) FILTER (WHERE tag.id IS NOT NULL),
 				'[]'::jsonb
 			)::text AS tags
-		FROM media_items AS item
-		LEFT JOIN media_item_tags AS item_tag ON item_tag.media_item_id = item.id
-		LEFT JOIN media_tags AS tag ON tag.id = item_tag.media_tag_id AND tag.is_active = true
-		WHERE item.status = 'active'
+		FROM media_episodes AS episode
+		INNER JOIN media_seasons AS season ON season.id = episode.season_id
+		LEFT JOIN media_season_tags AS season_tag ON season_tag.season_id = season.id
+		LEFT JOIN media_tags AS tag ON tag.id = season_tag.media_tag_id AND tag.is_active = true
+		WHERE episode.status = 'active'
+			AND season.status = 'active'
 			AND (
 				$1 = ''
-				OR item.title ILIKE '%' || $1 || '%'
-				OR item.subtitle ILIKE '%' || $1 || '%'
-				OR item.description ILIKE '%' || $1 || '%'
-				OR item.original_title ILIKE '%' || $1 || '%'
-				OR item.production_team ILIKE '%' || $1 || '%'
-				OR item.search_aliases::text ILIKE '%' || $1 || '%'
+				OR season.title ILIKE '%' || $1 || '%'
+				OR season.description ILIKE '%' || $1 || '%'
+				OR season.original_title ILIKE '%' || $1 || '%'
+				OR season.production_team ILIKE '%' || $1 || '%'
+				OR season.search_aliases::text ILIKE '%' || $1 || '%'
+				OR episode.title ILIKE '%' || $1 || '%'
+				OR episode.subtitle ILIKE '%' || $1 || '%'
+				OR episode.description ILIKE '%' || $1 || '%'
+				OR episode.episode_label ILIKE '%' || $1 || '%'
 			)
 			AND (
 				$2 = ''
 				OR EXISTS (
 					SELECT 1
-					FROM media_item_tags AS filter_item_tag
-					INNER JOIN media_tags AS filter_tag ON filter_tag.id = filter_item_tag.media_tag_id
-					WHERE filter_item_tag.media_item_id = item.id
+					FROM media_season_tags AS filter_season_tag
+					INNER JOIN media_tags AS filter_tag ON filter_tag.id = filter_season_tag.media_tag_id
+					WHERE filter_season_tag.season_id = season.id
 						AND filter_tag.slug = $2
 						AND filter_tag.is_active = true
 				)
 			)
-		GROUP BY item.id
-		ORDER BY item.updated_at DESC, item.title ASC
+		GROUP BY episode.id, season.id
+		ORDER BY season.sort_order ASC, episode.sort_order ASC, season.title ASC, episode.episode_number ASC NULLS LAST
 		LIMIT $3 OFFSET $4
 	`
 

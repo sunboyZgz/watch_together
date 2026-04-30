@@ -205,10 +205,10 @@ server/
 - `internal/progress/service.go`: 用户媒体观看进度校验与低频写入逻辑
 - `internal/roomapi/service.go`: 6 位房间码生成、DB-backed create room 和 join room by code 业务逻辑
 - `internal/store/postgres.go`: PostgreSQL 连接与 `users` 读写
-- `internal/store/home_postgres.go`: `users`、`user_media_progress` 与 `media_items` 的首页 summary 查询
-- `internal/store/media_postgres.go`: `media_items`、`media_tags` 与 `media_item_tags` 的标签列表、搜索和筛选查询
+- `internal/store/home_postgres.go`: `users`、`user_media_progress`、`media_episodes` 与 `media_seasons` 的首页 summary 查询
+- `internal/store/media_postgres.go`: `media_tags` 标签列表，以及 `media_seasons / media_episodes / media_season_tags` 的搜索和筛选查询
 - `internal/store/progress_postgres.go`: `user_media_progress` 的 upsert 写入
-- `internal/store/room_postgres.go`: `rooms`、`room_members`、`media_items` 的创建房间和按房间码加入事务
+- `internal/store/room_postgres.go`: `rooms`、`room_members`、`media_episodes` 与 `media_seasons` 的创建房间、加入和详情查询事务
 - `internal/transport/auth_http_handler.go`: auth HTTP API 入口与统一 API envelope
 - `internal/transport/home_http_handler.go`: `GET /home/summary` HTTP API 入口与 dev token 解析
 - `internal/transport/media_http_handler.go`: `GET /media/tags`、`GET /media/items` HTTP API 入口和分页 envelope
@@ -390,8 +390,11 @@ make migration-up
 
 - `users`
 - `media_items`
+- `media_seasons`
+- `media_episodes`
 - `media_tags`
 - `media_item_tags`
+- `media_season_tags`
 - `rooms`
 - `room_members`
 - `user_media_progress`
@@ -418,10 +421,20 @@ make migration-up
 - `production_team`
 - `search_aliases`
 
+当前媒体内容模型已经进入 episode-backed 过渡阶段：
+
+- `media_items` 暂时保留为兼容期旧表
+- `media_seasons` 表达一季、篇章、合集或作品容器
+- `media_episodes` 表达真正可播放的一集或视频资源
+- `media_season_tags` 表达 season 与标签目录的关系
+- 服务端媒体列表、创建房间、房间详情、首页 summary 和观看进度已优先使用 `media_episodes / media_seasons`
+- HTTP 字段名 `mediaItemId` 暂时保留，但语义已经逐步迁移为 episode-backed id
+
 当前标签目录与标签关联由以下表承载：
 
 - `media_tags`
 - `media_item_tags`
+- `media_season_tags`
 
 当前包含的关键约束：
 
@@ -440,9 +453,11 @@ make migration-up
 - `media_tags.is_active / sort_order`
 - `media_tags.is_featured / is_active / sort_order`
 - `media_item_tags.media_tag_id`
-- `rooms.host_user_id / media_item_id / status / destroy_after`
+- `media_season_tags.media_tag_id`
+- `rooms.host_user_id / media_item_id / media_episode_id / status / destroy_after`
 - `room_members.room_id / user_id`
 - active 成员关系相关索引
 - `user_media_progress(user_id, media_item_id)` 唯一约束
+- `user_media_progress(user_id, media_episode_id)` 部分唯一约束
 - `user_media_progress(user_id, last_watched_at desc)`
 - `user_media_progress(user_id, completed, last_watched_at desc)`

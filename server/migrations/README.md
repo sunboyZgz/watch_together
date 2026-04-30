@@ -49,4 +49,23 @@
 - migration 会把旧 `media_items` 安全 backfill 成一条 `media_seasons` 与一条 `media_episodes`
 - `media_episodes.legacy_media_item_id` 用于后续 API 迁移期间关联旧数据
 
-后续 `INT-147 / INT-148` 会分别处理服务端 API 和 Android 客户端对 episode-backed 模型的迁移。
+`INT-147` 继续新增 API 过渡引用 migration：
+
+- `20260430103000_add_episode_refs_to_rooms_and_progress.up.sql`
+- `20260430103000_add_episode_refs_to_rooms_and_progress.down.sql`
+
+这组 migration 增加：
+
+- `rooms.media_episode_id`
+- `user_media_progress.media_episode_id`
+- `rooms` 的 episode 引用索引
+- `user_media_progress(user_id, media_episode_id)` 部分唯一索引
+
+兼容策略：
+
+- `rooms.media_item_id` 暂时保留，但允许为空
+- `user_media_progress.media_item_id` 暂时保留，但允许为空
+- 旧数据会通过 `media_episodes.legacy_media_item_id` 自动 backfill 到 episode 引用
+- API 层字段名 `mediaItemId` 暂时保留，但语义开始迁移为 episode-backed id
+
+后续 `INT-148` 会处理 Android 客户端对 episode-backed 模型的迁移和命名收敛。
