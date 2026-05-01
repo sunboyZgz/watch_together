@@ -17,8 +17,8 @@ data class MediaCatalogTags(
     val allTags: List<MediaTag>
 )
 
-data class MediaItem(
-    val id: String,
+data class MediaEpisode(
+    val episodeId: String,
     val title: String,
     val subtitle: String?,
     val description: String?,
@@ -30,7 +30,7 @@ data class MediaItem(
 )
 
 data class MediaItemsPage(
-    val items: List<MediaItem>,
+    val items: List<MediaEpisode>,
     val nextCursor: String?
 )
 
@@ -131,14 +131,14 @@ private fun org.json.JSONArray?.toTags(): List<MediaTag> {
     }
 }
 
-private fun org.json.JSONArray?.toMediaItems(): List<MediaItem> {
+private fun org.json.JSONArray?.toMediaItems(): List<MediaEpisode> {
     if (this == null) return emptyList()
     return buildList {
         for (index in 0 until length()) {
             val item = getJSONObject(index)
             add(
-                MediaItem(
-                    id = item.getString("id"),
+                MediaEpisode(
+                    episodeId = item.getString("id"),
                     title = item.getString("title"),
                     subtitle = item.optNullableString("subtitle"),
                     description = item.optNullableString("description"),

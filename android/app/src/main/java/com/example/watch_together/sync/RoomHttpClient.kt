@@ -45,11 +45,11 @@ class RoomHttpClient(
     private val okHttpClient: OkHttpClient = OkHttpClient()
 ) {
 
-    // createRoom uses the DB-backed POST /rooms entrypoint and returns the
-    // business media data needed to load the selected video into the theater page.
-    fun createRoom(accessToken: String, mediaItemId: String): CreateRoomResult {
+    // createRoom sends the selected episode id through the temporary mediaItemId
+    // HTTP field while the API contract finishes its episode-backed migration.
+    fun createRoom(accessToken: String, episodeId: String): CreateRoomResult {
         val requestBody = JSONObject()
-            .put("mediaItemId", mediaItemId)
+            .put("mediaItemId", episodeId)
             .toString()
             .toRequestBody("application/json; charset=utf-8".toMediaType())
 

@@ -34,7 +34,7 @@ import java.util.UUID
 fun PlayerScreen(
     accessToken: String = "",
     currentUserId: String = "",
-    selectedMediaItemId: String = AppConfig.defaultMediaIdForRoom(),
+    selectedEpisodeId: String = AppConfig.defaultMediaIdForRoom(),
     autoCreateAsHost: Boolean = false,
     modifier: Modifier = Modifier
 ) {
@@ -66,7 +66,7 @@ fun PlayerScreen(
 
     var uiState by remember { mutableStateOf(RoomPlayerUiState()) }
     var loadedRoomId by remember { mutableStateOf<String?>(null) }
-    var autoCreatedMediaItemId by rememberSaveable { mutableStateOf<String?>(null) }
+    var autoCreatedEpisodeId by rememberSaveable { mutableStateOf<String?>(null) }
     var loadedRoomDetailCode by rememberSaveable { mutableStateOf<String?>(null) }
     var lastProgressReportAtMs by rememberSaveable { mutableStateOf(0L) }
     var lastProgressReportPositionSeconds by rememberSaveable { mutableStateOf(-1L) }
@@ -218,7 +218,7 @@ fun PlayerScreen(
                 withContext(Dispatchers.IO) {
                     progressHttpClient.updateProgress(
                         accessToken = accessToken,
-                        mediaItemId = media.id,
+                        episodeId = media.id,
                         lastPositionSeconds = safePositionSeconds,
                         durationSeconds = safeDurationSeconds,
                         completed = completed,
@@ -228,7 +228,7 @@ fun PlayerScreen(
             }.onSuccess {
                 appendLog(
                     syncLogs,
-                    "progress reported mediaId=${it.mediaItemId} pos=${it.lastPositionSeconds}s completed=${it.completed}"
+                    "progress reported episodeId=${it.episodeId} pos=${it.lastPositionSeconds}s completed=${it.completed}"
                 )
             }.onFailure { error ->
                 appendLog(syncLogs, "progress report failed: ${error.message}")
@@ -334,11 +334,11 @@ fun PlayerScreen(
                 updateUiState { current ->
                     current.copy(syncStatus = SyncStatus.CreatingRoom)
                 }
-                appendLog(syncLogs, "POST /rooms mediaItemId=$selectedMediaItemId hostUserId=$hostUserId")
+                appendLog(syncLogs, "POST /rooms episodeId=$selectedEpisodeId hostUserId=$hostUserId")
                 val createResult = withContext(Dispatchers.IO) {
                     roomSessionController.createRoom(
                         accessToken = accessToken,
-                        mediaItemId = selectedMediaItemId
+                        episodeId = selectedEpisodeId
                     )
                 }
 
@@ -370,12 +370,12 @@ fun PlayerScreen(
         }
     }
 
-    LaunchedEffect(autoCreateAsHost, selectedMediaItemId, accessToken) {
+    LaunchedEffect(autoCreateAsHost, selectedEpisodeId, accessToken) {
         if (!autoCreateAsHost) return@LaunchedEffect
-        if (selectedMediaItemId.isBlank()) return@LaunchedEffect
-        if (autoCreatedMediaItemId == selectedMediaItemId) return@LaunchedEffect
+        if (selectedEpisodeId.isBlank()) return@LaunchedEffect
+        if (autoCreatedEpisodeId == selectedEpisodeId) return@LaunchedEffect
 
-        autoCreatedMediaItemId = selectedMediaItemId
+        autoCreatedEpisodeId = selectedEpisodeId
         createAndJoinAsHost()
     }
 

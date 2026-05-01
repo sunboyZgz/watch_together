@@ -9,7 +9,8 @@ import (
 )
 
 func TestParseIngestOptionsBuildsDryRunContract(t *testing.T) {
-	input := writeTempFile(t, "source.mp4")
+	libraryRoot := t.TempDir()
+	input := writeLibraryFile(t, libraryRoot, "violet-evergarden/season-01/episode-09.mp4")
 	cover := writeTempFile(t, "cover.jpg")
 	env := map[string]string{
 		"MEDIA_STORAGE_DRIVER":           "local",
@@ -24,6 +25,7 @@ func TestParseIngestOptionsBuildsDryRunContract(t *testing.T) {
 	options, err := ParseIngestOptions([]string{
 		"--media-id", "media_uuid",
 		"--input", input,
+		"--library-root", libraryRoot,
 		"--title", "紫罗兰永恒花园",
 		"--season-label", "第 1 季",
 		"--episode-label", "第 09 集",
@@ -39,6 +41,21 @@ func TestParseIngestOptionsBuildsDryRunContract(t *testing.T) {
 
 	if options.Input != input {
 		t.Fatalf("expected input %q, got %q", input, options.Input)
+	}
+	if options.SourceKey != "violet-evergarden/season-01/episode-09.mp4" {
+		t.Fatalf("expected source key, got %q", options.SourceKey)
+	}
+	if options.SourceHash != "sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08" {
+		t.Fatalf("expected sha256 hash, got %q", options.SourceHash)
+	}
+	if options.SeasonSlug != "violet-evergarden" {
+		t.Fatalf("expected season slug, got %q", options.SeasonSlug)
+	}
+	if options.SeasonNumber == nil || *options.SeasonNumber != 1 {
+		t.Fatalf("expected season number 1, got %#v", options.SeasonNumber)
+	}
+	if options.EpisodeNumber == nil || *options.EpisodeNumber != 9 {
+		t.Fatalf("expected episode number 9, got %#v", options.EpisodeNumber)
 	}
 	if options.Title != "紫罗兰永恒花园" {
 		t.Fatalf("unexpected title %q", options.Title)
@@ -73,8 +90,10 @@ func TestParseIngestOptionsBuildsDryRunContract(t *testing.T) {
 }
 
 func TestParseIngestOptionsRequiresExistingInput(t *testing.T) {
+	libraryRoot := t.TempDir()
 	_, err := ParseIngestOptions([]string{
-		"--input", filepath.Join(t.TempDir(), "missing.mp4"),
+		"--input", filepath.Join(libraryRoot, "missing.mp4"),
+		"--library-root", libraryRoot,
 		"--title", "missing",
 	}, envLookup(nil), &bytes.Buffer{})
 	if err == nil {
@@ -85,14 +104,50 @@ func TestParseIngestOptionsRequiresExistingInput(t *testing.T) {
 	}
 }
 
+func TestParseIngestOptionsRequiresInputInsideLibraryRoot(t *testing.T) {
+	libraryRoot := t.TempDir()
+	input := writeTempFile(t, "episode-01.mp4")
+
+	_, err := ParseIngestOptions([]string{
+		"--input", input,
+		"--library-root", libraryRoot,
+		"--title", "测试视频",
+	}, envLookup(nil), &bytes.Buffer{})
+	if err == nil {
+		t.Fatalf("expected input outside library root to fail")
+	}
+	if !strings.Contains(err.Error(), "--input must be inside --library-root") {
+		t.Fatalf("expected library containment error, got %v", err)
+	}
+}
+
+func TestParseIngestOptionsRequiresSafeSourcePath(t *testing.T) {
+	libraryRoot := t.TempDir()
+	input := writeLibraryFile(t, libraryRoot, "Violet Evergarden/season-01/episode-01.mp4")
+
+	_, err := ParseIngestOptions([]string{
+		"--input", input,
+		"--library-root", libraryRoot,
+		"--title", "测试视频",
+	}, envLookup(nil), &bytes.Buffer{})
+	if err == nil {
+		t.Fatalf("expected unsafe source path to fail")
+	}
+	if !strings.Contains(err.Error(), "must use lowercase letters") {
+		t.Fatalf("expected source path component error, got %v", err)
+	}
+}
+
 func TestRunIngestPrintsDryRunSummary(t *testing.T) {
-	input := writeTempFile(t, "source.mp4")
+	libraryRoot := t.TempDir()
+	input := writeLibraryFile(t, libraryRoot, "bocchi/season-01/episode-01.mp4")
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 
 	exitCode := Run([]string{
 		"ingest",
 		"--input", input,
+		"--library-root", libraryRoot,
 		"--title", "孤独摇滚!",
 		"--tags", "music,comedy",
 	}, envLookup(nil), &stdout, &stderr)
@@ -106,6 +161,9 @@ func TestRunIngestPrintsDryRunSummary(t *testing.T) {
 	if !strings.Contains(stdout.String(), `"title": "孤独摇滚!"`) {
 		t.Fatalf("expected title in summary, got %s", stdout.String())
 	}
+	if !strings.Contains(stdout.String(), `"sourceKey": "bocchi/season-01/episode-01.mp4"`) {
+		t.Fatalf("expected source key in summary, got %s", stdout.String())
+	}
 	if !strings.Contains(stdout.String(), `"ffmpegBin": "ffmpeg"`) {
 		t.Fatalf("expected default ffmpeg in summary, got %s", stdout.String())
 	}
@@ -114,28 +172,28 @@ func TestRunIngestPrintsDryRunSummary(t *testing.T) {
 	}
 }
 
-func TestParseIngestOptionsRequiresStableOutputForNonDryRun(t *testing.T) {
+func TestParseIngestOptionsRequiresLibraryRoot(t *testing.T) {
 	input := writeTempFile(t, "source.mp4")
 
 	_, err := ParseIngestOptions([]string{
 		"--input", input,
 		"--title", "测试视频",
-		"--dry-run=false",
 	}, envLookup(nil), &bytes.Buffer{})
 	if err == nil {
-		t.Fatalf("expected missing media id to fail")
+		t.Fatalf("expected missing library root to fail")
 	}
-	if !strings.Contains(err.Error(), "--media-id is required") {
-		t.Fatalf("expected media id error, got %v", err)
+	if !strings.Contains(err.Error(), "--library-root is required") {
+		t.Fatalf("expected library root error, got %v", err)
 	}
 }
 
 func TestParseIngestOptionsRequiresDatabaseURLForWriteDB(t *testing.T) {
-	input := writeTempFile(t, "source.mp4")
+	libraryRoot := t.TempDir()
+	input := writeLibraryFile(t, libraryRoot, "test-show/season-01/episode-01.mp4")
 
 	_, err := ParseIngestOptions([]string{
-		"--media-id", "10000000-0000-0000-0000-000000000099",
 		"--input", input,
+		"--library-root", libraryRoot,
 		"--title", "测试视频",
 		"--dry-run=false",
 		"--write-db",
@@ -174,7 +232,7 @@ func TestBuildFFmpegHLSArgs(t *testing.T) {
 
 func TestPlannedMediaURLUsesStableObjectKey(t *testing.T) {
 	options := IngestOptions{
-		MediaID: "10000000-0000-0000-0000-000000000099",
+		SourceKey: "violet-evergarden/season-01/episode-09.mp4",
 		Storage: StorageConfig{
 			PublicBaseURL:   "http://127.0.0.1:9000/media/tmp/",
 			ObjectKeyPrefix: "media",
@@ -182,7 +240,7 @@ func TestPlannedMediaURLUsesStableObjectKey(t *testing.T) {
 	}
 
 	got := plannedMediaURL(options)
-	want := "http://127.0.0.1:9000/media/tmp/media/10000000-0000-0000-0000-000000000099/hls/index.m3u8"
+	want := "http://127.0.0.1:9000/media/tmp/media/violet-evergarden/season-01/episode-09/hls/index.m3u8"
 	if got != want {
 		t.Fatalf("expected media url %q, got %q", want, got)
 	}
@@ -207,6 +265,18 @@ func writeTempFile(t *testing.T, name string) string {
 	path := filepath.Join(t.TempDir(), name)
 	if err := os.WriteFile(path, []byte("test"), 0o600); err != nil {
 		t.Fatalf("write temp file: %v", err)
+	}
+	return path
+}
+
+func writeLibraryFile(t *testing.T, root string, name string) string {
+	t.Helper()
+	path := filepath.Join(root, filepath.FromSlash(name))
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatalf("create library dir: %v", err)
+	}
+	if err := os.WriteFile(path, []byte("test"), 0o600); err != nil {
+		t.Fatalf("write library file: %v", err)
 	}
 	return path
 }

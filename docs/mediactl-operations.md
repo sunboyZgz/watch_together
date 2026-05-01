@@ -13,7 +13,9 @@ server/cmd/mediactl
 - `mediactl ingest` dry-run。
 - 本地单码率 HLS 生成。
 - 源视频时长探测。
-- PostgreSQL 媒体元数据 upsert，需要显式传 `--write-db`。
+- 基于媒体库目录自动推导 `source_key`。
+- 基于源文件内容自动计算 `source_hash`。
+- PostgreSQL season/episode 元数据 upsert，需要显式传 `--write-db`。
 
 当前未实现：
 
@@ -76,8 +78,8 @@ dry-run 不会写文件、不会上传、不会写数据库，适合先检查参
 ```bash
 cd server
 go run ./cmd/mediactl ingest \
-  --media-id media_uuid \
-  --input /path/to/source.mp4 \
+  --library-root ../media/raw \
+  --input ../media/raw/violet-evergarden/season-01/episode-09.mp4 \
   --title "紫罗兰永恒花园" \
   --season-label "第 1 季" \
   --episode-label "第 09 集" \
@@ -87,6 +89,9 @@ go run ./cmd/mediactl ingest \
 输出会包含：
 
 - 输入文件路径
+- `sourceKey`
+- `sourceHash`
+- 从目录解析出的 `seasonSlug / seasonNumber / episodeNumber`
 - 标题、季度、集数
 - tags
 - 当前 storage config
@@ -99,8 +104,8 @@ go run ./cmd/mediactl ingest \
 ```bash
 cd server
 go run ./cmd/mediactl ingest \
-  --media-id media_uuid \
-  --input /path/to/source.mp4 \
+  --library-root ../media/raw \
+  --input ../media/raw/violet-evergarden/season-01/episode-09.mp4 \
   --title "紫罗兰永恒花园" \
   --season-label "第 1 季" \
   --episode-label "第 09 集" \
@@ -111,13 +116,13 @@ go run ./cmd/mediactl ingest \
 默认输出目录：
 
 ```text
-{MEDIA_LOCAL_ROOT}/{MEDIA_OBJECT_KEY_PREFIX}/{mediaId}/hls/
+{MEDIA_LOCAL_ROOT}/{MEDIA_OBJECT_KEY_PREFIX}/{sourceKeyWithoutExt}/hls/
 ```
 
 例如：
 
 ```text
-../media/tmp/media/media_uuid/hls/
+../media/tmp/media/violet-evergarden/season-01/episode-09/hls/
 ```
 
 默认产物：
@@ -147,7 +152,7 @@ go run ./cmd/mediactl ingest \
   --dry-run=false
 ```
 
-`--output-dir` 适合本地试跑。正式入库流程建议使用 `--media-id` 生成稳定目录。
+`--output-dir` 适合本地试跑。正式入库流程建议不要使用它，让 CLI 根据 `source_key` 生成稳定目录。
 
 ### 写入 PostgreSQL
 
@@ -156,8 +161,8 @@ go run ./cmd/mediactl ingest \
 ```bash
 cd server
 go run ./cmd/mediactl ingest \
-  --media-id "10000000-0000-0000-0000-000000000099" \
-  --input /path/to/source.mp4 \
+  --library-root ../media/raw \
+  --input ../media/raw/violet-evergarden/season-01/episode-09.mp4 \
   --title "紫罗兰永恒花园" \
   --subtitle "和搭子一起继续看" \
   --description "治愈系作品，适合夜晚慢慢看。" \
@@ -174,34 +179,35 @@ go run ./cmd/mediactl ingest \
 
 写入内容：
 
-- upsert `media_items`
+- upsert `media_seasons`
+- upsert `media_episodes`
 - upsert `media_tags`
-- replace 当前媒体的 `media_item_tags`
+- replace 当前 season 的 `media_season_tags`
 
 `--write-db` 需要：
 
 - `--dry-run=false`
-- `--media-id`
 - `DATABASE_URL` 或 `--database-url`
 
-当前 `cover_url` 仍由后续上传阶段补齐；如果重复导入同一个 `media-id`，已有 `cover_url` 不会被空值覆盖。
+当前 `cover_url` 仍由后续上传阶段补齐；如果重复导入同一个 `source_key`，已有 `cover_url` 不会被空值覆盖。
 
 ## 参数说明
 
 | 参数 | 必填 | 当前作用 |
 | -- | -- | -- |
 | `--input` | 是 | 源视频文件路径，必须存在。 |
+| `--library-root` | 是 | 媒体库根目录，用于从 `--input` 自动推导 `source_key`。 |
 | `--title` | 是 | 媒体标题。 |
-| `--media-id` | 非 dry-run 推荐，写库必填 | 稳定媒体 ID，用于生成 object key 目录；写库时必须是 PostgreSQL UUID。 |
+| `--media-id` | 否 | 兼容期 legacy override；常规生产流程不要传。 |
 | `--subtitle` | 否 | 媒体副标题。 |
 | `--description` | 否 | 媒体简介。 |
 | `--category` | 否 | 媒体分类，例如 `anime`。 |
 | `--original-title` | 否 | 原始标题。 |
 | `--production-team` | 否 | 制作团队或工作室。 |
-| `--search-aliases` | 否 | 逗号分隔搜索别名，写入 `media_items.search_aliases`。 |
+| `--search-aliases` | 否 | 逗号分隔搜索别名，写入 `media_seasons.search_aliases`。 |
 | `--season-label` | 否 | 季度展示文本。 |
 | `--episode-label` | 否 | 集数展示文本。 |
-| `--tags` | 否 | 逗号分隔标签；写库时会进入 `media_tags / media_item_tags`。 |
+| `--tags` | 否 | 逗号分隔标签；写库时会进入 `media_tags / media_season_tags`。 |
 | `--cover` | 否 | 封面文件路径，当前只校验存在，后续由 `INT-141` 上传。 |
 | `--output-dir` | 否 | 覆盖 HLS 输出目录，适合临时测试。 |
 | `--hls-segment-seconds` | 否 | HLS 分片时长，允许 4 到 6 秒，默认 6。 |
@@ -264,19 +270,26 @@ http://10.0.2.2:9000/media/tmp/media/media_uuid/hls/index.m3u8
 
 写入字段包括：
 
-- `media_items.title`
-- `media_items.subtitle`
-- `media_items.description`
-- `media_items.category`
-- `media_items.original_title`
-- `media_items.production_team`
-- `media_items.search_aliases`
-- `media_items.media_url`
-- `media_items.duration_ms`
-- `media_items.season_label`
-- `media_items.episode_label`
+- `media_seasons.slug`
+- `media_seasons.title`
+- `media_seasons.description`
+- `media_seasons.category`
+- `media_seasons.original_title`
+- `media_seasons.production_team`
+- `media_seasons.search_aliases`
+- `media_seasons.season_number`
+- `media_seasons.season_label`
+- `media_episodes.title`
+- `media_episodes.subtitle`
+- `media_episodes.description`
+- `media_episodes.media_url`
+- `media_episodes.duration_ms`
+- `media_episodes.episode_number`
+- `media_episodes.episode_label`
+- `media_episodes.source_key`
+- `media_episodes.source_hash`
 - `media_tags`
-- `media_item_tags`
+- `media_season_tags`
 
 当前 `cover_url` 仍等待 `INT-141` 上传阶段补齐。
 
@@ -295,15 +308,49 @@ http://10.0.2.2:9000/media/tmp/media/media_uuid/hls/index.m3u8
 
 ## 常见问题
 
-### `--dry-run=false` 提示需要 `--media-id`
+### `--library-root` 与目录规范
 
-非 dry-run 默认会输出到：
+常规生产流程不手动输入 `source_key / source_hash`：
+
+- `source_key` 由 `--input` 相对 `--library-root` 的路径推导
+- `source_hash` 由源文件内容 SHA-256 自动计算
+
+推荐目录结构：
 
 ```text
-{MEDIA_LOCAL_ROOT}/{MEDIA_OBJECT_KEY_PREFIX}/{mediaId}/hls/
+media/raw/
+└── violet-evergarden/
+    └── season-01/
+        └── episode-09.mp4
 ```
 
-因此需要 `--media-id`。如果只是临时测试，也可以传 `--output-dir`。
+示例：
+
+```bash
+go run ./cmd/mediactl ingest \
+  --library-root ../media/raw \
+  --input ../media/raw/violet-evergarden/season-01/episode-09.mp4 \
+  --title "紫罗兰永恒花园"
+```
+
+推导结果：
+
+```text
+source_key = violet-evergarden/season-01/episode-09.mp4
+season_slug = violet-evergarden
+season_number = 1
+episode_number = 9
+source_hash = sha256:<file-content-hash>
+```
+
+如果 `--input` 不在 `--library-root` 内，CLI 会拒绝执行。
+
+路径规范：
+
+- 每个路径片段只允许小写英文字母、数字、点、短横线或下划线。
+- 推荐 season 目录使用 `season-01` 这类格式。
+- 推荐 episode 文件名使用 `episode-09.mp4` 这类格式。
+- 不建议在媒体库目录和文件名里使用中文、空格或大写字母；这些信息应进入 `title / original-title / search-aliases` 等元数据字段。
 
 ### 找不到 ffmpeg 或 ffprobe
 
@@ -328,7 +375,7 @@ export FFPROBE_BIN=/absolute/path/to/ffprobe
 - 静态服务是否启动。
 - Android 使用的是 `10.0.2.2` 而不是 `127.0.0.1`。
 - `index.m3u8` 和 `.ts` 分片是否都能通过浏览器访问。
-- PostgreSQL 中 `media_items.media_url` 是否指向 `index.m3u8`。
+- PostgreSQL 中 `media_episodes.media_url` 是否指向 `index.m3u8`。
 
 ## 后续任务
 

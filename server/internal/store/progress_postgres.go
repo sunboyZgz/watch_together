@@ -18,7 +18,7 @@ func NewPostgresProgressStore(db *sql.DB) *PostgresProgressStore {
 	return &PostgresProgressStore{db: db}
 }
 
-// UpdateMediaProgress upserts one user's latest progress for one media item.
+// UpdateMediaProgress upserts one user's latest progress for one playable episode.
 func (s *PostgresProgressStore) UpdateMediaProgress(ctx context.Context, params progress.UpdateParams) (progress.Summary, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -32,53 +32,42 @@ func (s *PostgresProgressStore) UpdateMediaProgress(ctx context.Context, params 
 		return progress.Summary{}, progress.ErrUserNotFound
 	}
 
-	mediaRef, err := findProgressMedia(ctx, tx, params.MediaItemID)
+	episodeID, err := findProgressEpisodeID(ctx, tx, params.MediaItemID)
 	if err != nil {
 		return progress.Summary{}, err
 	}
-	if mediaRef.episodeID == "" {
+	if episodeID == "" {
 		return progress.Summary{}, progress.ErrMediaNotFound
 	}
 
-	existingID, err := findExistingProgressID(ctx, tx, params.UserID, mediaRef.episodeID)
+	existingID, err := findExistingProgressID(ctx, tx, params.UserID, episodeID)
 	if err != nil {
 		return progress.Summary{}, err
 	}
 	if existingID != "" {
-		return updateExistingProgress(ctx, tx, existingID, params, mediaRef.episodeID)
+		return updateExistingProgress(ctx, tx, existingID, params, episodeID)
 	}
-	return insertProgress(ctx, tx, params, mediaRef)
+	return insertProgress(ctx, tx, params, episodeID)
 }
 
-type progressMediaRef struct {
-	episodeID         string
-	legacyMediaItemID *string
-}
-
-func findProgressMedia(ctx context.Context, tx *sql.Tx, mediaItemID string) (progressMediaRef, error) {
+func findProgressEpisodeID(ctx context.Context, tx *sql.Tx, mediaItemID string) (string, error) {
 	const query = `
-		SELECT episode.id::text, episode.legacy_media_item_id::text
+		SELECT episode.id::text
 		FROM media_episodes AS episode
 		INNER JOIN media_seasons AS season ON season.id = episode.season_id
-		WHERE (episode.id = $1 OR episode.legacy_media_item_id = $1)
+		WHERE episode.id = $1
 			AND episode.status = 'active'
 			AND season.status = 'active'
-		ORDER BY CASE WHEN episode.id = $1 THEN 0 ELSE 1 END
 		LIMIT 1
 	`
-	var ref progressMediaRef
-	var legacyMediaItemID sql.NullString
-	if err := tx.QueryRowContext(ctx, query, mediaItemID).Scan(
-		&ref.episodeID,
-		&legacyMediaItemID,
-	); err != nil {
+	var episodeID string
+	if err := tx.QueryRowContext(ctx, query, mediaItemID).Scan(&episodeID); err != nil {
 		if err == sql.ErrNoRows {
-			return progressMediaRef{}, nil
+			return "", nil
 		}
-		return progressMediaRef{}, fmt.Errorf("find progress media: %w", err)
+		return "", fmt.Errorf("find progress media: %w", err)
 	}
-	ref.legacyMediaItemID = nullableStringPtr(legacyMediaItemID)
-	return ref, nil
+	return episodeID, nil
 }
 
 func findExistingProgressID(ctx context.Context, tx *sql.Tx, userID string, episodeID string) (string, error) {
@@ -141,11 +130,10 @@ func updateExistingProgress(ctx context.Context, tx *sql.Tx, progressID string, 
 	return summary, nil
 }
 
-func insertProgress(ctx context.Context, tx *sql.Tx, params progress.UpdateParams, mediaRef progressMediaRef) (progress.Summary, error) {
+func insertProgress(ctx context.Context, tx *sql.Tx, params progress.UpdateParams, episodeID string) (progress.Summary, error) {
 	const query = `
 		INSERT INTO user_media_progress (
 			user_id,
-			media_item_id,
 			media_episode_id,
 			last_position_seconds,
 			duration_seconds,
@@ -153,7 +141,7 @@ func insertProgress(ctx context.Context, tx *sql.Tx, params progress.UpdateParam
 			completed,
 			completion_source
 		)
-		VALUES ($1, $2, $3, $4, $5, NOW(), $6, $7)
+		VALUES ($1, $2, $3, $4, NOW(), $5, $6)
 		RETURNING media_episode_id::text, last_position_seconds, duration_seconds, completed, last_watched_at
 	`
 
@@ -162,8 +150,7 @@ func insertProgress(ctx context.Context, tx *sql.Tx, params progress.UpdateParam
 		ctx,
 		query,
 		params.UserID,
-		mediaRef.legacyMediaItemID,
-		mediaRef.episodeID,
+		episodeID,
 		params.LastPositionSeconds,
 		params.DurationSeconds,
 		params.Completed,

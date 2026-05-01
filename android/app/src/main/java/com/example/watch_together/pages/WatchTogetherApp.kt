@@ -25,7 +25,7 @@ fun WatchTogetherApp() {
     var sessionAccount by rememberSaveable { mutableStateOf("") }
     var sessionNickname by rememberSaveable { mutableStateOf("") }
     var sessionAccessToken by rememberSaveable { mutableStateOf("") }
-    var selectedMediaItemId by rememberSaveable { mutableStateOf(AppConfig.defaultMediaIdForRoom()) }
+    var selectedEpisodeId by rememberSaveable { mutableStateOf(AppConfig.defaultMediaIdForRoom()) }
 
     when (currentScreen) {
         AppScreen.Login -> LoginPage(
@@ -46,8 +46,8 @@ fun WatchTogetherApp() {
 
         AppScreen.VideoSelection -> VideoSelectionPage(
             onBackClick = { currentScreen = AppScreen.Home },
-            onCreateRoomClick = { mediaItemId ->
-                selectedMediaItemId = mediaItemId
+            onCreateRoomClick = { episodeId ->
+                selectedEpisodeId = episodeId
                 currentScreen = AppScreen.Player
             }
         )
@@ -55,7 +55,7 @@ fun WatchTogetherApp() {
         AppScreen.Player -> PlayerScreen(
             accessToken = sessionAccessToken,
             currentUserId = sessionUserId,
-            selectedMediaItemId = selectedMediaItemId,
+            selectedEpisodeId = selectedEpisodeId,
             autoCreateAsHost = true
         )
     }

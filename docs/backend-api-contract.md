@@ -333,8 +333,7 @@ cursor=opaque_cursor
 
 - `GET /home/summary` 已落地，对应 `INT-118`
 - 使用 `Authorization: Bearer dev_<userId>` 读取当前用户
-- `INT-147` 后，观看进度展示数据来自 `users`、`user_media_progress`、`media_episodes` 与 `media_seasons`
-- `media_items` 仅作为兼容期旧引用
+- 观看进度展示数据来自 `users`、`user_media_progress`、`media_episodes` 与 `media_seasons`
 - `lastWatched` 没有记录时返回 `null`
 - `continueWatching` 当前取最近 2 条未完成记录
 - 启动服务端前必须配置 `DATABASE_URL`，否则 home endpoints 会返回 `503`
@@ -407,10 +406,9 @@ Android 联调状态：
 
 - `GET /media/tags` 已落地，对应 `INT-119`
 - `GET /media/items` 已落地，对应 `INT-120`
-- `INT-147` 后，`GET /media/items` 已迁移为 episode-backed 查询
+- `GET /media/items` 已迁移为 episode-backed 查询
 - 标签目录仍来自 `media_tags`
 - 媒体列表数据来自 `media_seasons / media_episodes / media_season_tags`
-- `media_items / media_item_tags` 暂时保留为兼容期旧模型
 - `featuredTags` 当前返回最多 5 个 `is_featured = true` 且 `is_active = true` 的标签
 - `allTags` 当前返回最多 20 个 `is_active = true` 的标签
 - `GET /media/items` 支持 `query`、`tag`、`limit`、`cursor`
@@ -535,8 +533,9 @@ Android 联调状态：
 - 搜索框变化后会用 `query` 重新请求媒体列表
 - 标签变化后会用 `tag=<media_tags.slug>` 重新请求媒体列表
 - Android 当前会展示接口返回的 `title` 和 `subtitle / episodeLabel / description` 中的首个可用描述
-- Android 当前已把选中的 `mediaItemId` 传到创建房间入口回调，后续 `POST /rooms` 接入时直接使用
-- `INT-147` 后，`items[].id` 是 `media_episodes.id`；HTTP 字段名暂时仍叫 `mediaItemId`，但语义已经是 episode-backed id
+- `items[].id` 是 `media_episodes.id`；HTTP 字段名暂时仍叫 `mediaItemId`，但语义已经是 episode-backed id
+- `INT-148` 后，Android 内部已把选中的 id 命名为 `episodeId / selectedEpisodeId`
+- Android 调用 `POST /rooms` 时仍使用请求体字段 `mediaItemId`，但传入值是 `media_episodes.id`
 - Android 当前暂不加载远程 `coverUrl`，封面仍使用本地渐变占位
 
 ### Rooms
@@ -545,9 +544,8 @@ Android 联调状态：
 
 - `POST /rooms` 已调整为 DB-backed create room，对应 `INT-121`
 - `POST /rooms/{roomCode}/join` 已落地，对应 `INT-122`
-- `INT-147` 后，房间媒体业务主数据优先来自 PostgreSQL `rooms / room_members / media_episodes / media_seasons`
-- `rooms.media_episode_id` 是后续 create/detail 的主要媒体引用
-- `rooms.media_item_id` 暂时保留为兼容期旧引用
+- 房间媒体业务主数据来自 PostgreSQL `rooms / room_members / media_episodes / media_seasons`
+- `rooms.media_episode_id` 是 create/detail 的媒体引用
 - 创建房间和加入房间都需要 `Authorization: Bearer dev_<userId>`
 - `room.id` 是 PostgreSQL 中的 UUID 主键
 - `room.roomCode` 是 6 位可分享房间码，也是当前 WebSocket `join_room.roomId` 使用的运行时房间 key
@@ -612,8 +610,7 @@ Accept: application/json
 
 - 创建成功后会写入 `rooms` 和 host 的 `room_members` 记录。
 - 创建房间时 `mediaItemId` 当前传 `media_episodes.id`。
-- 兼容期内如果客户端仍传旧 `media_items.id`，服务端会通过 `media_episodes.legacy_media_item_id` 解析到 episode。
-- `rooms.media_episode_id` 会保存 episode id；`rooms.media_item_id` 仅在存在 legacy 对应时继续写入。
+- `rooms.media_episode_id` 会保存 episode id。
 - 服务端会同时把 `roomCode` 注册到内存同步房间中，方便紧接着建立 WebSocket。
 - Android 创建成功后进入 `03 放映室`，后续 WebSocket `join_room.payload.roomId` 当前传 `room.roomCode`。
 - `roomState` 是新房间的初始运行时状态，用于首屏占位；真正实时状态仍以 WebSocket `room_state` 为准。
@@ -687,7 +684,6 @@ Accept: application/json
 
 - `GET /rooms/{roomCode}` 已落地，对应 `INT-123`
 - 数据来自 PostgreSQL `rooms / room_members / users / media_episodes / media_seasons`
-- `media_items` 仅作为兼容期桥接来源
 - 响应只包含业务主数据，不包含实时 `positionMs / playbackRate / paused / ended / seq`
 - 实时同步状态仍必须等待 WebSocket `room_state`
 
@@ -762,8 +758,7 @@ Accept: application/json
 
 - `PUT /me/media-progress/{mediaItemId}` 已落地，对应 `INT-124`
 - 写入 PostgreSQL `user_media_progress`
-- `INT-147` 后优先写入 `user_media_progress.media_episode_id`
-- `user_media_progress.media_item_id` 暂时保留为兼容期旧引用
+- 写入目标为 `user_media_progress.media_episode_id`
 - 使用 `Authorization: Bearer dev_<userId>` 识别当前用户
 - 进度以秒级写入，用于首页 `lastWatched / continueWatching`
 - 不用于实时播放同步，不替代 WebSocket authority state
@@ -809,7 +804,6 @@ Accept: application/json
 
 - 普通播放进度 tick 不需要传 `completionSource`，传 `null` 或省略即可。
 - 路径中的 `mediaItemId` 当前语义为 episode-backed id，即 `media_episodes.id`。
-- 兼容期内如果传旧 `media_items.id`，服务端会通过 `media_episodes.legacy_media_item_id` 解析到 episode。
 - `completionSource` 仅在明确完成语义时使用。
 - 当前允许值：`ended`、`manual_mark`、`threshold_auto`。
 - `lastPositionSeconds` 必须大于等于 0。

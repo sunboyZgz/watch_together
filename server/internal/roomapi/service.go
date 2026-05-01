@@ -25,14 +25,13 @@ type Room struct {
 }
 
 type Media struct {
-	ID                string
-	LegacyMediaItemID *string
-	Title             string
-	Subtitle          *string
-	MediaURL          string
-	DurationMs        *int64
-	SeasonLabel       *string
-	EpisodeLabel      *string
+	ID           string
+	Title        string
+	Subtitle     *string
+	MediaURL     string
+	DurationMs   *int64
+	SeasonLabel  *string
+	EpisodeLabel *string
 }
 
 type Member struct {

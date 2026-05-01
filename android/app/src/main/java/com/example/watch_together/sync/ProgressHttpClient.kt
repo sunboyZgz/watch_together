@@ -8,7 +8,7 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
 
 data class ProgressUpdateResult(
-    val mediaItemId: String,
+    val episodeId: String,
     val lastPositionSeconds: Long,
     val durationSeconds: Long,
     val completed: Boolean
@@ -21,7 +21,7 @@ class ProgressHttpClient(
     // not realtime playback sync.
     fun updateProgress(
         accessToken: String,
-        mediaItemId: String,
+        episodeId: String,
         lastPositionSeconds: Long,
         durationSeconds: Long,
         completed: Boolean,
@@ -36,7 +36,7 @@ class ProgressHttpClient(
         }
 
         val request = Request.Builder()
-            .url(AppConfig.mediaProgressUrl(mediaItemId))
+            .url(AppConfig.mediaProgressUrl(episodeId))
             .header("Authorization", "Bearer $accessToken")
             .put(requestJson.toString().toRequestBody("application/json; charset=utf-8".toMediaType()))
             .build()
@@ -56,7 +56,7 @@ class ProgressHttpClient(
 
             val data = JSONObject(responseBody).getJSONObject("data")
             return ProgressUpdateResult(
-                mediaItemId = data.getString("mediaItemId"),
+                episodeId = data.getString("mediaItemId"),
                 lastPositionSeconds = data.getLong("lastPositionSeconds"),
                 durationSeconds = data.getLong("durationSeconds"),
                 completed = data.getBoolean("completed")

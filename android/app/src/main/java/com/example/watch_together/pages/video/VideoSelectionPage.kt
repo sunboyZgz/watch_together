@@ -123,7 +123,7 @@ private val sampleVideos = listOf(
 @Composable
 fun VideoSelectionPage(
     onBackClick: () -> Unit,
-    onCreateRoomClick: (mediaItemId: String) -> Unit,
+    onCreateRoomClick: (episodeId: String) -> Unit,
     modifier: Modifier = Modifier,
     enableRemoteLoad: Boolean = true
 ) {
@@ -134,7 +134,7 @@ fun VideoSelectionPage(
     var selectedVideoId by rememberSaveable { mutableStateOf(sampleVideos.first().id) }
     var featuredTags by remember { mutableStateOf<List<MediaTag>>(emptyList()) }
     var allTags by remember { mutableStateOf<List<MediaTag>>(emptyList()) }
-    var mediaItems by remember { mutableStateOf<List<MediaItem>>(emptyList()) }
+    var mediaItems by remember { mutableStateOf<List<MediaEpisode>>(emptyList()) }
     var isTagsLoading by rememberSaveable { mutableStateOf(false) }
     var isItemsLoading by rememberSaveable { mutableStateOf(false) }
     var catalogError by rememberSaveable { mutableStateOf<String?>(null) }
@@ -173,8 +173,8 @@ fun VideoSelectionPage(
             }
         }.onSuccess { page ->
             mediaItems = page.items
-            if (page.items.none { it.id == selectedVideoId }) {
-                selectedVideoId = page.items.firstOrNull()?.id.orEmpty()
+            if (page.items.none { it.episodeId == selectedVideoId }) {
+                selectedVideoId = page.items.firstOrNull()?.episodeId.orEmpty()
             }
         }.onFailure { throwable ->
             catalogError = throwable.message ?: "影片加载失败，请稍后重试"
@@ -793,7 +793,7 @@ private fun MediaTag.toOption(): VideoTagOption {
     return VideoTagOption(slug = slug, name = name)
 }
 
-private fun MediaItem.toVideoCandidate(index: Int): VideoCandidate {
+private fun MediaEpisode.toVideoCandidate(index: Int): VideoCandidate {
     val descriptionText = listOfNotNull(
         subtitle,
         episodeLabel,
@@ -801,7 +801,7 @@ private fun MediaItem.toVideoCandidate(index: Int): VideoCandidate {
     ).firstOrNull { it.isNotBlank() } ?: "适合一起看的片单"
 
     return VideoCandidate(
-        id = id,
+        id = episodeId,
         title = title,
         description = descriptionText,
         tags = tags.map { it.name } + "全部",

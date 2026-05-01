@@ -4,7 +4,7 @@
 
 ## 背景
 
-当前项目的测试资源主要放在仓库 `media/` 目录下，Android 通过 `media_items.media_url` 或本地 `MEDIA_BASE_URL` 播放 HLS。
+当前项目的测试资源主要放在仓库 `media/` 目录下，Android 通过后端返回的 `media_episodes.media_url` 或本地 `MEDIA_BASE_URL` 播放 HLS。
 
 随着项目进入真实业务联调，媒体资源会逐步从本地样例迁移到云端对象存储和 CDN。这里需要提前确定三个边界：
 
@@ -140,30 +140,30 @@ object key 必须稳定、可预测，并且不包含用户本地文件名。
 第一版约定：
 
 ```text
-{MEDIA_OBJECT_KEY_PREFIX}/{mediaItemId}/hls/index.m3u8
-{MEDIA_OBJECT_KEY_PREFIX}/{mediaItemId}/hls/segment_00001.ts
-{MEDIA_OBJECT_KEY_PREFIX}/{mediaItemId}/cover/cover.jpg
+{MEDIA_OBJECT_KEY_PREFIX}/{sourceKeyWithoutExt}/hls/index.m3u8
+{MEDIA_OBJECT_KEY_PREFIX}/{sourceKeyWithoutExt}/hls/segment_00001.ts
+{MEDIA_OBJECT_KEY_PREFIX}/{sourceKeyWithoutExt}/cover/cover.jpg
 ```
 
 其中：
 
 - `MEDIA_OBJECT_KEY_PREFIX` 默认是 `media`。
-- `{mediaItemId}` 使用 PostgreSQL `media_items.id`。
-- `media_items.media_url` 指向 `hls/index.m3u8` 的公开 URL。
-- `media_items.cover_url` 指向 `cover/cover.jpg` 的公开 URL。
+- `{sourceKeyWithoutExt}` 由媒体库相对路径自动推导，例如 `violet-evergarden/season-01/episode-09`。
+- `media_episodes.media_url` 指向 `hls/index.m3u8` 的公开 URL。
+- `media_episodes.cover_url` 或 `media_seasons.cover_url` 指向封面 URL。
 
 本地静态服务下的 URL 示例：
 
 ```text
-http://127.0.0.1:9000/media/tmp/media/{mediaItemId}/hls/index.m3u8
-http://127.0.0.1:9000/media/tmp/media/{mediaItemId}/cover/cover.jpg
+http://127.0.0.1:9000/media/tmp/media/violet-evergarden/season-01/episode-09/hls/index.m3u8
+http://127.0.0.1:9000/media/tmp/media/violet-evergarden/season-01/episode-09/cover/cover.jpg
 ```
 
 MinIO / S3-compatible 下的 URL 示例：
 
 ```text
-https://cdn.example.com/media/{mediaItemId}/hls/index.m3u8
-https://cdn.example.com/media/{mediaItemId}/cover/cover.jpg
+https://cdn.example.com/media/violet-evergarden/season-01/episode-09/hls/index.m3u8
+https://cdn.example.com/media/violet-evergarden/season-01/episode-09/cover/cover.jpg
 ```
 
 这里的 `cdn.example.com` 可以是 CDN 域名，也可以是对象存储 public endpoint。
@@ -172,17 +172,19 @@ https://cdn.example.com/media/{mediaItemId}/cover/cover.jpg
 
 PostgreSQL 保存业务元数据：
 
-- `media_items.id`
-- `media_items.title`
-- `media_items.subtitle`
-- `media_items.description`
-- `media_items.cover_url`
-- `media_items.media_url`
-- `media_items.duration_ms`
-- `media_items.season_label`
-- `media_items.episode_label`
+- `media_seasons.title`
+- `media_seasons.description`
+- `media_seasons.cover_url`
+- `media_seasons.season_label`
+- `media_episodes.title`
+- `media_episodes.subtitle`
+- `media_episodes.media_url`
+- `media_episodes.duration_ms`
+- `media_episodes.episode_label`
+- `media_episodes.source_key`
+- `media_episodes.source_hash`
 - `media_tags`
-- `media_item_tags`
+- `media_season_tags`
 
 PostgreSQL 不保存：
 
@@ -201,8 +203,8 @@ PostgreSQL 不保存：
 - HLS segment 时长：4 到 6 秒。
 - 输出 `index.m3u8`。
 - 输出 `.ts` 或 `.m4s` 分片，第一版优先 `.ts`，兼容性更直接。
-- 保留源视频时长，写入 `media_items.duration_ms`。
-- 生成或接收封面图，写入 `media_items.cover_url`。
+- 保留源视频时长，写入 `media_episodes.duration_ms`。
+- 生成或接收封面图，写入 `media_episodes.cover_url` 或 `media_seasons.cover_url`。
 
 示例方向：
 
@@ -224,7 +226,9 @@ ffmpeg -i input.mp4 \
 - 默认 segment 时长为 6 秒，可通过 `--hls-segment-seconds` 在 4 到 6 秒之间调整。
 - 输出 `index.m3u8`。
 - 输出 `segment_%05d.ts`。
-- 使用 `ffprobe` 读取源视频时长，后续写入 `media_items.duration_ms`。
+- 使用 `ffprobe` 读取源视频时长，后续写入 `media_episodes.duration_ms`。
+- 自动根据 `--library-root + --input` 推导 `source_key`。
+- 自动根据源文件内容计算 `source_hash`。
 - 不负责上传，上传由 `INT-141` 补齐。
 - 传入 `--write-db` 后可写入 PostgreSQL，当前由 `INT-140` 落地。
 
@@ -249,8 +253,8 @@ server/cmd/mediactl
 
 ```bash
 mediactl ingest \
-  --media-id "media_uuid" \
-  --input /path/to/video.mp4 \
+  --library-root ../media/raw \
+  --input ../media/raw/violet-evergarden/season-01/episode-09.mp4 \
   --title "紫罗兰永恒花园" \
   --season-label "第 1 季" \
   --episode-label "第 09 集" \
@@ -262,11 +266,14 @@ mediactl ingest \
 第一版职责：
 
 - 校验输入视频存在。
+- 校验媒体库根目录存在。
+- 根据规范目录结构自动推导 `source_key / season_number / episode_number`。
+- 根据源文件内容自动计算 `source_hash`。
 - 读取媒体存储相关环境变量。
 - 输出 dry-run summary。
 - 在 `--dry-run=false` 时调用 `ffmpeg` 输出单码率 HLS。
 - 在 `--dry-run=false` 时调用 `ffprobe` 读取源视频时长。
-- 在 `--dry-run=false --write-db` 时写入或更新 `media_items`，并写入 `media_tags / media_item_tags`。
+- 在 `--dry-run=false --write-db` 时写入或更新 `media_seasons / media_episodes`，并写入 `media_tags / media_season_tags`。
 
 后续任务继续补齐：
 

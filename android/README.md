@@ -119,18 +119,19 @@ android/
 - 悬浮标签面板不挤压后续影片列表布局
 - `MediaCatalogClient` 会调用 `GET /media/tags` 获取默认标签和全部标签
 - `MediaCatalogClient` 会调用 `GET /media/items` 获取默认片单、搜索结果和标签筛选结果
+- `GET /media/items` 返回的 `items[].id` 当前语义是 `media_episodes.id`
 - 搜索词或标签变化后，Android 会重新请求媒体列表
 - 底部固定栏展示当前选中影片，并提供 `创建房间` 操作
-- 当前创建房间入口已经拿到选中的 `mediaItemId`，后续接入 DB-backed `POST /rooms` 时直接使用该 ID
+- 当前创建房间入口拿到的是选中 episode id；HTTP 请求体字段仍暂时使用 `mediaItemId`
 - 当前 cover 图仍使用本地渐变占位，后续接入图片加载库后再消费 `coverUrl`
 - 小屏设备通过收紧 padding、缩短文案和两列卡片约束保持可读性
 
 当前创建房间接入状态：
 
-- 点击 `创建房间` 后，`VideoSelectionPage` 会把选中的 `mediaItemId` 交给 `WatchTogetherApp`
-- `WatchTogetherApp` 进入 `PlayerScreen` 时会传入 `accessToken / currentUserId / selectedMediaItemId`
+- 点击 `创建房间` 后，`VideoSelectionPage` 会把选中的 episode id 交给 `WatchTogetherApp`
+- `WatchTogetherApp` 进入 `PlayerScreen` 时会传入 `accessToken / currentUserId / selectedEpisodeId`
 - `PlayerScreen` 会自动调用 DB-backed `POST /rooms`
-- 请求体使用 `{ "mediaItemId": "<selected-media-id>" }`
+- 请求体暂时使用 `{ "mediaItemId": "<selected-episode-id>" }`
 - 请求头使用 `Authorization: Bearer dev_<userId>`
 - 创建成功后使用响应中的 `room.roomCode` 建立 WebSocket `join_room`
 - 创建成功后使用响应中的 `media.title / media.episodeLabel / media.mediaUrl` 更新 `03 放映室`
@@ -148,6 +149,7 @@ android/
 当前观看进度上报状态：
 
 - `ProgressHttpClient` 会调用 `PUT /me/media-progress/{mediaItemId}`
+- 路径字段名仍叫 `mediaItemId`，但 Android 内部传入的是 episode id
 - 上报使用登录后的 `Authorization: Bearer dev_<userId>` token
 - 上报单位为秒，不上传毫秒
 - 当前低频上报时机包括暂停、播放结束，以及每 30 秒一次的低频后台 tick
@@ -167,7 +169,7 @@ android/
 - 播放、暂停、seek 和倍速选择只出现在播放器点击后的浮层中
 - 底部保留折叠的开发联调入口，避免正式页面被调试控件压重
 
-数据边界上，页面业务信息来自服务端主数据接口，例如 `rooms`、`room_members`、`users` 和 `media_items`。
+数据边界上，页面业务信息来自服务端主数据接口，例如 `rooms`、`room_members`、`users`、`media_seasons` 和 `media_episodes`。
 实时播放状态继续来自 WebSocket 同步链路，例如 `positionMs`、`playbackRate`、`paused`、`ended` 和 `seq`。
 
 当前架构边界：

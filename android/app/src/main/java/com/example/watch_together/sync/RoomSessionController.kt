@@ -11,8 +11,8 @@ class RoomSessionController(
         roomWebSocketClient.close()
     }
 
-    suspend fun createRoom(accessToken: String, mediaItemId: String): CreateRoomResult {
-        return roomHttpClient.createRoom(accessToken = accessToken, mediaItemId = mediaItemId)
+    suspend fun createRoom(accessToken: String, episodeId: String): CreateRoomResult {
+        return roomHttpClient.createRoom(accessToken = accessToken, episodeId = episodeId)
     }
 
     suspend fun getRoomDetail(roomCode: String): RoomDetailResult {

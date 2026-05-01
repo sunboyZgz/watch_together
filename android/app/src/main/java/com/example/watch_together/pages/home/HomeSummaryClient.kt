@@ -18,7 +18,7 @@ data class HomeSummaryUser(
 )
 
 data class HomeWatchProgress(
-    val mediaItemId: String,
+    val episodeId: String,
     val title: String,
     val coverUrl: String?,
     val lastPositionSeconds: Int,
@@ -84,7 +84,7 @@ class HomeSummaryRequestException(
 
 private fun JSONObject.toWatchProgress(): HomeWatchProgress {
     return HomeWatchProgress(
-        mediaItemId = getString("mediaItemId"),
+        episodeId = getString("mediaItemId"),
         title = getString("title"),
         coverUrl = optNullableString("coverUrl"),
         lastPositionSeconds = optInt("lastPositionSeconds"),

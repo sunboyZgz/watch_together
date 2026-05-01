@@ -2,7 +2,9 @@ package mediactl
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -50,6 +52,12 @@ type StorageConfig struct {
 type IngestOptions struct {
 	MediaID        string        `json:"mediaId,omitempty"`
 	Input          string        `json:"input"`
+	LibraryRoot    string        `json:"libraryRoot"`
+	SourceKey      string        `json:"sourceKey"`
+	SourceHash     string        `json:"sourceHash"`
+	SeasonSlug     string        `json:"seasonSlug"`
+	SeasonNumber   *int          `json:"seasonNumber,omitempty"`
+	EpisodeNumber  *int          `json:"episodeNumber,omitempty"`
 	Title          string        `json:"title"`
 	Subtitle       string        `json:"subtitle,omitempty"`
 	Description    string        `json:"description,omitempty"`
@@ -155,8 +163,9 @@ func ParseIngestOptions(args []string, getenv EnvLookup, stderr io.Writer) (Inge
 	var tags string
 	var searchAliases string
 	options := IngestOptions{DryRun: true, HLSSegment: defaultHLSSegmentTime}
-	flags.StringVar(&options.MediaID, "media-id", "", "stable media id used for local object key layout")
+	flags.StringVar(&options.MediaID, "media-id", "", "legacy media id override; normal ingest should use --library-root")
 	flags.StringVar(&options.Input, "input", "", "source video file path")
+	flags.StringVar(&options.LibraryRoot, "library-root", "", "media library root used to derive source_key from --input")
 	flags.StringVar(&options.Title, "title", "", "media title")
 	flags.StringVar(&options.Subtitle, "subtitle", "", "media subtitle")
 	flags.StringVar(&options.Description, "description", "", "media description")
@@ -183,6 +192,7 @@ func ParseIngestOptions(args []string, getenv EnvLookup, stderr io.Writer) (Inge
 	}
 
 	options.Input = strings.TrimSpace(options.Input)
+	options.LibraryRoot = strings.TrimSpace(options.LibraryRoot)
 	options.MediaID = strings.TrimSpace(options.MediaID)
 	options.Title = strings.TrimSpace(options.Title)
 	options.Subtitle = strings.TrimSpace(options.Subtitle)
@@ -204,20 +214,17 @@ func ParseIngestOptions(args []string, getenv EnvLookup, stderr io.Writer) (Inge
 	if options.Input == "" {
 		return IngestOptions{}, errors.New("--input is required")
 	}
+	if options.LibraryRoot == "" {
+		return IngestOptions{}, errors.New("--library-root is required")
+	}
 	if options.Title == "" {
 		return IngestOptions{}, errors.New("--title is required")
 	}
 	if options.HLSSegment < 4 || options.HLSSegment > 6 {
 		return IngestOptions{}, errors.New("--hls-segment-seconds must be between 4 and 6")
 	}
-	if !options.DryRun && options.MediaID == "" && options.OutputDir == "" {
-		return IngestOptions{}, errors.New("--media-id is required when --dry-run=false unless --output-dir is provided")
-	}
 	if options.WriteDB && options.DryRun {
 		return IngestOptions{}, errors.New("--write-db requires --dry-run=false")
-	}
-	if options.WriteDB && options.MediaID == "" {
-		return IngestOptions{}, errors.New("--write-db requires --media-id")
 	}
 	if options.WriteDB && options.DatabaseURL == "" {
 		return IngestOptions{}, errors.New("--write-db requires DATABASE_URL or --database-url")
@@ -225,6 +232,22 @@ func ParseIngestOptions(args []string, getenv EnvLookup, stderr io.Writer) (Inge
 	if err := requireExistingFile(options.Input, "--input"); err != nil {
 		return IngestOptions{}, err
 	}
+	if err := requireExistingDir(options.LibraryRoot, "--library-root"); err != nil {
+		return IngestOptions{}, err
+	}
+	sourceInfo, err := deriveSourceInfo(options.LibraryRoot, options.Input)
+	if err != nil {
+		return IngestOptions{}, err
+	}
+	options.SourceKey = sourceInfo.SourceKey
+	options.SeasonSlug = sourceInfo.SeasonSlug
+	options.SeasonNumber = sourceInfo.SeasonNumber
+	options.EpisodeNumber = sourceInfo.EpisodeNumber
+	sourceHash, err := ComputeSourceHash(options.Input)
+	if err != nil {
+		return IngestOptions{}, err
+	}
+	options.SourceHash = sourceHash
 	if options.Cover != "" {
 		if err := requireExistingFile(options.Cover, "--cover"); err != nil {
 			return IngestOptions{}, err
@@ -234,7 +257,7 @@ func ParseIngestOptions(args []string, getenv EnvLookup, stderr io.Writer) (Inge
 	return options, nil
 }
 
-// UpsertMediaMetadata writes the ingest result into PostgreSQL media tables.
+// UpsertMediaMetadata writes the ingest result into PostgreSQL episode-backed media tables.
 func UpsertMediaMetadata(ctx context.Context, options IngestOptions, result HLSResult) error {
 	db, err := sql.Open("pgx", options.DatabaseURL)
 	if err != nil {
@@ -254,10 +277,14 @@ func UpsertMediaMetadata(ctx context.Context, options IngestOptions, result HLSR
 		_ = tx.Rollback()
 	}()
 
-	if err := upsertMediaItem(ctx, tx, options, result); err != nil {
+	seasonID, err := upsertMediaSeason(ctx, tx, options)
+	if err != nil {
 		return err
 	}
-	if err := replaceMediaTags(ctx, tx, options.MediaID, options.Tags); err != nil {
+	if err := upsertMediaEpisode(ctx, tx, seasonID, options, result); err != nil {
+		return err
+	}
+	if err := replaceMediaSeasonTags(ctx, tx, seasonID, options.Tags); err != nil {
 		return err
 	}
 
@@ -267,83 +294,122 @@ func UpsertMediaMetadata(ctx context.Context, options IngestOptions, result HLSR
 	return nil
 }
 
-func upsertMediaItem(ctx context.Context, tx *sql.Tx, options IngestOptions, result HLSResult) error {
+func upsertMediaSeason(ctx context.Context, tx *sql.Tx, options IngestOptions) (string, error) {
 	const query = `
-		INSERT INTO media_items (
-			id,
+		INSERT INTO media_seasons (
+			slug,
+			title,
+			description,
+			cover_url,
+			category,
+			original_title,
+			production_team,
+			search_aliases,
+			season_number,
+			season_label,
+			status
+		)
+		VALUES (
+			$1, $2, NULLIF($3, ''), NULLIF($4, ''), NULLIF($5, ''),
+			NULLIF($6, ''), NULLIF($7, ''), $8::jsonb, $9, NULLIF($10, ''), 'active'
+		)
+		ON CONFLICT (slug) DO UPDATE SET
+			title = EXCLUDED.title,
+			description = EXCLUDED.description,
+			cover_url = COALESCE(EXCLUDED.cover_url, media_seasons.cover_url),
+			category = EXCLUDED.category,
+			status = EXCLUDED.status,
+			original_title = EXCLUDED.original_title,
+			production_team = EXCLUDED.production_team,
+			search_aliases = EXCLUDED.search_aliases,
+			season_number = EXCLUDED.season_number,
+			season_label = EXCLUDED.season_label,
+			updated_at = NOW()
+		RETURNING id::text
+	`
+
+	searchAliasesJSON, err := json.Marshal(options.SearchAliases)
+	if err != nil {
+		return "", fmt.Errorf("encode search aliases json: %w", err)
+	}
+
+	var seasonID string
+	if err := tx.QueryRowContext(
+		ctx,
+		query,
+		options.SeasonSlug,
+		options.Title,
+		options.Description,
+		"", // cover URL is added by uploader stage.
+		options.Category,
+		options.OriginalTitle,
+		options.ProductionTeam,
+		string(searchAliasesJSON),
+		nullableInt64(options.SeasonNumber),
+		options.SeasonLabel,
+	).Scan(&seasonID); err != nil {
+		return "", fmt.Errorf("upsert media season: %w", err)
+	}
+	return seasonID, nil
+}
+
+func upsertMediaEpisode(ctx context.Context, tx *sql.Tx, seasonID string, options IngestOptions, result HLSResult) error {
+	const query = `
+		INSERT INTO media_episodes (
+			season_id,
 			title,
 			subtitle,
 			description,
 			cover_url,
 			media_url,
-			category,
-			tags,
 			duration_ms,
-			status,
-			original_title,
-			production_team,
-			search_aliases,
-			season_label,
-			episode_label
+			episode_number,
+			episode_label,
+			source_key,
+			source_hash,
+			status
 		)
 		VALUES (
-			$1, $2, NULLIF($3, ''), NULLIF($4, ''), NULLIF($5, ''), $6,
-			NULLIF($7, ''), $8::jsonb, $9, 'active', NULLIF($10, ''),
-			NULLIF($11, ''), $12::jsonb, NULLIF($13, ''), NULLIF($14, '')
+			$1, $2, NULLIF($3, ''), NULLIF($4, ''), NULLIF($5, ''),
+			$6, $7, $8, NULLIF($9, ''), $10, $11, 'active'
 		)
-		ON CONFLICT (id) DO UPDATE SET
+		ON CONFLICT (source_key) DO UPDATE SET
+			season_id = EXCLUDED.season_id,
 			title = EXCLUDED.title,
 			subtitle = EXCLUDED.subtitle,
 			description = EXCLUDED.description,
-			cover_url = COALESCE(EXCLUDED.cover_url, media_items.cover_url),
+			cover_url = COALESCE(EXCLUDED.cover_url, media_episodes.cover_url),
 			media_url = EXCLUDED.media_url,
-			category = EXCLUDED.category,
-			tags = EXCLUDED.tags,
 			duration_ms = EXCLUDED.duration_ms,
-			status = EXCLUDED.status,
-			original_title = EXCLUDED.original_title,
-			production_team = EXCLUDED.production_team,
-			search_aliases = EXCLUDED.search_aliases,
-			season_label = EXCLUDED.season_label,
+			episode_number = EXCLUDED.episode_number,
 			episode_label = EXCLUDED.episode_label,
+			source_hash = EXCLUDED.source_hash,
+			status = EXCLUDED.status,
 			updated_at = NOW()
 	`
-
-	tagsJSON, err := json.Marshal(options.Tags)
-	if err != nil {
-		return fmt.Errorf("encode media tags json: %w", err)
-	}
-	searchAliasesJSON, err := json.Marshal(options.SearchAliases)
-	if err != nil {
-		return fmt.Errorf("encode search aliases json: %w", err)
-	}
-
 	if _, err := tx.ExecContext(
 		ctx,
 		query,
-		options.MediaID,
+		seasonID,
 		options.Title,
 		options.Subtitle,
 		options.Description,
 		"", // cover URL is added by uploader stage.
 		publicMediaURL(options),
-		options.Category,
-		string(tagsJSON),
 		result.DurationMs,
-		options.OriginalTitle,
-		options.ProductionTeam,
-		string(searchAliasesJSON),
-		options.SeasonLabel,
+		nullableInt64(options.EpisodeNumber),
 		options.EpisodeLabel,
+		options.SourceKey,
+		options.SourceHash,
 	); err != nil {
-		return fmt.Errorf("upsert media item: %w", err)
+		return fmt.Errorf("upsert media episode: %w", err)
 	}
 	return nil
 }
 
-func replaceMediaTags(ctx context.Context, tx *sql.Tx, mediaID string, tags []string) error {
-	if _, err := tx.ExecContext(ctx, `DELETE FROM media_item_tags WHERE media_item_id = $1`, mediaID); err != nil {
-		return fmt.Errorf("clear media item tags: %w", err)
+func replaceMediaSeasonTags(ctx context.Context, tx *sql.Tx, seasonID string, tags []string) error {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM media_season_tags WHERE season_id = $1`, seasonID); err != nil {
+		return fmt.Errorf("clear media season tags: %w", err)
 	}
 	for order, rawTag := range tags {
 		slug := normalizeTagSlug(rawTag)
@@ -356,8 +422,8 @@ func replaceMediaTags(ctx context.Context, tx *sql.Tx, mediaID string, tags []st
 		}
 		if _, err := tx.ExecContext(
 			ctx,
-			`INSERT INTO media_item_tags (media_item_id, media_tag_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
-			mediaID,
+			`INSERT INTO media_season_tags (season_id, media_tag_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+			seasonID,
 			tagID,
 		); err != nil {
 			return fmt.Errorf("link media tag %q: %w", slug, err)
@@ -475,7 +541,7 @@ func resolveOutputDir(options IngestOptions) string {
 	if options.OutputDir != "" {
 		return options.OutputDir
 	}
-	return filepath.Join(options.Storage.LocalRoot, options.Storage.ObjectKeyPrefix, options.MediaID, "hls")
+	return filepath.Join(options.Storage.LocalRoot, sourceObjectKey(options), "hls")
 }
 
 func plannedPlaylistPath(options IngestOptions) string {
@@ -486,14 +552,22 @@ func plannedPlaylistPath(options IngestOptions) string {
 }
 
 func publicMediaURL(options IngestOptions) string {
-	return joinURLPath(options.Storage.PublicBaseURL, options.Storage.ObjectKeyPrefix, options.MediaID, "hls", "index.m3u8")
+	return joinURLPath(options.Storage.PublicBaseURL, sourceObjectKey(options), "hls", "index.m3u8")
 }
 
 func plannedMediaURL(options IngestOptions) string {
-	if options.MediaID == "" {
+	if options.SourceKey == "" {
 		return ""
 	}
 	return publicMediaURL(options)
+}
+
+func sourceObjectKey(options IngestOptions) string {
+	if options.MediaID != "" {
+		return filepath.ToSlash(filepath.Join(options.Storage.ObjectKeyPrefix, options.MediaID))
+	}
+	sourceKey := strings.TrimSuffix(options.SourceKey, filepath.Ext(options.SourceKey))
+	return filepath.ToSlash(filepath.Join(options.Storage.ObjectKeyPrefix, sourceKey))
 }
 
 func joinURLPath(parts ...string) string {
@@ -536,6 +610,111 @@ func splitTags(raw string) []string {
 	return tags
 }
 
+type sourceInfo struct {
+	SourceKey     string
+	SeasonSlug    string
+	SeasonNumber  *int
+	EpisodeNumber *int
+}
+
+func deriveSourceInfo(libraryRoot string, input string) (sourceInfo, error) {
+	absRoot, err := filepath.Abs(libraryRoot)
+	if err != nil {
+		return sourceInfo{}, fmt.Errorf("resolve --library-root: %w", err)
+	}
+	absInput, err := filepath.Abs(input)
+	if err != nil {
+		return sourceInfo{}, fmt.Errorf("resolve --input: %w", err)
+	}
+	relative, err := filepath.Rel(absRoot, absInput)
+	if err != nil {
+		return sourceInfo{}, fmt.Errorf("derive source key: %w", err)
+	}
+	if relative == "." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) || relative == ".." || filepath.IsAbs(relative) {
+		return sourceInfo{}, fmt.Errorf("--input must be inside --library-root")
+	}
+	sourceKey := filepath.ToSlash(filepath.Clean(relative))
+	parts := strings.Split(sourceKey, "/")
+	if len(parts) < 3 {
+		return sourceInfo{}, fmt.Errorf("source path must follow <season-slug>/season-XX/episode-XX.ext")
+	}
+	for _, part := range parts {
+		if !isSafeSourcePathComponent(part) {
+			return sourceInfo{}, fmt.Errorf("source path component %q must use lowercase letters, numbers, dot, dash or underscore", part)
+		}
+	}
+	seasonSlug := normalizePathSlug(parts[0])
+	if seasonSlug == "" {
+		return sourceInfo{}, fmt.Errorf("source path season slug is invalid")
+	}
+	return sourceInfo{
+		SourceKey:     sourceKey,
+		SeasonSlug:    seasonSlug,
+		SeasonNumber:  parseNumberAfterPrefix(parts[1], "season-"),
+		EpisodeNumber: parseNumberAfterPrefix(strings.TrimSuffix(filepath.Base(sourceKey), filepath.Ext(sourceKey)), "episode-"),
+	}, nil
+}
+
+func isSafeSourcePathComponent(value string) bool {
+	if value == "" || value == "." || value == ".." {
+		return false
+	}
+	for _, char := range value {
+		if char >= 'a' && char <= 'z' {
+			continue
+		}
+		if char >= '0' && char <= '9' {
+			continue
+		}
+		if char == '-' || char == '_' || char == '.' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func ComputeSourceHash(input string) (string, error) {
+	file, err := os.Open(input)
+	if err != nil {
+		return "", fmt.Errorf("open source for hash: %w", err)
+	}
+	defer file.Close()
+
+	hash := sha256.New()
+	if _, err := io.Copy(hash, file); err != nil {
+		return "", fmt.Errorf("hash source file: %w", err)
+	}
+	return "sha256:" + hex.EncodeToString(hash.Sum(nil)), nil
+}
+
+func normalizePathSlug(value string) string {
+	slug := strings.ToLower(strings.TrimSpace(value))
+	slug = strings.ReplaceAll(slug, "_", "-")
+	slug = strings.ReplaceAll(slug, " ", "-")
+	return slug
+}
+
+func parseNumberAfterPrefix(value string, prefix string) *int {
+	normalized := strings.ToLower(strings.TrimSpace(value))
+	trimmed := strings.TrimPrefix(normalized, prefix)
+	if trimmed == normalized || trimmed == "" {
+		return nil
+	}
+	number, err := strconv.Atoi(trimmed)
+	if err != nil || number <= 0 {
+		return nil
+	}
+	return &number
+}
+
+func nullableInt64(value *int) sql.NullInt64 {
+	if value == nil {
+		return sql.NullInt64{}
+	}
+	return sql.NullInt64{Int64: int64(*value), Valid: true}
+}
+
 func requireExistingFile(path string, flagName string) error {
 	info, err := os.Stat(path)
 	if err != nil {
@@ -543,6 +722,17 @@ func requireExistingFile(path string, flagName string) error {
 	}
 	if info.IsDir() {
 		return fmt.Errorf("%s must point to a file, got directory %q", flagName, path)
+	}
+	return nil
+}
+
+func requireExistingDir(path string, flagName string) error {
+	info, err := os.Stat(path)
+	if err != nil {
+		return fmt.Errorf("%s directory is not accessible: %w", flagName, err)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("%s must point to a directory, got file %q", flagName, path)
 	}
 	return nil
 }

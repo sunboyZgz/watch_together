@@ -38,9 +38,9 @@ func (s *PostgresRoomStore) CreateRoom(ctx context.Context, params roomapi.Creat
 	}
 
 	const insertRoom = `
-		INSERT INTO rooms (room_code, host_user_id, media_item_id, media_episode_id, status)
-		VALUES ($1, $2, $3, $4, 'active')
-		RETURNING id::text, room_code, host_user_id::text, COALESCE(media_episode_id, media_item_id)::text, status
+		INSERT INTO rooms (room_code, host_user_id, media_episode_id, status)
+		VALUES ($1, $2, $3, 'active')
+		RETURNING id::text, room_code, host_user_id::text, media_episode_id::text, status
 	`
 	var room roomapi.Room
 	if err := tx.QueryRowContext(
@@ -48,7 +48,6 @@ func (s *PostgresRoomStore) CreateRoom(ctx context.Context, params roomapi.Creat
 		insertRoom,
 		params.RoomCode,
 		params.HostUserID,
-		mediaItem.LegacyMediaItemID,
 		mediaItem.ID,
 	).Scan(
 		&room.ID,
@@ -155,7 +154,6 @@ func findRoomMedia(ctx context.Context, tx *sql.Tx, mediaItemID string) (roomapi
 	const query = `
 		SELECT
 			episode.id::text,
-			episode.legacy_media_item_id::text,
 			season.title,
 			episode.subtitle,
 			episode.media_url,
@@ -164,21 +162,18 @@ func findRoomMedia(ctx context.Context, tx *sql.Tx, mediaItemID string) (roomapi
 			episode.episode_label
 		FROM media_episodes AS episode
 		INNER JOIN media_seasons AS season ON season.id = episode.season_id
-		WHERE (episode.id = $1 OR episode.legacy_media_item_id = $1)
+		WHERE episode.id = $1
 			AND episode.status = 'active'
 			AND season.status = 'active'
-		ORDER BY CASE WHEN episode.id = $1 THEN 0 ELSE 1 END
 		LIMIT 1
 	`
 	var mediaItem roomapi.Media
-	var legacyMediaItemID sql.NullString
 	var subtitle sql.NullString
 	var durationMs sql.NullInt64
 	var seasonLabel sql.NullString
 	var episodeLabel sql.NullString
 	if err := tx.QueryRowContext(ctx, query, mediaItemID).Scan(
 		&mediaItem.ID,
-		&legacyMediaItemID,
 		&mediaItem.Title,
 		&subtitle,
 		&mediaItem.MediaURL,
@@ -191,7 +186,6 @@ func findRoomMedia(ctx context.Context, tx *sql.Tx, mediaItemID string) (roomapi
 		}
 		return roomapi.Media{}, fmt.Errorf("find room media: %w", err)
 	}
-	mediaItem.LegacyMediaItemID = nullableStringPtr(legacyMediaItemID)
 	mediaItem.Subtitle = nullableStringPtr(subtitle)
 	if durationMs.Valid {
 		mediaItem.DurationMs = &durationMs.Int64
@@ -241,7 +235,7 @@ func findActiveMembers(ctx context.Context, tx *sql.Tx, roomID string) ([]roomap
 
 func findActiveRoomByCode(ctx context.Context, tx *sql.Tx, roomCode string) (roomapi.Room, error) {
 	const query = `
-		SELECT id::text, room_code, host_user_id::text, COALESCE(media_episode_id, media_item_id)::text, status
+		SELECT id::text, room_code, host_user_id::text, media_episode_id::text, status
 		FROM rooms
 		WHERE room_code = $1 AND status IN ('active', 'grace_period')
 	`

@@ -1,0 +1,161 @@
+@startuml database_relationship
+title watch_together PostgreSQL Table Relationships
+
+hide circle
+skinparam linetype ortho
+skinparam shadowing false
+skinparam entity {
+  BackgroundColor #FAFAFF
+  BorderColor #4F5B93
+  FontColor #1F2544
+}
+
+legend right
+  Main media path:
+  media_seasons -> media_episodes -> rooms / user_media_progress
+endlegend
+
+entity users {
+  * id : uuid <<PK>>
+  --
+  account : text <<UK>>
+  password_hash : text
+  nickname : text
+  avatar_seed : text
+  avatar_url : text
+  bio : text
+  created_at : timestamptz
+  updated_at : timestamptz
+}
+
+entity rooms {
+  * id : uuid <<PK>>
+  --
+  room_code : text <<UK>>
+  host_user_id : uuid <<FK>>
+  media_episode_id : uuid <<FK>>
+  status : text
+  last_empty_at : timestamptz
+  destroy_after : timestamptz
+  created_at : timestamptz
+  updated_at : timestamptz
+}
+
+entity room_members {
+  * id : uuid <<PK>>
+  --
+  room_id : uuid <<FK>>
+  user_id : uuid <<FK>>
+  role : text
+  joined_at : timestamptz
+  left_at : timestamptz
+  is_active : boolean
+}
+
+entity media_seasons {
+  * id : uuid <<PK>>
+  --
+  slug : text <<UK>>
+  title : text
+  original_title : text
+  description : text
+  cover_url : text
+  category : text
+  production_team : text
+  search_aliases : jsonb
+  season_number : int
+  season_label : text
+  sort_order : int
+  status : text
+  created_at : timestamptz
+  updated_at : timestamptz
+}
+
+entity media_episodes {
+  * id : uuid <<PK>>
+  --
+  season_id : uuid <<FK>>
+  title : text
+  subtitle : text
+  description : text
+  cover_url : text
+  media_url : text
+  duration_ms : bigint
+  episode_number : int
+  episode_label : text
+  source_key : text <<UK>>
+  source_hash : text
+  sort_order : int
+  status : text
+  created_at : timestamptz
+  updated_at : timestamptz
+}
+
+entity media_tags {
+  * id : uuid <<PK>>
+  --
+  name : text
+  slug : text <<UK>>
+  sort_order : int
+  is_featured : boolean
+  is_active : boolean
+  created_at : timestamptz
+  updated_at : timestamptz
+}
+
+entity media_season_tags {
+  * season_id : uuid <<PK, FK>>
+  * media_tag_id : uuid <<PK, FK>>
+  --
+  created_at : timestamptz
+}
+
+entity user_media_progress {
+  * id : uuid <<PK>>
+  --
+  user_id : uuid <<FK>>
+  media_episode_id : uuid <<FK>>
+  last_position_seconds : int
+  duration_seconds : int
+  last_watched_at : timestamptz
+  completed : boolean
+  completion_source : text
+  created_at : timestamptz
+  updated_at : timestamptz
+}
+
+users ||--o{ rooms : hosts
+users ||--o{ room_members : joins
+users ||--o{ user_media_progress : watches
+
+rooms ||--o{ room_members : contains
+media_episodes ||--o{ rooms : selected_by
+media_episodes ||--o{ user_media_progress : tracked_by
+
+media_seasons ||--o{ media_episodes : has
+media_seasons ||--o{ media_season_tags : tagged_by
+media_tags ||--o{ media_season_tags : labels
+
+note bottom of rooms
+  A room selects one playable episode.
+  The shareable room code is the public join key.
+end note
+
+note bottom of user_media_progress
+  Progress is low-frequency business history.
+  It does not replace WebSocket authority state.
+end note
+
+note bottom of media_seasons
+  Tags and searchable work/season metadata live here.
+  This avoids repeating the same metadata on each episode.
+end note
+
+note bottom
+  Runtime sync state is intentionally not persisted here:
+  WebSocket connections, online member state, authority timeline,
+  positionMs, playbackRate, paused, ended, seq, heartbeat activity,
+  and immediate host-transfer decisions stay in server memory.
+end note
+
+@enduml

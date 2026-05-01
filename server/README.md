@@ -224,8 +224,8 @@ server/
 当前已完成的本地验证：
 
 - `go test ./...`
-- `go run ./cmd/mediactl ingest --input <file> --title <title>` 输出 dry-run summary
-- `go run ./cmd/mediactl ingest --media-id <id> --input <file> --title <title> --dry-run=false` 生成本地 HLS
+- `go run ./cmd/mediactl ingest --library-root <root> --input <root>/<season>/season-01/episode-01.mp4 --title <title>` 输出 dry-run summary
+- `go run ./cmd/mediactl ingest --library-root <root> --input <root>/<season>/season-01/episode-01.mp4 --title <title> --dry-run=false` 生成本地 HLS
 - `POST /auth/register` 返回 `201 Created`、用户资料和 `dev_<userId>` access token
 - `POST /auth/login` 校验 bcrypt 密码并返回统一 envelope
 - 重复注册同一账号返回 `409 CONFLICT`
@@ -266,8 +266,8 @@ server/
 ```bash
 cd server
 go run ./cmd/mediactl ingest \
-  --media-id "media_uuid" \
-  --input ../media/source/sample.mp4 \
+  --library-root ../media/raw \
+  --input ../media/raw/violet-evergarden/season-01/episode-09.mp4 \
   --title "紫罗兰永恒花园" \
   --season-label "第 1 季" \
   --episode-label "第 09 集" \
@@ -280,13 +280,16 @@ go run ./cmd/mediactl ingest \
 当前命令会完成：
 
 - 校验 `--input` 文件存在
+- 校验 `--library-root` 目录存在
+- 自动推导 `source_key`
+- 自动计算 `source_hash`
 - 校验 `--cover` 文件存在，如果传入
 - 校验 `--title` 不为空
 - 读取媒体存储环境变量
 - 默认输出 dry-run summary
 - `--dry-run=false` 时调用 `ffmpeg` 生成 `index.m3u8` 和 `.ts` 分片
 - `--dry-run=false` 时调用 `ffprobe` 读取源视频时长
-- `--dry-run=false --write-db` 时写入 `media_items / media_tags / media_item_tags`
+- `--dry-run=false --write-db` 时写入 `media_seasons / media_episodes / media_tags / media_season_tags`
 
 后续任务会继续补充：
 
@@ -385,15 +388,19 @@ make migration-up
 - `migrations/20260421130000_add_media_search_fields.down.sql`
 - `migrations/20260421143000_add_media_tags.up.sql`
 - `migrations/20260421143000_add_media_tags.down.sql`
+- `migrations/20260429101000_add_media_season_episode_schema.up.sql`
+- `migrations/20260429101000_add_media_season_episode_schema.down.sql`
+- `migrations/20260430103000_add_episode_refs_to_rooms_and_progress.up.sql`
+- `migrations/20260430103000_add_episode_refs_to_rooms_and_progress.down.sql`
+- `migrations/20260501100000_remove_legacy_media_items_schema.up.sql`
+- `migrations/20260501100000_remove_legacy_media_items_schema.down.sql`
 
 当前包含的主表：
 
 - `users`
-- `media_items`
 - `media_seasons`
 - `media_episodes`
 - `media_tags`
-- `media_item_tags`
 - `media_season_tags`
 - `rooms`
 - `room_members`
@@ -415,25 +422,17 @@ make migration-up
 - `completed`
 - `completion_source`
 
-当前 `media_items` 额外承载搜索准备字段：
+当前媒体内容模型已经收敛为 episode-backed 结构：
 
-- `original_title`
-- `production_team`
-- `search_aliases`
-
-当前媒体内容模型已经进入 episode-backed 过渡阶段：
-
-- `media_items` 暂时保留为兼容期旧表
 - `media_seasons` 表达一季、篇章、合集或作品容器
 - `media_episodes` 表达真正可播放的一集或视频资源
 - `media_season_tags` 表达 season 与标签目录的关系
-- 服务端媒体列表、创建房间、房间详情、首页 summary 和观看进度已优先使用 `media_episodes / media_seasons`
-- HTTP 字段名 `mediaItemId` 暂时保留，但语义已经逐步迁移为 episode-backed id
+- 服务端媒体列表、创建房间、房间详情、首页 summary 和观看进度均使用 `media_episodes / media_seasons`
+- HTTP 字段名 `mediaItemId` 暂时保留，但语义已经是 `media_episodes.id`
 
 当前标签目录与标签关联由以下表承载：
 
 - `media_tags`
-- `media_item_tags`
 - `media_season_tags`
 
 当前包含的关键约束：
@@ -445,19 +444,14 @@ make migration-up
 
 当前包含的第一版索引：
 
-- `media_items.category / status`
-- `media_items.tags` GIN 索引
-- `media_items.original_title`
-- `media_items.production_team`
-- `media_items.search_aliases` GIN 索引
 - `media_tags.is_active / sort_order`
 - `media_tags.is_featured / is_active / sort_order`
-- `media_item_tags.media_tag_id`
 - `media_season_tags.media_tag_id`
-- `rooms.host_user_id / media_item_id / media_episode_id / status / destroy_after`
+- `media_seasons.status / sort_order / category / original_title / production_team / search_aliases`
+- `media_episodes.season_id / sort_order / status / source_hash`
+- `rooms.host_user_id / media_episode_id / status / destroy_after`
 - `room_members.room_id / user_id`
 - active 成员关系相关索引
-- `user_media_progress(user_id, media_item_id)` 唯一约束
-- `user_media_progress(user_id, media_episode_id)` 部分唯一约束
+- `user_media_progress(user_id, media_episode_id)` 唯一约束
 - `user_media_progress(user_id, last_watched_at desc)`
 - `user_media_progress(user_id, completed, last_watched_at desc)`

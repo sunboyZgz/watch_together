@@ -20,6 +20,7 @@
 - [backend-api-contract.md](./backend-api-contract.md): 后端 HTTP API 契约、统一响应格式与 Android/Server 联调规则
 - [contributing.md](./contributing.md): 当前仓库的基础工作规约
 - [core-sync-technical-notes.md](./core-sync-technical-notes.md): 核心同步功能中的关键技术点记录
+- [database-relationship-uml.puml](./database-relationship-uml.puml): PostgreSQL 表关系 UML/ER 图与目标媒体主模型
 - [environment-config.md](./environment-config.md): 当前阶段环境参数清单与归类
 - [mediactl-operations.md](./mediactl-operations.md): `mediactl` CLI 的本地 HLS 生成、参数、验证和后续入库操作说明
 - [media-storage-and-delivery.md](./media-storage-and-delivery.md): 媒体资源存储、HLS 分发、对象存储和后续入库 CLI 的技术选型
