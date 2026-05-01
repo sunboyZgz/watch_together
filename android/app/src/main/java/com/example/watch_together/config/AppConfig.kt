@@ -23,6 +23,8 @@ object AppConfig {
 
     fun roomDetailUrl(roomCode: String): String = "${roomsUrl()}/${roomCode.trim().uppercase()}"
 
+    fun roomJoinUrl(roomCode: String): String = "${roomDetailUrl(roomCode)}/join"
+
     fun mediaProgressUrl(episodeId: String): String =
         "${apiBaseUrl.trimEnd('/')}/me/media-progress/$episodeId"
 

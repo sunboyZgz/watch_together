@@ -35,7 +35,9 @@ fun PlayerScreen(
     accessToken: String = "",
     currentUserId: String = "",
     selectedEpisodeId: String = AppConfig.defaultMediaIdForRoom(),
+    initialRoomCode: String = "",
     autoCreateAsHost: Boolean = false,
+    autoJoinAsViewer: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     val adapter = rememberPlayerAdapter()
@@ -60,7 +62,9 @@ fun PlayerScreen(
     val hostUserId = remember(currentUserId) {
         currentUserId.ifBlank { "android_host_${UUID.randomUUID().toString().take(4)}" }
     }
-    val viewerUserId = remember { "android_viewer_${UUID.randomUUID().toString().take(4)}" }
+    val viewerUserId = remember(currentUserId) {
+        currentUserId.ifBlank { "android_viewer_${UUID.randomUUID().toString().take(4)}" }
+    }
 
     val playerEventLogs = remember { mutableStateListOf<String>() }
     val syncLogs = remember { mutableStateListOf<String>() }
@@ -68,6 +72,7 @@ fun PlayerScreen(
     var uiState by remember { mutableStateOf(RoomPlayerUiState()) }
     var loadedRoomId by remember { mutableStateOf<String?>(null) }
     var autoCreatedEpisodeId by rememberSaveable { mutableStateOf<String?>(null) }
+    var autoJoinedRoomCode by rememberSaveable { mutableStateOf<String?>(null) }
     var loadedRoomDetailCode by rememberSaveable { mutableStateOf<String?>(null) }
     var lastProgressReportAtMs by rememberSaveable { mutableStateOf(0L) }
     var lastProgressReportPositionSeconds by rememberSaveable { mutableStateOf(-1L) }
@@ -372,6 +377,51 @@ fun PlayerScreen(
         }
     }
 
+    fun joinAsViewer(roomCodeOverride: String? = null) {
+        val roomId = (roomCodeOverride ?: uiState.joinRoomInput).trim().uppercase()
+        if (roomId.isBlank()) {
+            appendLog(syncLogs, "Join aborted: roomId is empty")
+            return
+        }
+        if (accessToken.isBlank()) {
+            updateUiState { current -> current.copy(syncStatus = SyncStatus.SyncFailed) }
+            appendLog(syncLogs, "Join aborted: missing access token")
+            return
+        }
+
+        coroutineScope.launch {
+            runCatching {
+                updateUiState { current ->
+                    current.copy(
+                        joinRoomInput = roomId,
+                        activeUserId = viewerUserId,
+                        syncStatus = SyncStatus.JoiningAsViewer
+                    )
+                }
+                appendLog(syncLogs, "POST /rooms/$roomId/join userId=$viewerUserId")
+                val joinResult = withContext(Dispatchers.IO) {
+                    roomSessionController.joinRoomByCode(
+                        accessToken = accessToken,
+                        roomCode = roomId
+                    )
+                }
+                appendLog(
+                    syncLogs,
+                    "joined roomCode=${joinResult.roomCode} role=${joinResult.memberRole}"
+                )
+                joinCurrentRoomAsUser(
+                    roomId = joinResult.roomCode,
+                    userId = joinResult.memberUserId,
+                    status = SyncStatus.JoiningAsViewer,
+                    reason = "viewer join"
+                )
+            }.onFailure { error ->
+                updateUiState { current -> current.copy(syncStatus = SyncStatus.SyncFailed) }
+                appendLog(syncLogs, "Join viewer failed: ${error.message}")
+            }
+        }
+    }
+
     LaunchedEffect(autoCreateAsHost, selectedEpisodeId, accessToken) {
         if (!autoCreateAsHost) return@LaunchedEffect
         if (selectedEpisodeId.isBlank()) return@LaunchedEffect
@@ -381,20 +431,14 @@ fun PlayerScreen(
         createAndJoinAsHost()
     }
 
-    fun joinAsViewer() {
-        val roomId = uiState.joinRoomInput.trim()
-        if (roomId.isBlank()) {
-            appendLog(syncLogs, "Join aborted: roomId is empty")
-            return
-        }
+    LaunchedEffect(autoJoinAsViewer, initialRoomCode, accessToken) {
+        val normalizedRoomCode = initialRoomCode.trim().uppercase()
+        if (!autoJoinAsViewer) return@LaunchedEffect
+        if (normalizedRoomCode.length != 6) return@LaunchedEffect
+        if (autoJoinedRoomCode == normalizedRoomCode) return@LaunchedEffect
 
-        updateUiState { current -> current.copy(activeUserId = viewerUserId) }
-        joinCurrentRoomAsUser(
-            roomId = roomId,
-            userId = viewerUserId,
-            status = SyncStatus.JoiningAsViewer,
-            reason = "viewer join"
-        )
+        autoJoinedRoomCode = normalizedRoomCode
+        joinAsViewer(normalizedRoomCode)
     }
 
     fun rejoinCurrentUser() {

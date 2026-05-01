@@ -98,6 +98,7 @@ fun HomePage(
     sessionAccount: String,
     accessToken: String,
     onCreateRoomClick: () -> Unit = {},
+    onJoinRoomConfirm: (String) -> Unit = {},
     modifier: Modifier = Modifier,
     enableRemoteLoad: Boolean = true
 ) {
@@ -250,9 +251,9 @@ fun HomePage(
                     },
                     onDismiss = { isJoinDialogVisible = false },
                     onConfirm = {
+                        val normalizedRoomCode = joinRoomCode.trim().uppercase()
                         isJoinDialogVisible = false
-                        activeFeatureDialog = HomeFeatureDialogKind.ResumeWatch
-                        activeResumeTitle = "房间 ${joinRoomCode.ifBlank { "------" }}"
+                        onJoinRoomConfirm(normalizedRoomCode)
                     },
                     modifier = Modifier.padding(horizontal = pagePadding)
                 )

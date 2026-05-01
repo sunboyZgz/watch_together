@@ -14,6 +14,14 @@ data class CreateRoomResult(
     val roomState: RoomSyncState
 )
 
+data class JoinRoomResult(
+    val roomId: String,
+    val roomCode: String,
+    val hostUserId: String,
+    val memberUserId: String,
+    val memberRole: String
+)
+
 data class RoomMedia(
     val id: String,
     val title: String,
@@ -92,6 +100,41 @@ class RoomHttpClient(
                     playbackRate = stateJson.getDouble("playbackRate"),
                     seq = stateJson.getLong("seq")
                 )
+            )
+        }
+    }
+
+    // joinRoomByCode persists the current user as a room member before WebSocket join_room.
+    fun joinRoomByCode(accessToken: String, roomCode: String): JoinRoomResult {
+        val normalizedRoomCode = roomCode.trim().uppercase()
+        val request = Request.Builder()
+            .url(AppConfig.roomJoinUrl(normalizedRoomCode))
+            .header("Authorization", "Bearer $accessToken")
+            .post(ByteArray(0).toRequestBody(null))
+            .build()
+
+        okHttpClient.newCall(request).execute().use { response ->
+            val responseBody = response.body?.string().orEmpty()
+            if (!response.isSuccessful) {
+                throw RoomHttpRequestException(
+                    message = errorMessageFrom(responseBody) ?: "Join room failed with ${response.code}",
+                    statusCode = response.code
+                )
+            }
+            if (responseBody.isBlank()) {
+                throw RoomHttpRequestException("Join room returned an empty body", response.code)
+            }
+
+            val data = JSONObject(responseBody).getJSONObject("data")
+            val roomJson = data.getJSONObject("room")
+            val memberJson = data.getJSONObject("member")
+            val joinedRoomCode = roomJson.getString("roomCode")
+            return JoinRoomResult(
+                roomId = joinedRoomCode,
+                roomCode = joinedRoomCode,
+                hostUserId = roomJson.getString("hostUserId"),
+                memberUserId = memberJson.getString("userId"),
+                memberRole = memberJson.getString("role")
             )
         }
     }

@@ -26,6 +26,9 @@ fun WatchTogetherApp() {
     var sessionNickname by rememberSaveable { mutableStateOf("") }
     var sessionAccessToken by rememberSaveable { mutableStateOf("") }
     var selectedEpisodeId by rememberSaveable { mutableStateOf(AppConfig.defaultMediaIdForRoom()) }
+    var pendingJoinRoomCode by rememberSaveable { mutableStateOf("") }
+    var shouldAutoCreateRoom by rememberSaveable { mutableStateOf(false) }
+    var shouldAutoJoinRoom by rememberSaveable { mutableStateOf(false) }
 
     when (currentScreen) {
         AppScreen.Login -> LoginPage(
@@ -41,13 +44,22 @@ fun WatchTogetherApp() {
         AppScreen.Home -> HomePage(
             sessionAccount = sessionNickname.ifBlank { sessionAccount },
             accessToken = sessionAccessToken,
-            onCreateRoomClick = { currentScreen = AppScreen.VideoSelection }
+            onCreateRoomClick = { currentScreen = AppScreen.VideoSelection },
+            onJoinRoomConfirm = { roomCode ->
+                pendingJoinRoomCode = roomCode
+                shouldAutoCreateRoom = false
+                shouldAutoJoinRoom = true
+                currentScreen = AppScreen.Player
+            }
         )
 
         AppScreen.VideoSelection -> VideoSelectionPage(
             onBackClick = { currentScreen = AppScreen.Home },
             onCreateRoomClick = { episodeId ->
                 selectedEpisodeId = episodeId
+                pendingJoinRoomCode = ""
+                shouldAutoCreateRoom = true
+                shouldAutoJoinRoom = false
                 currentScreen = AppScreen.Player
             }
         )
@@ -56,7 +68,9 @@ fun WatchTogetherApp() {
             accessToken = sessionAccessToken,
             currentUserId = sessionUserId,
             selectedEpisodeId = selectedEpisodeId,
-            autoCreateAsHost = true
+            initialRoomCode = pendingJoinRoomCode,
+            autoCreateAsHost = shouldAutoCreateRoom,
+            autoJoinAsViewer = shouldAutoJoinRoom
         )
     }
 }

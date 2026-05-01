@@ -235,6 +235,18 @@ PlayerScreen
 -> RoomHttpClient / RoomWebSocketClient
 ```
 
+房间码加入链路是：
+
+```text
+HomePage join dialog
+-> WatchTogetherApp 保存 roomCode 并进入 PlayerScreen
+-> PlayerScreen 调用 POST /rooms/{roomCode}/join
+-> RoomSessionController 启动 WebSocket join_room
+-> RoomSyncCoordinator 应用 room_state
+```
+
+这条顺序不能跳过 HTTP join。HTTP join 负责确认房间存在、写入或恢复当前用户的业务成员关系，并让服务端准备好后续 WebSocket 运行时房间。
+
 同步状态应用链路是：
 
 ```text

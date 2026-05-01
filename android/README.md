@@ -140,6 +140,9 @@ android/
 
 当前放映室详情接入状态：
 
+- 首页 `加入房间` 弹窗输入 6 位房间码后，会进入 `PlayerScreen`
+- Android 会先调用 `POST /rooms/{roomCode}/join`，用当前登录用户写入或恢复业务成员关系
+- HTTP join 成功后才会连接 WebSocket `/ws` 并发送 `join_room`
 - `PlayerScreen` 会在进入或加入房间时调用 `GET /rooms/{roomCode}`
 - `GET /rooms/{roomCode}` 返回的业务数据用于 `03 放映室` 首屏展示
 - `media.title / media.episodeLabel / media.mediaUrl` 来自 room detail 或 create room response
