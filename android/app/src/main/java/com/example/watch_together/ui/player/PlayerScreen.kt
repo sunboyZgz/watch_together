@@ -47,6 +47,7 @@ fun PlayerScreen(
             currentRoomMedia
                 ?.takeIf { it.id == mediaId }
                 ?.mediaUrl
+                ?.let(AppConfig::playableMediaUrl)
                 ?: AppConfig.mediaUrlFor(mediaId)
         }
     }
@@ -139,7 +140,8 @@ fun PlayerScreen(
 
     LaunchedEffect(uiState.currentRoomId, currentRoomMedia?.mediaUrl) {
         val roomId = uiState.currentRoomId ?: return@LaunchedEffect
-        val mediaUrl = currentRoomMedia?.mediaUrl ?: return@LaunchedEffect
+        val mediaUrl = currentRoomMedia?.mediaUrl?.let(AppConfig::playableMediaUrl)
+            ?: return@LaunchedEffect
         if (loadedRoomId == roomId) return@LaunchedEffect
 
         adapter.load(mediaUrl)
@@ -417,6 +419,10 @@ fun PlayerScreen(
 
     fun sendPlay() {
         val currentState = uiState.latestSyncState ?: return
+        if (!uiState.canControlPlayback) {
+            appendLog(syncLogs, "play ignored: media is not ready")
+            return
+        }
         val sent = roomSessionController.sendPlay(
             positionMs = uiState.player.currentPosition,
             seq = currentState.seq
@@ -426,6 +432,10 @@ fun PlayerScreen(
 
     fun sendPause() {
         val currentState = uiState.latestSyncState ?: return
+        if (!uiState.canControlPlayback) {
+            appendLog(syncLogs, "pause ignored: media is not ready")
+            return
+        }
         val sent = roomSessionController.sendPause(
             positionMs = uiState.player.currentPosition,
             seq = currentState.seq
@@ -436,6 +446,10 @@ fun PlayerScreen(
 
     fun sendSeek(targetPositionMs: Long) {
         val currentState = uiState.latestSyncState ?: return
+        if (!uiState.canControlPlayback) {
+            appendLog(syncLogs, "seek ignored: media is not ready")
+            return
+        }
         val sent = roomSessionController.sendSeek(
             positionMs = targetPositionMs,
             seq = currentState.seq
@@ -445,6 +459,10 @@ fun PlayerScreen(
 
     fun sendPlaybackRateSync(speed: Float) {
         val currentState = uiState.latestSyncState ?: return
+        if (!uiState.canControlPlayback) {
+            appendLog(syncLogs, "playbackRate ignored: media is not ready")
+            return
+        }
         val previousPlaybackSpeed = uiState.player.playbackSpeed
         updateUiState { current ->
             current.copy(
@@ -517,7 +535,11 @@ fun PlayerScreen(
         uiState = uiState,
         adapter = adapter,
         isHostController = isHostController,
-        onPlaybackToggleClick = {
+        onPlaybackToggleClick = playbackToggle@{
+            if (!uiState.canControlPlayback) {
+                appendLog(syncLogs, "playback ignored: media is not ready")
+                return@playbackToggle
+            }
             if (uiState.player.isPlaying) {
                 if (isHostController) {
                     sendPause()
@@ -533,7 +555,11 @@ fun PlayerScreen(
                 }
             }
         },
-        onSeekBackwardClick = {
+        onSeekBackwardClick = seekBackward@{
+            if (!uiState.canControlPlayback) {
+                appendLog(syncLogs, "seek ignored: media is not ready")
+                return@seekBackward
+            }
             val target = (uiState.player.currentPosition - 10_000L).coerceAtLeast(0L)
             if (isHostController) {
                 sendSeek(target)
@@ -541,7 +567,11 @@ fun PlayerScreen(
                 adapter.seekTo(target)
             }
         },
-        onSeekForwardClick = {
+        onSeekForwardClick = seekForward@{
+            if (!uiState.canControlPlayback) {
+                appendLog(syncLogs, "seek ignored: media is not ready")
+                return@seekForward
+            }
             val safeDuration = if (uiState.player.duration > 0L) {
                 uiState.player.duration
             } else {
@@ -554,7 +584,11 @@ fun PlayerScreen(
                 adapter.seekTo(target)
             }
         },
-        onPlaybackSpeedChange = { speed ->
+        onPlaybackSpeedChange = speedChange@{ speed ->
+            if (!uiState.canControlPlayback) {
+                appendLog(syncLogs, "playbackRate ignored: media is not ready")
+                return@speedChange
+            }
             if (isHostController && uiState.latestSyncState != null) {
                 appendLog(syncLogs, "playbackRate click path=sync rate=${speed}x")
                 sendPlaybackRateSync(speed)

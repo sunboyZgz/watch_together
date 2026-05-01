@@ -136,6 +136,7 @@ android/
 - 创建成功后使用响应中的 `room.roomCode` 建立 WebSocket `join_room`
 - 创建成功后使用响应中的 `media.title / media.episodeLabel / media.mediaUrl` 更新 `03 放映室`
 - 播放器会优先使用 `media.mediaUrl` 载入选中的影片
+- 如果后端返回的本地媒体 URL 使用 `127.0.0.1`、`localhost` 或 `0.0.0.0`，Android 会在本地环境中改写为 `MEDIA_BASE_URL` 的 host，例如默认的 `10.0.2.2`
 
 当前放映室详情接入状态：
 
@@ -187,6 +188,7 @@ android/
 - 播放和暂停合并为同一个按钮
 - host 点击播放/暂停时，底层映射为同步事件
 - viewer 入房后默认跟随房主，不显示成主控交互
+- 播放器只有进入 `Player.STATE_READY` 后才允许播放/暂停、seek 和倍速操作；`IDLE / BUFFERING / ENDED` 状态下控制层会保持禁用，避免资源未成功加载时仍发出本地播放或同步事件
 - 全屏按钮位于播放/暂停按钮左侧，点击后进入播放器全屏层，再次点击退出
 - 播放/暂停使用轻量 icon 按钮，位于浮层控制栏最左侧
 - `-10` 和 `+10` 跟随播放/暂停按钮靠左排列

@@ -1,6 +1,7 @@
 package com.example.watch_together.config
 
 import com.example.watch_together.BuildConfig
+import java.net.URI
 
 object AppConfig {
     val appEnv: String = BuildConfig.APP_ENV
@@ -35,5 +36,35 @@ object AppConfig {
         }
     }
 
+    fun playableMediaUrl(rawUrl: String): String =
+        rewriteLoopbackMediaUrl(rawUrl = rawUrl, androidMediaBaseUrl = mediaBaseUrl)
+
     fun sampleHlsUrl(): String = mediaUrlFor(defaultMediaIdForRoom())
+}
+
+fun rewriteLoopbackMediaUrl(rawUrl: String, androidMediaBaseUrl: String): String {
+    val sourceUri = runCatching { URI(rawUrl) }.getOrNull() ?: return rawUrl
+    val sourceHost = sourceUri.host ?: return rawUrl
+    if (!sourceHost.isLoopbackHost()) return rawUrl
+
+    val androidBaseUri = runCatching { URI(androidMediaBaseUrl) }.getOrNull() ?: return rawUrl
+    val androidHost = androidBaseUri.host ?: return rawUrl
+
+    return URI(
+        androidBaseUri.scheme ?: sourceUri.scheme,
+        sourceUri.userInfo,
+        androidHost,
+        androidBaseUri.port,
+        sourceUri.path,
+        sourceUri.query,
+        sourceUri.fragment
+    ).toString()
+}
+
+private fun String.isLoopbackHost(): Boolean {
+    val normalized = trim().lowercase()
+    return normalized == "127.0.0.1" ||
+        normalized == "localhost" ||
+        normalized == "0.0.0.0" ||
+        normalized == "::1"
 }

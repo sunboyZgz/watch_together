@@ -149,7 +149,7 @@ private fun JSONObject.toRoomMedia(): RoomMedia {
         id = getString("id"),
         title = getString("title"),
         subtitle = optNullableString("subtitle"),
-        mediaUrl = getString("mediaUrl"),
+        mediaUrl = AppConfig.playableMediaUrl(getString("mediaUrl")),
         durationMs = optNullableLong("durationMs"),
         seasonLabel = optNullableString("seasonLabel"),
         episodeLabel = optNullableString("episodeLabel")

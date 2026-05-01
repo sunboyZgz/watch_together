@@ -60,6 +60,7 @@ internal fun PlayerCoreShell(
     playbackSpeed: Float,
     controlHint: String,
     playbackButtonEnabled: Boolean,
+    secondaryControlsEnabled: Boolean,
     onPlaybackToggleClick: () -> Unit,
     onSeekBackwardClick: () -> Unit,
     onSeekForwardClick: () -> Unit,
@@ -77,6 +78,7 @@ internal fun PlayerCoreShell(
             playbackSpeed = playbackSpeed,
             controlHint = controlHint,
             playbackButtonEnabled = playbackButtonEnabled,
+            secondaryControlsEnabled = secondaryControlsEnabled,
             onPlaybackToggleClick = onPlaybackToggleClick,
             onSeekBackwardClick = onSeekBackwardClick,
             onSeekForwardClick = onSeekForwardClick,
@@ -98,6 +100,7 @@ private fun PlayerViewport(
     playbackSpeed: Float,
     controlHint: String,
     playbackButtonEnabled: Boolean,
+    secondaryControlsEnabled: Boolean,
     onPlaybackToggleClick: () -> Unit,
     onSeekBackwardClick: () -> Unit,
     onSeekForwardClick: () -> Unit,
@@ -120,12 +123,19 @@ private fun PlayerViewport(
         speedPickerVisible = false
     }
 
+    LaunchedEffect(secondaryControlsEnabled) {
+        if (!secondaryControlsEnabled) {
+            speedPickerVisible = false
+        }
+    }
+
     PlayerSurface(
         adapter = adapter,
         isPlaying = isPlaying,
         playbackSpeed = playbackSpeed,
         controlHint = controlHint,
         playbackButtonEnabled = playbackButtonEnabled,
+        secondaryControlsEnabled = secondaryControlsEnabled,
         controlsVisible = controlsVisible,
         speedPickerVisible = speedPickerVisible,
         fullscreenVisible = false,
@@ -175,6 +185,7 @@ private fun PlayerViewport(
                 playbackSpeed = playbackSpeed,
                 controlHint = controlHint,
                 playbackButtonEnabled = playbackButtonEnabled,
+                secondaryControlsEnabled = secondaryControlsEnabled,
                 controlsVisible = true,
                 speedPickerVisible = speedPickerVisible,
                 fullscreenVisible = true,
@@ -220,6 +231,7 @@ private fun PlayerSurface(
     playbackSpeed: Float,
     controlHint: String,
     playbackButtonEnabled: Boolean,
+    secondaryControlsEnabled: Boolean,
     controlsVisible: Boolean,
     speedPickerVisible: Boolean,
     fullscreenVisible: Boolean,
@@ -275,6 +287,7 @@ private fun PlayerSurface(
                     playbackSpeed = playbackSpeed,
                     controlHint = controlHint,
                     playbackButtonEnabled = playbackButtonEnabled,
+                    secondaryControlsEnabled = secondaryControlsEnabled,
                     speedPickerVisible = speedPickerVisible,
                     fullscreenVisible = fullscreenVisible,
                     onPlaybackToggleClick = onPlaybackToggleClick,
@@ -357,6 +370,7 @@ private fun PlayerOverlayControls(
     playbackSpeed: Float,
     controlHint: String,
     playbackButtonEnabled: Boolean,
+    secondaryControlsEnabled: Boolean,
     speedPickerVisible: Boolean,
     fullscreenVisible: Boolean,
     onPlaybackToggleClick: () -> Unit,
@@ -409,12 +423,12 @@ private fun PlayerOverlayControls(
                 )
                 OverlayControlChip(
                     label = "-10s",
-                    enabled = playbackButtonEnabled,
+                    enabled = secondaryControlsEnabled,
                     onClick = onSeekBackwardClick
                 )
                 OverlayControlChip(
                     label = "+10s",
-                    enabled = playbackButtonEnabled,
+                    enabled = secondaryControlsEnabled,
                     onClick = onSeekForwardClick
                 )
             }
@@ -422,6 +436,7 @@ private fun PlayerOverlayControls(
             SpeedEntryButton(
                 playbackSpeed = playbackSpeed,
                 expanded = speedPickerVisible,
+                enabled = secondaryControlsEnabled,
                 onClick = onSpeedClick
             )
         }
@@ -646,12 +661,21 @@ private fun OverlayControlChip(
 private fun SpeedEntryButton(
     playbackSpeed: Float,
     expanded: Boolean,
+    enabled: Boolean,
     onClick: () -> Unit
 ) {
+    val textColor = when {
+        !enabled -> PlayerTextMuted.copy(alpha = 0.55f)
+        expanded -> PlayerPrimary
+        else -> PlayerText
+    }
+
     Surface(
         color = Color.Transparent,
         shape = RoundedCornerShape(999.dp),
-        onClick = onClick
+        onClick = {
+            if (enabled) onClick()
+        }
     ) {
         Row(
             modifier = Modifier.padding(horizontal = 8.dp, vertical = 9.dp),
@@ -660,7 +684,7 @@ private fun SpeedEntryButton(
         ) {
             Text(
                 text = "倍速 ${playbackSpeed}x",
-                color = if (expanded) PlayerPrimary else PlayerText,
+                color = textColor,
                 fontSize = 12.sp,
                 fontWeight = FontWeight.Bold
             )

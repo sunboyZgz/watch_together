@@ -128,11 +128,14 @@ internal fun RoomTheaterPage(
                 isPlaying = uiState.player.isPlaying,
                 playbackSpeed = uiState.player.playbackSpeed,
                 controlHint = when {
+                    !uiState.canControlPlayback -> "视频载入后可操作。"
                     isHostController -> "房主操作会自动同步给房间成员。"
                     uiState.isJoinedToRoom -> "你正在跟随房主，播放控制由房主同步。"
                     else -> "先创建或加入房间，视频会自动载入。"
                 },
-                playbackButtonEnabled = isHostController || !uiState.isJoinedToRoom,
+                playbackButtonEnabled = uiState.canControlPlayback &&
+                    (isHostController || !uiState.isJoinedToRoom),
+                secondaryControlsEnabled = uiState.canControlPlayback,
                 compactWidth = compactWidth,
                 onPlaybackToggleClick = onPlaybackToggleClick,
                 onSeekBackwardClick = onSeekBackwardClick,
@@ -538,6 +541,7 @@ private fun RoomTheaterPagePreview() {
                     currentPosition = 9 * 60 * 1000L + 24 * 1000L,
                     duration = 24 * 60 * 1000L + 18 * 1000L,
                     isPlaying = true,
+                    playbackState = androidx.media3.common.Player.STATE_READY,
                     playbackSpeed = 1.25f
                 )
             ),
