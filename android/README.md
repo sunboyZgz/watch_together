@@ -191,7 +191,10 @@ android/
 - 播放和暂停合并为同一个按钮
 - host 点击播放/暂停时，底层映射为同步事件
 - viewer 入房后默认跟随房主，不显示成主控交互
+- 放映室媒体状态会区分 `等待载入 / 缓冲中 / 正在播放 / 已暂停 / 跟随同步中 / 已结束`，避免把播放器 rebuffer 误显示成同步等待
 - 播放器只有进入 `Player.STATE_READY` 后才允许播放/暂停、seek 和倍速操作；`IDLE / BUFFERING / ENDED` 状态下控制层会保持禁用，避免资源未成功加载时仍发出本地播放或同步事件
+- ExoPlayer 使用自定义 `DefaultLoadControl`，当前缓冲策略为 `minBuffer=30s / maxBuffer=90s / playbackStart=2.5s / rebufferStart=5s`，优先保障 2 倍速播放时有更充足的可播放缓存
+- 2 倍速播放时会通过 Logcat `WatchTogetherBuffer` 输出低频 buffer debug 日志，包含 `state / pos / buffered / ahead / percent / speed`，用于判断是否真的发生 rebuffer
 - 全屏按钮位于播放/暂停按钮左侧，点击后进入播放器全屏层，再次点击退出
 - 播放/暂停使用轻量 icon 按钮，位于浮层控制栏最左侧
 - `-10` 和 `+10` 跟随播放/暂停按钮靠左排列

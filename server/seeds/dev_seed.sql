@@ -160,7 +160,7 @@ INSERT INTO media_episodes (
         '和搭子一起继续看到第 09 集',
         '治愈系剧场感作品，适合夜晚慢慢看。',
         'https://example.com/covers/violet-evergarden.jpg',
-        'https://storage.googleapis.com/shaka-demo-assets/angel-one-hls/hls.m3u8',
+        'http://10.0.2.2:9000/media/tmp/media/sample-show/season-01/episode-01-720p/hls/index.m3u8',
         1458000,
         9,
         '第 09 集',

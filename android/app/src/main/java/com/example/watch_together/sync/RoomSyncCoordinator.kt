@@ -172,6 +172,7 @@ class RoomSyncCoordinator(
         lastCorrectionAtMs: Long,
         durationMs: Long = 0L,
         playbackEnded: Boolean = false,
+        playbackBuffering: Boolean = false,
         thresholdMs: Long = DEFAULT_DRIFT_THRESHOLD_MS,
         correctionIntervalMs: Long = DEFAULT_CORRECTION_INTERVAL_MS
     ): DriftCheck {
@@ -183,6 +184,7 @@ class RoomSyncCoordinator(
         val driftMs = localPositionMs - expectedPositionMs
 
         val shouldCorrect = !playbackEnded &&
+            !playbackBuffering &&
             !authorityState.paused &&
             !authorityState.ended &&
             authorityState.authorityAppliedAtMs > 0L &&

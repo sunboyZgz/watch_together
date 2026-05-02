@@ -1,5 +1,6 @@
 package com.example.watch_together.ui.player
 
+import android.util.Log
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -76,6 +77,9 @@ fun PlayerScreen(
     var loadedRoomDetailCode by rememberSaveable { mutableStateOf<String?>(null) }
     var lastProgressReportAtMs by rememberSaveable { mutableStateOf(0L) }
     var lastProgressReportPositionSeconds by rememberSaveable { mutableStateOf(-1L) }
+    var lastBufferLogAtMs by rememberSaveable { mutableStateOf(0L) }
+    var lastBufferLogState by rememberSaveable { mutableStateOf(-1) }
+    var lastBufferingDriftSkipAtMs by rememberSaveable { mutableStateOf(0L) }
     val currentUiState by rememberUpdatedState(uiState)
 
     val isHostController = remember(uiState.activeUserId, uiState.latestSyncState) {
@@ -110,11 +114,18 @@ fun PlayerScreen(
         adapter.setEventListener { event ->
             appendLog(playerEventLogs, event.toDebugLabel(), maxSize = 8)
             if (event is PlayerEvent.PlaybackStateChanged) {
+                val snapshot = playerSnapshotFromAdapter(
+                    adapter = adapter,
+                    playbackState = event.playbackState,
+                    playbackSpeed = currentUiState.player.playbackSpeed
+                )
                 updateUiState { current ->
                     current.copy(
-                        player = current.player.copy(playbackState = event.playbackState)
+                        player = snapshot
                     )
                 }
+                logBufferDebug(syncLogs, bufferDebugLogLine("buffer state", snapshot))
+                lastBufferLogState = event.playbackState
             }
         }
         onDispose {
@@ -130,14 +141,25 @@ fun PlayerScreen(
 
     LaunchedEffect(adapter) {
         while (isActive) {
+            val snapshot = playerSnapshotFromAdapter(
+                adapter = adapter,
+                playbackState = uiState.player.playbackState,
+                playbackSpeed = uiState.player.playbackSpeed
+            )
             updateUiState { current ->
                 current.copy(
-                    player = current.player.copy(
-                        currentPosition = adapter.getCurrentPosition(),
-                        duration = adapter.getDuration().coerceAtLeast(0L),
-                        isPlaying = adapter.isPlaying()
-                    )
+                    player = snapshot
                 )
+            }
+            val nowMs = System.currentTimeMillis()
+            val shouldLogBuffer = snapshot.playbackSpeed > 1.0f &&
+                snapshot.hasActivePlaybackState() &&
+                (nowMs - lastBufferLogAtMs >= BUFFER_DEBUG_LOG_INTERVAL_MS ||
+                    snapshot.playbackState != lastBufferLogState)
+            if (shouldLogBuffer) {
+                logBufferDebug(syncLogs, bufferDebugLogLine("buffer tick", snapshot))
+                lastBufferLogAtMs = nowMs
+                lastBufferLogState = snapshot.playbackState
             }
             delay(500)
         }
@@ -165,13 +187,23 @@ fun PlayerScreen(
 
             val authorityState = uiState.latestSyncState ?: continue
             val nowMs = System.currentTimeMillis()
+            val playbackBuffering = uiState.player.playbackState == Player.STATE_BUFFERING
             val driftCheck = roomSyncCoordinator.evaluateDrift(
                 authorityState = authorityState,
                 nowMs = nowMs,
                 lastCorrectionAtMs = uiState.lastDriftCorrectionAtMs,
                 durationMs = uiState.player.duration,
-                playbackEnded = uiState.player.playbackState == Player.STATE_ENDED
+                playbackEnded = uiState.player.playbackState == Player.STATE_ENDED,
+                playbackBuffering = playbackBuffering
             )
+
+            if (playbackBuffering && nowMs - lastBufferingDriftSkipAtMs >= BUFFER_DEBUG_LOG_INTERVAL_MS) {
+                appendLog(
+                    syncLogs,
+                    "drift correction skipped: local player is buffering ahead=${uiState.player.bufferedAheadMs}ms"
+                )
+                lastBufferingDriftSkipAtMs = nowMs
+            }
 
             if (!driftCheck.shouldCorrect) {
                 continue
@@ -687,4 +719,42 @@ private fun appendLog(
     while (logs.size > maxSize) {
         logs.removeAt(logs.lastIndex)
     }
+}
+
+private const val BUFFER_DEBUG_LOG_INTERVAL_MS = 3_000L
+private const val BUFFER_DEBUG_LOG_TAG = "WatchTogetherBuffer"
+
+private fun logBufferDebug(logs: MutableList<String>, line: String) {
+    appendLog(logs, line)
+    Log.d(BUFFER_DEBUG_LOG_TAG, line)
+}
+
+private fun bufferDebugLogLine(prefix: String, snapshot: PlayerRuntimeUiState): String {
+    return "$prefix state=${snapshot.playbackState.toPlaybackStateLabel()} " +
+        "pos=${snapshot.currentPosition}ms " +
+        "buffered=${snapshot.bufferedPosition}ms " +
+        "ahead=${snapshot.bufferedAheadMs}ms " +
+        "percent=${snapshot.bufferedPercentage}% " +
+        "speed=${snapshot.playbackSpeed}x"
+}
+
+private fun PlayerRuntimeUiState.hasActivePlaybackState(): Boolean {
+    return playbackState == Player.STATE_BUFFERING ||
+        playbackState == Player.STATE_READY
+}
+
+private fun playerSnapshotFromAdapter(
+    adapter: PlayerAdapter,
+    playbackState: Int,
+    playbackSpeed: Float
+): PlayerRuntimeUiState {
+    return PlayerRuntimeUiState(
+        currentPosition = adapter.getCurrentPosition(),
+        duration = adapter.getDuration().coerceAtLeast(0L),
+        bufferedPosition = adapter.getBufferedPosition().coerceAtLeast(0L),
+        bufferedPercentage = adapter.getBufferedPercentage().coerceIn(0, 100),
+        isPlaying = adapter.isPlaying(),
+        playbackState = playbackState,
+        playbackSpeed = playbackSpeed
+    )
 }

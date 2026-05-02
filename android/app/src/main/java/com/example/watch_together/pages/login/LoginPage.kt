@@ -76,8 +76,8 @@ fun LoginPage(
     val coroutineScope = rememberCoroutineScope()
     val authHttpClient = remember { AuthHttpClient() }
     var isDialogVisible by rememberSaveable { mutableStateOf(false) }
-    var account by rememberSaveable { mutableStateOf("") }
-    var password by rememberSaveable { mutableStateOf("") }
+    var account by rememberSaveable { mutableStateOf("zgz") }
+    var password by rememberSaveable { mutableStateOf("zgz010225") }
     var isLoggingIn by rememberSaveable { mutableStateOf(false) }
     var loginError by rememberSaveable { mutableStateOf<String?>(null) }
 

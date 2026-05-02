@@ -79,11 +79,11 @@ dry-run 不会写文件、不会上传、不会写数据库，适合先检查参
 cd server
 go run ./cmd/mediactl ingest \
   --library-root ../media/raw \
-  --input ../media/raw/violet-evergarden/season-01/episode-09.mp4 \
-  --title "紫罗兰永恒花园" \
+  --input ../media/raw/sample-show/season-01/episode-01.mp4 \
+  --title "测试视频" \
   --season-label "第 1 季" \
-  --episode-label "第 09 集" \
-  --tags healing,anime
+  --episode-label "第 01 集" \
+  --tags test,anime
 ```
 
 输出会包含：
@@ -105,11 +105,11 @@ go run ./cmd/mediactl ingest \
 cd server
 go run ./cmd/mediactl ingest \
   --library-root ../media/raw \
-  --input ../media/raw/violet-evergarden/season-01/episode-09.mp4 \
-  --title "紫罗兰永恒花园" \
+  --input ../media/raw/sample-show/season-01/episode-01.mp4 \
+  --title "测试视频" \
   --season-label "第 1 季" \
-  --episode-label "第 09 集" \
-  --tags healing,anime \
+  --episode-label "第 01 集" \
+  --tags test,anime \
   --dry-run=false
 ```
 
@@ -122,7 +122,7 @@ go run ./cmd/mediactl ingest \
 例如：
 
 ```text
-../media/tmp/media/violet-evergarden/season-01/episode-09/hls/
+../media/tmp/media/sample-show/season-01/episode-01/hls/
 ```
 
 默认产物：
@@ -146,7 +146,8 @@ segment_00001.ts
 
 ```bash
 go run ./cmd/mediactl ingest \
-  --input /path/to/source.mp4 \
+  --library-root ../media/raw \
+  --input ../media/raw/sample-show/season-01/episode-01.mp4 \
   --title "测试视频" \
   --output-dir /tmp/watch-media/test_media/hls \
   --dry-run=false
@@ -162,17 +163,17 @@ go run ./cmd/mediactl ingest \
 cd server
 go run ./cmd/mediactl ingest \
   --library-root ../media/raw \
-  --input ../media/raw/violet-evergarden/season-01/episode-09.mp4 \
-  --title "紫罗兰永恒花园" \
-  --subtitle "和搭子一起继续看" \
-  --description "治愈系作品，适合夜晚慢慢看。" \
+  --input ../media/raw/sample-show/season-01/episode-01.mp4 \
+  --title "测试视频" \
+  --subtitle "本地 2 倍速播放测试" \
+  --description "本地 HLS 与播放器联调用测试视频。" \
   --category anime \
-  --original-title "Violet Evergarden" \
-  --production-team "Kyoto Animation" \
-  --search-aliases "紫罗兰,薇尔莉特,京阿尼" \
+  --original-title "Sample Show" \
+  --production-team "Test Studio" \
+  --search-aliases "测试视频,sample-show" \
   --season-label "第 1 季" \
-  --episode-label "第 09 集" \
-  --tags healing,theatrical \
+  --episode-label "第 01 集" \
+  --tags test,anime \
   --dry-run=false \
   --write-db
 ```
@@ -227,6 +228,9 @@ go run ./cmd/mediactl ingest \
 - 分片命名：`segment_%05d.ts`。
 - 默认分片时长：6 秒。
 - 允许分片时长：4 到 6 秒。
+- 使用 `libx264 + aac` 重新编码。
+- 通过 `-force_key_frames` 让 HLS 分片边界尽量对齐关键帧。
+- 使用 `-hls_flags independent_segments` 标记独立分片，降低 Android/ExoPlayer 在 seek、倍速和 rebuffer 场景下的解码压力。
 - 使用 `ffprobe` 读取 `durationMs`。
 
 当前不做：
@@ -243,7 +247,7 @@ go run ./cmd/mediactl ingest \
 如果 HLS 输出到了：
 
 ```text
-media/tmp/media/media_uuid/hls/index.m3u8
+media/tmp/media/sample-show/season-01/episode-01/hls/index.m3u8
 ```
 
 可以在仓库根目录启动静态服务：
@@ -255,13 +259,13 @@ python3 -m http.server 9000
 本机访问地址：
 
 ```text
-http://127.0.0.1:9000/media/tmp/media/media_uuid/hls/index.m3u8
+http://127.0.0.1:9000/media/tmp/media/sample-show/season-01/episode-01/hls/index.m3u8
 ```
 
 Android 模拟器访问宿主机时通常使用：
 
 ```text
-http://10.0.2.2:9000/media/tmp/media/media_uuid/hls/index.m3u8
+http://10.0.2.2:9000/media/tmp/media/sample-show/season-01/episode-01/hls/index.m3u8
 ```
 
 ## 与数据库的关系
@@ -319,9 +323,9 @@ http://10.0.2.2:9000/media/tmp/media/media_uuid/hls/index.m3u8
 
 ```text
 media/raw/
-└── violet-evergarden/
+└── sample-show/
     └── season-01/
-        └── episode-09.mp4
+        └── episode-01.mp4
 ```
 
 示例：
@@ -329,17 +333,17 @@ media/raw/
 ```bash
 go run ./cmd/mediactl ingest \
   --library-root ../media/raw \
-  --input ../media/raw/violet-evergarden/season-01/episode-09.mp4 \
-  --title "紫罗兰永恒花园"
+  --input ../media/raw/sample-show/season-01/episode-01.mp4 \
+  --title "测试视频"
 ```
 
 推导结果：
 
 ```text
-source_key = violet-evergarden/season-01/episode-09.mp4
-season_slug = violet-evergarden
+source_key = sample-show/season-01/episode-01.mp4
+season_slug = sample-show
 season_number = 1
-episode_number = 9
+episode_number = 1
 source_hash = sha256:<file-content-hash>
 ```
 
@@ -376,6 +380,39 @@ export FFPROBE_BIN=/absolute/path/to/ffprobe
 - Android 使用的是 `10.0.2.2` 而不是 `127.0.0.1`。
 - `index.m3u8` 和 `.ts` 分片是否都能通过浏览器访问。
 - PostgreSQL 中 `media_episodes.media_url` 是否指向 `index.m3u8`。
+
+本机浏览器可以访问：
+
+```text
+http://127.0.0.1:9000/media/tmp/media/sample-show/season-01/episode-01-720p/hls/index.m3u8
+```
+
+但 Android 模拟器应该使用：
+
+```text
+http://10.0.2.2:9000/media/tmp/media/sample-show/season-01/episode-01-720p/hls/index.m3u8
+```
+
+如果需要直接更新本地 PostgreSQL：
+
+```sql
+UPDATE media_episodes
+SET media_url = 'http://10.0.2.2:9000/media/tmp/media/sample-show/season-01/episode-01-720p/hls/index.m3u8'
+WHERE id = '40000000-0000-0000-0000-000000000001';
+```
+
+更新后重新进入放映室，或重新创建房间，确保 Android 重新拉取 `GET /rooms/{roomCode}` 返回的新 `mediaUrl`。
+
+如果 Android 能访问资源但播放中频繁 `BUFFERING`，先用本机工具排除 HLS 封装问题：
+
+```bash
+ffprobe -hide_banner media/tmp/sample_001/index.m3u8
+ffmpeg -v warning -i media/tmp/sample_001/index.m3u8 -f null -
+```
+
+- `ffprobe` 应该能识别出 `h264` 视频流、`aac` 音频流和正确时长。
+- `ffmpeg -v warning` 如果没有输出 warning/error，说明这份 HLS 至少可以被 ffmpeg 完整解码。
+- 如果 Android Logcat 仍出现 `PesReader` 或 `MediaCodec` 相关 warning，需要继续结合 `WatchTogetherBuffer` 的 `ahead` 判断是缓冲不足、模拟器解码能力问题，还是 HLS 封装需要重新制作。
 
 ## 后续任务
 

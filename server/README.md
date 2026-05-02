@@ -267,12 +267,11 @@ server/
 cd server
 go run ./cmd/mediactl ingest \
   --library-root ../media/raw \
-  --input ../media/raw/violet-evergarden/season-01/episode-09.mp4 \
-  --title "紫罗兰永恒花园" \
+  --input ../media/raw/sample-show/season-01/episode-01.mp4 \
+  --title "测试视频" \
   --season-label "第 1 季" \
-  --episode-label "第 09 集" \
-  --tags healing,anime \
-  --cover ../media/source/cover.jpg \
+  --episode-label "第 01 集" \
+  --tags test,anime \
   --dry-run=false \
   --write-db
 ```

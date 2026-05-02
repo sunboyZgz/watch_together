@@ -311,7 +311,10 @@ PlayerScreen
 - 播放和暂停合并成同一个按钮，根据当前播放状态切换
 - host 点击播放/暂停时，页面装配层映射为同步事件
 - viewer 入房后默认跟随房主，播放按钮不可用，避免误导为主控
+- 放映室页面层负责把播放器状态映射为展示文案：`IDLE` 是等待载入，`BUFFERING` 是缓冲中，`ENDED` 是已结束，`READY + isPlaying` 是正在播放，`READY + !isPlaying` 再结合 host/viewer 语义显示为已暂停或跟随同步中
 - 播放、暂停、seek 和倍速都必须等到底层播放器进入 `Player.STATE_READY` 后才可用；资源未加载、仍在缓冲或已经 ended 时，不应触发本地控制或同步事件
+- `AndroidExoPlayerAdapter` 使用自定义 `DefaultLoadControl`，当前缓冲策略为 `minBuffer=30s / maxBuffer=90s / playbackStart=2.5s / rebufferStart=5s`，用于降低 2 倍速播放时短 HLS segment 被快速消耗导致的频繁 rebuffer
+- 2 倍速及以上调试时，`PlayerScreen` 会通过 Logcat `WatchTogetherBuffer` 低频写入 buffer debug 日志，格式包含 `state / pos / buffered / ahead / percent / speed`
 - 全屏按钮位于播放/暂停按钮左侧，并由 `PlayerCoreShell` 内部管理全屏显示/退出
 - 倍速默认显示 `倍速 + 当前倍率`，点击后在右侧上方展开窄型深色倍率列表，当前倍率用粉色文字和小点标记
 - 播放/暂停、seek、倍速入口显示在播放器画面 overlay 上，排列为左侧全屏、播放/暂停、`-10`、`+10`，右侧倍速

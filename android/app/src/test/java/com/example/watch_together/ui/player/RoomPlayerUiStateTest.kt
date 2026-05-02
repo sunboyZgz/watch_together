@@ -46,4 +46,14 @@ class RoomPlayerUiStateTest {
         assertTrue(state.hasPlayableMedia)
         assertFalse(state.canControlPlayback)
     }
+
+    @Test
+    fun `buffered ahead never returns negative value`() {
+        val state = PlayerRuntimeUiState(
+            currentPosition = 12_000L,
+            bufferedPosition = 10_000L
+        )
+
+        assertFalse(state.bufferedAheadMs < 0L)
+    }
 }

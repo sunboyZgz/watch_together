@@ -148,22 +148,22 @@ object key 必须稳定、可预测，并且不包含用户本地文件名。
 其中：
 
 - `MEDIA_OBJECT_KEY_PREFIX` 默认是 `media`。
-- `{sourceKeyWithoutExt}` 由媒体库相对路径自动推导，例如 `violet-evergarden/season-01/episode-09`。
+- `{sourceKeyWithoutExt}` 由媒体库相对路径自动推导，例如 `sample-show/season-01/episode-01`。
 - `media_episodes.media_url` 指向 `hls/index.m3u8` 的公开 URL。
 - `media_episodes.cover_url` 或 `media_seasons.cover_url` 指向封面 URL。
 
 本地静态服务下的 URL 示例：
 
 ```text
-http://127.0.0.1:9000/media/tmp/media/violet-evergarden/season-01/episode-09/hls/index.m3u8
-http://127.0.0.1:9000/media/tmp/media/violet-evergarden/season-01/episode-09/cover/cover.jpg
+http://127.0.0.1:9000/media/tmp/media/sample-show/season-01/episode-01/hls/index.m3u8
+http://127.0.0.1:9000/media/tmp/media/sample-show/season-01/episode-01/cover/cover.jpg
 ```
 
 MinIO / S3-compatible 下的 URL 示例：
 
 ```text
-https://cdn.example.com/media/violet-evergarden/season-01/episode-09/hls/index.m3u8
-https://cdn.example.com/media/violet-evergarden/season-01/episode-09/cover/cover.jpg
+https://cdn.example.com/media/sample-show/season-01/episode-01/hls/index.m3u8
+https://cdn.example.com/media/sample-show/season-01/episode-01/cover/cover.jpg
 ```
 
 这里的 `cdn.example.com` 可以是 CDN 域名，也可以是对象存储 public endpoint。
@@ -210,13 +210,22 @@ PostgreSQL 不保存：
 
 ```bash
 ffmpeg -i input.mp4 \
-  -c:v h264 \
+  -c:v libx264 \
+  -preset veryfast \
+  -crf 23 \
+  -pix_fmt yuv420p \
+  -force_key_frames "expr:gte(t,n_forced*6)" \
+  -sc_threshold 0 \
   -c:a aac \
+  -b:a 128k \
   -hls_time 6 \
   -hls_playlist_type vod \
+  -hls_flags independent_segments \
   -hls_segment_filename "segment_%05d.ts" \
   index.m3u8
 ```
+
+注意：HLS 分片应尽量和关键帧对齐。只设置 `-hls_time 6` 不一定能得到稳定 6 秒分片，如果源视频关键帧间隔不规则，playlist 可能出现 9 到 10 秒长分片和 1 秒左右短分片。2 倍速播放会放大这种不稳定，Android 模拟器更容易进入 rebuffer。
 
 当前 `mediactl ingest --dry-run=false` 会固化第一版单码率 HLS 生成参数，避免手工命令分散。
 
@@ -254,11 +263,11 @@ server/cmd/mediactl
 ```bash
 mediactl ingest \
   --library-root ../media/raw \
-  --input ../media/raw/violet-evergarden/season-01/episode-09.mp4 \
-  --title "紫罗兰永恒花园" \
+  --input ../media/raw/sample-show/season-01/episode-01.mp4 \
+  --title "测试视频" \
   --season-label "第 1 季" \
-  --episode-label "第 09 集" \
-  --tags healing,anime \
+  --episode-label "第 01 集" \
+  --tags test,anime \
   --dry-run=false \
   --upload
 ```

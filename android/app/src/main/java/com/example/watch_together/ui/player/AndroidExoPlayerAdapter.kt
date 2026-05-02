@@ -5,6 +5,7 @@ import androidx.media3.common.PlaybackException
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
+import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 
@@ -12,7 +13,17 @@ class AndroidExoPlayerAdapter(
     context: Context
 ) : PlayerAdapter {
 
-    private val exoPlayer: ExoPlayer = ExoPlayer.Builder(context).build()
+    private val loadControl = DefaultLoadControl.Builder()
+        .setBufferDurationsMs(
+            MinBufferMs,
+            MaxBufferMs,
+            BufferForPlaybackMs,
+            BufferForPlaybackAfterRebufferMs
+        )
+        .build()
+    private val exoPlayer: ExoPlayer = ExoPlayer.Builder(context)
+        .setLoadControl(loadControl)
+        .build()
     private var attachedPlayerView: PlayerView? = null
     private var eventListener: ((PlayerEvent) -> Unit)? = null
     private val playerListener = object : Player.Listener {
@@ -90,6 +101,10 @@ class AndroidExoPlayerAdapter(
 
     override fun getDuration(): Long = exoPlayer.duration
 
+    override fun getBufferedPosition(): Long = exoPlayer.bufferedPosition
+
+    override fun getBufferedPercentage(): Int = exoPlayer.bufferedPercentage
+
     override fun isPlaying(): Boolean = exoPlayer.isPlaying
 
     override fun setPlaybackSpeed(speed: Float) {
@@ -105,5 +120,13 @@ class AndroidExoPlayerAdapter(
 
     private fun emit(event: PlayerEvent) {
         eventListener?.invoke(event)
+    }
+
+    private companion object {
+        // Keep a larger VOD buffer so 2x playback does not immediately drain short HLS segments.
+        const val MinBufferMs = 30_000
+        const val MaxBufferMs = 90_000
+        const val BufferForPlaybackMs = 2_500
+        const val BufferForPlaybackAfterRebufferMs = 5_000
     }
 }

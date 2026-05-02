@@ -217,10 +217,17 @@ func TestBuildFFmpegHLSArgs(t *testing.T) {
 	joined := strings.Join(args, " ")
 	for _, want := range []string{
 		"-i input.mp4",
-		"-c:v h264",
+		"-c:v libx264",
+		"-preset veryfast",
+		"-crf 23",
+		"-pix_fmt yuv420p",
+		"-force_key_frames expr:gte(t,n_forced*6)",
+		"-sc_threshold 0",
 		"-c:a aac",
+		"-b:a 128k",
 		"-hls_time 6",
 		"-hls_playlist_type vod",
+		"-hls_flags independent_segments",
 		"-hls_segment_filename /tmp/out/segment_%05d.ts",
 		"/tmp/out/index.m3u8",
 	} {

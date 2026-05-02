@@ -505,10 +505,17 @@ func BuildFFmpegHLSArgs(input string, playlistPath string, segmentPattern string
 	return []string{
 		"-y",
 		"-i", input,
-		"-c:v", "h264",
+		"-c:v", "libx264",
+		"-preset", "veryfast",
+		"-crf", "23",
+		"-pix_fmt", "yuv420p",
+		"-force_key_frames", fmt.Sprintf("expr:gte(t,n_forced*%d)", segmentSeconds),
+		"-sc_threshold", "0",
 		"-c:a", "aac",
+		"-b:a", "128k",
 		"-hls_time", strconv.Itoa(segmentSeconds),
 		"-hls_playlist_type", "vod",
+		"-hls_flags", "independent_segments",
 		"-hls_segment_filename", segmentPattern,
 		playlistPath,
 	}

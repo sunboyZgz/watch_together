@@ -247,6 +247,7 @@ drift correction 是当前最值得持续跟踪的核心技术点之一。
 - correction interval: `1s`
 - drift threshold: `750ms`
 - local ended guard: enabled
+- local buffering guard: enabled
 
 #### Current Algorithm
 
@@ -283,12 +284,30 @@ drift correction 是当前最值得持续跟踪的核心技术点之一。
 
    - 当前不是暂停态
    - 本地播放器还没有进入 ended 状态
+   - 本地播放器不处于 buffering 状态
    - 已经拿到有效 authority baseline
    - 距离上次 authority baseline 应用已有一个最小检查窗口
    - 距离上一次 correction 已经超过 cooldown
    - `abs(driftMs) >= driftThresholdMs`
 
-4. 处理 media ended 边界  
+4. 处理 buffering 边界  
+   如果本地播放器处于 `BUFFERING`：
+
+   - 暂停本轮 drift correction
+   - 不执行 correction seek
+   - 不丢弃最新 authority baseline
+   - 等播放器恢复 `READY` 后继续按同一 authority baseline 做 drift 判断
+
+   这样可以避免播放器已经在 rebuffer 或解码器 flush 时，又被 correction seek 打断，导致 `BUFFERING -> seek -> flush -> BUFFERING` 的连锁抖动。
+
+5. 播放器缓冲策略  
+   Android 端当前通过 `AndroidExoPlayerAdapter` 配置 `DefaultLoadControl`，使用 `minBuffer=30s / maxBuffer=90s / playbackStart=2.5s / rebufferStart=5s`。
+
+   这不是同步协议的一部分，而是播放器本地的稳定性策略：2 倍速会更快消耗 HLS segment，如果 `bufferedAheadMs` 经常低于 3 到 5 秒，就容易出现真实 rebuffer。
+
+   后续判断是否继续优化时，优先观察 `WatchTogetherBuffer` 日志里的 `ahead`：如果 `BUFFERING` 发生时 `ahead` 接近 0，说明是缓冲不足；如果 `ahead` 仍然很高但频繁 `BUFFERING`，则更可能是 HLS 封装、解码器或模拟器能力问题。
+
+6. 处理 media ended 边界  
    如果本地播放器已经进入 ended：
 
    - 停止继续做 drift correction

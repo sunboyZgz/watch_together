@@ -15,6 +15,8 @@ interface PlayerAdapter {
 
     fun getCurrentPosition(): Long
     fun getDuration(): Long
+    fun getBufferedPosition(): Long = 0L
+    fun getBufferedPercentage(): Int = 0
     fun isPlaying(): Boolean
 
     fun setPlaybackSpeed(speed: Float)

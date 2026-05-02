@@ -41,6 +41,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.media3.common.Player
 import androidx.media3.ui.PlayerView
 import com.example.watch_together.ui.player.PlayerAdapter
 import com.example.watch_together.ui.player.PlayerCoreShell
@@ -98,10 +99,11 @@ internal fun RoomTheaterPage(
         val horizontalPadding = if (compactWidth) 16.dp else 20.dp
         val sectionGap = if (compactHeight) 14.dp else 18.dp
         val roomCode = uiState.currentRoomId?.take(6)?.uppercase() ?: "A7K2M9"
+        val playbackStatusLabel = playbackStatusLabel(uiState, isHostController)
         val mediaMeta = buildString {
             append(mediaEpisodeLabel ?: "当前影片")
             append(" · ")
-            append(if (uiState.player.isPlaying) "正在播放" else "等待同步")
+            append(playbackStatusLabel)
         }
 
         RoomPlayerBackdrop()
@@ -128,6 +130,8 @@ internal fun RoomTheaterPage(
                 isPlaying = uiState.player.isPlaying,
                 playbackSpeed = uiState.player.playbackSpeed,
                 controlHint = when {
+                    uiState.player.playbackState == Player.STATE_BUFFERING -> "正在缓冲，播放器恢复后会继续跟随同步。"
+                    uiState.player.playbackState == Player.STATE_ENDED -> "当前视频已播放结束。"
                     !uiState.canControlPlayback -> "视频载入后可操作。"
                     isHostController -> "房主操作会自动同步给房间成员。"
                     uiState.isJoinedToRoom -> "你正在跟随房主，播放控制由房主同步。"
@@ -165,6 +169,23 @@ internal fun RoomTheaterPage(
                 canRejoinCurrentUser = uiState.activeUserId != null && uiState.currentRoomId != null
             )
         }
+    }
+}
+
+private fun playbackStatusLabel(
+    uiState: RoomPlayerUiState,
+    isHostController: Boolean
+): String {
+    return when (uiState.player.playbackState) {
+        Player.STATE_BUFFERING -> "缓冲中"
+        Player.STATE_ENDED -> "已结束"
+        Player.STATE_IDLE -> "等待载入"
+        Player.STATE_READY -> when {
+            uiState.player.isPlaying -> "正在播放"
+            uiState.isJoinedToRoom && !isHostController -> "跟随同步中"
+            else -> "已暂停"
+        }
+        else -> "准备中"
     }
 }
 

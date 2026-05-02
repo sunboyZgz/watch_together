@@ -23,10 +23,15 @@ enum class SyncStatus(val label: String) {
 data class PlayerRuntimeUiState(
     val currentPosition: Long = 0L,
     val duration: Long = 0L,
+    val bufferedPosition: Long = 0L,
+    val bufferedPercentage: Int = 0,
     val isPlaying: Boolean = false,
     val playbackState: Int = Player.STATE_IDLE,
     val playbackSpeed: Float = 1f,
-)
+) {
+    val bufferedAheadMs: Long
+        get() = (bufferedPosition - currentPosition).coerceAtLeast(0L)
+}
 
 data class RoomPlayerUiState(
     val joinRoomInput: String = "",

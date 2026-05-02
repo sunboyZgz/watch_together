@@ -52,7 +52,7 @@ android/.cxx/
 media/tmp/
 media/out/
 media/.cache/
-media/source/
+media/raw/
 media/**/*.tmp
 media/**/*.part
 
