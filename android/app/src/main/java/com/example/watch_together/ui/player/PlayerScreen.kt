@@ -113,11 +113,20 @@ fun PlayerScreen(
     DisposableEffect(adapter) {
         adapter.setEventListener { event ->
             appendLog(playerEventLogs, event.toDebugLabel(), maxSize = 8)
+            if (event is PlayerEvent.VideoVariantChanged) {
+                updateUiState { current ->
+                    current.copy(
+                        player = current.player.copy(videoVariant = event.variant)
+                    )
+                }
+                appendLog(syncLogs, "video variant ${event.variant.debugLabel}")
+            }
             if (event is PlayerEvent.PlaybackStateChanged) {
                 val snapshot = playerSnapshotFromAdapter(
                     adapter = adapter,
                     playbackState = event.playbackState,
-                    playbackSpeed = currentUiState.player.playbackSpeed
+                    playbackSpeed = currentUiState.player.playbackSpeed,
+                    videoVariant = currentUiState.player.videoVariant
                 )
                 updateUiState { current ->
                     current.copy(
@@ -144,7 +153,8 @@ fun PlayerScreen(
             val snapshot = playerSnapshotFromAdapter(
                 adapter = adapter,
                 playbackState = uiState.player.playbackState,
-                playbackSpeed = uiState.player.playbackSpeed
+                playbackSpeed = uiState.player.playbackSpeed,
+                videoVariant = uiState.player.videoVariant
             )
             updateUiState { current ->
                 current.copy(
@@ -735,7 +745,8 @@ private fun bufferDebugLogLine(prefix: String, snapshot: PlayerRuntimeUiState): 
         "buffered=${snapshot.bufferedPosition}ms " +
         "ahead=${snapshot.bufferedAheadMs}ms " +
         "percent=${snapshot.bufferedPercentage}% " +
-        "speed=${snapshot.playbackSpeed}x"
+        "speed=${snapshot.playbackSpeed}x " +
+        "variant=${snapshot.videoVariant.displayLabel}"
 }
 
 private fun PlayerRuntimeUiState.hasActivePlaybackState(): Boolean {
@@ -746,7 +757,8 @@ private fun PlayerRuntimeUiState.hasActivePlaybackState(): Boolean {
 private fun playerSnapshotFromAdapter(
     adapter: PlayerAdapter,
     playbackState: Int,
-    playbackSpeed: Float
+    playbackSpeed: Float,
+    videoVariant: PlayerVideoVariant
 ): PlayerRuntimeUiState {
     return PlayerRuntimeUiState(
         currentPosition = adapter.getCurrentPosition(),
@@ -755,6 +767,7 @@ private fun playerSnapshotFromAdapter(
         bufferedPercentage = adapter.getBufferedPercentage().coerceIn(0, 100),
         isPlaying = adapter.isPlaying(),
         playbackState = playbackState,
-        playbackSpeed = playbackSpeed
+        playbackSpeed = playbackSpeed,
+        videoVariant = videoVariant
     )
 }

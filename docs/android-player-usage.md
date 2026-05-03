@@ -108,6 +108,7 @@ android/app/src/main/java/com/example/watch_together/
 - 全屏属于播放器组件内部能力，不需要 `RoomTheaterPage` 直接管理
 - 全屏按钮位于播放/暂停按钮左侧，点击后进入播放器全屏层，再次点击退出
 - 播放/暂停使用轻量 icon 按钮，不使用文字按钮和重色块
+- 接入 `master.m3u8` 后由 ExoPlayer 执行 ABR，浮层右上角使用轻量 pill 展示当前 `自动 · 720p / 1080p`
 - 浮层控制栏左侧依次放置播放/暂停、`-10`、`+10`
 - 浮层控制栏右侧放置倍速入口，点击后从右侧上方展开接近 B 站播放器气质的窄型深色倍速菜单
 - 房主、成员、倍速、在线状态和 `seq` 使用轻量状态面板展示
@@ -215,6 +216,14 @@ android/app/src/main/java/com/example/watch_together/
 
 它不应该知道房间、host、viewer、seq、heartbeat。
 
+当前 `AndroidExoPlayerAdapter` 还负责本地 ABR 播放策略：
+
+- ABR 是 Adaptive Bitrate Streaming，即播放器从 `master.m3u8` 读取多个 variant，并根据网络、缓冲、设备解码能力和播放状态自动选择当前清晰度。
+- 当前 track selector 设置最低视频尺寸为 `1280x720`，避免正常体验降到 720p 以下。
+- 当前依赖 Media3 HLS 自适应能力在 `720p / 1080p` 之间切换。
+- 当前通过 Logcat `WatchTogetherABR` 输出可用 variant 和当前 variant。
+- 当前通过播放器浮层右上角的轻量 pill 展示当前自动清晰度，例如 `自动 · 720p`。
+
 ## 当前组合关系
 
 当前进入 `03 放映室` 后的组合链路是：
@@ -314,6 +323,8 @@ PlayerScreen
 - 放映室页面层负责把播放器状态映射为展示文案：`IDLE` 是等待载入，`BUFFERING` 是缓冲中，`ENDED` 是已结束，`READY + isPlaying` 是正在播放，`READY + !isPlaying` 再结合 host/viewer 语义显示为已暂停或跟随同步中
 - 播放、暂停、seek 和倍速都必须等到底层播放器进入 `Player.STATE_READY` 后才可用；资源未加载、仍在缓冲或已经 ended 时，不应触发本地控制或同步事件
 - `AndroidExoPlayerAdapter` 使用自定义 `DefaultLoadControl`，当前缓冲策略为 `minBuffer=30s / maxBuffer=90s / playbackStart=2.5s / rebufferStart=5s`，用于降低 2 倍速播放时短 HLS segment 被快速消耗导致的频繁 rebuffer
+- `AndroidExoPlayerAdapter` 使用 `DefaultTrackSelector` 接入 ABR，当前最低视频尺寸约束为 720p，避免 master playlist 中意外出现低清晰度时被常规选择
+- 当前播放 variant 会通过 Logcat `WatchTogetherABR` 输出，播放器 overlay 右上角也会显示 `自动 · 当前清晰度`
 - 2 倍速及以上调试时，`PlayerScreen` 会通过 Logcat `WatchTogetherBuffer` 低频写入 buffer debug 日志，格式包含 `state / pos / buffered / ahead / percent / speed`
 - 全屏按钮位于播放/暂停按钮左侧，并由 `PlayerCoreShell` 内部管理全屏显示/退出
 - 倍速默认显示 `倍速 + 当前倍率`，点击后在右侧上方展开窄型深色倍率列表，当前倍率用粉色文字和小点标记

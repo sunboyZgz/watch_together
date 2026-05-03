@@ -12,7 +12,8 @@ skinparam entity {
 
 legend right
   Main media path:
-  media_seasons -> media_episodes -> rooms / user_media_progress
+  media_seasons -> media_episodes -> media_episode_variants
+  media_episodes -> rooms / user_media_progress
 endlegend
 
 entity users {
@@ -91,6 +92,23 @@ entity media_episodes {
   updated_at : timestamptz
 }
 
+entity media_episode_variants {
+  * id : uuid <<PK>>
+  --
+  media_episode_id : uuid <<FK>>
+  variant_key : text
+  label : text
+  playlist_url : text
+  width : int
+  height : int
+  bandwidth_bps : int
+  codecs : text
+  is_default : boolean
+  sort_order : int
+  created_at : timestamptz
+  updated_at : timestamptz
+}
+
 entity media_tags {
   * id : uuid <<PK>>
   --
@@ -131,6 +149,7 @@ users ||--o{ user_media_progress : watches
 rooms ||--o{ room_members : contains
 media_episodes ||--o{ rooms : selected_by
 media_episodes ||--o{ user_media_progress : tracked_by
+media_episodes ||--o{ media_episode_variants : has_quality
 
 media_seasons ||--o{ media_episodes : has
 media_seasons ||--o{ media_season_tags : tagged_by
@@ -149,6 +168,11 @@ end note
 note bottom of media_seasons
   Tags and searchable work/season metadata live here.
   This avoids repeating the same metadata on each episode.
+end note
+
+note bottom of media_episode_variants
+  One episode can have multiple HLS variants.
+  media_episodes.media_url points to master.m3u8.
 end note
 
 note bottom

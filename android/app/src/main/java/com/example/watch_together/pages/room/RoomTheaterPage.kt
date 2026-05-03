@@ -129,6 +129,7 @@ internal fun RoomTheaterPage(
                 duration = uiState.player.duration,
                 isPlaying = uiState.player.isPlaying,
                 playbackSpeed = uiState.player.playbackSpeed,
+                videoQualityLabel = uiState.player.videoVariant.displayLabel,
                 controlHint = when {
                     uiState.player.playbackState == Player.STATE_BUFFERING -> "正在缓冲，播放器恢复后会继续跟随同步。"
                     uiState.player.playbackState == Player.STATE_ENDED -> "当前视频已播放结束。"
@@ -153,6 +154,7 @@ internal fun RoomTheaterPage(
                 activeUserId = uiState.activeUserId,
                 isHostController = isHostController,
                 playbackSpeed = uiState.player.playbackSpeed,
+                videoQualityLabel = uiState.player.videoVariant.displayLabel,
                 isJoinedToRoom = uiState.isJoinedToRoom,
                 syncStatus = uiState.syncStatus,
                 latestSeq = uiState.latestSyncState?.seq
@@ -260,6 +262,7 @@ private fun TheaterStatusPanel(
     activeUserId: String?,
     isHostController: Boolean,
     playbackSpeed: Float,
+    videoQualityLabel: String,
     isJoinedToRoom: Boolean,
     syncStatus: SyncStatus,
     latestSeq: Long?
@@ -325,6 +328,7 @@ private fun TheaterStatusPanel(
 
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 StatusChip(if (isHostController) "主控中" else "跟随中")
+                StatusChip(videoQualityLabel)
                 StatusChip("seq ${latestSeq ?: "-"}")
                 StatusChip(syncStatus.label)
             }

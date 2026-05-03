@@ -22,7 +22,7 @@
 
 - 本地 Android 模拟器联调。
 - 本地 server API 联调。
-- 快速验证 HLS 分片和 `index.m3u8` 是否可播放。
+- 快速验证 HLS master playlist、variant playlist 和 `.ts` 分片是否可播放。
 
 当前推荐：
 
@@ -103,11 +103,11 @@ FFPROBE_BIN=ffprobe
 
 ## 推荐资源结构
 
-对象存储中的资源建议按媒体 ID 组织：
+对象存储中的资源建议按 `source_key` 去掉扩展名后的稳定路径组织。当前默认生成多码率 HLS，但不默认生成 4K。项目当前资源大多不是 4K，而且 Android 同步播放器的首要目标是稳定 720p 以上播放体验。
 
 ```text
 media/
-└── {mediaItemId}/
+└── {sourceKeyWithoutExt}/
     ├── hls/
     │   ├── master.m3u8
     │   ├── 720p/
@@ -116,32 +116,29 @@ media/
     │   └── 1080p/
     │       ├── index.m3u8
     │       └── segment_00001.ts
-    └── cover.jpg
-```
-
-第一版可以只生成单码率 HLS：
-
-```text
-media/
-└── {mediaItemId}/
-    ├── hls/
-    │   ├── index.m3u8
-    │   └── segment_00001.ts
     └── cover/
         └── cover.jpg
 ```
 
-后续如果要支持多清晰度，再引入 master playlist。
+说明：
+
+- `master.m3u8` 是 Android 播放入口。
+- `720p/index.m3u8` 是默认基线 variant，面向低卡顿同步播放。
+- `1080p/index.m3u8` 仅在源视频高度足够时生成。
+- 4K 不进入默认 ladder，后续只有在明确有 4K 资源和播放端性能验证后再追加。
 
 ## Object Key 规范
 
 object key 必须稳定、可预测，并且不包含用户本地文件名。
 
-第一版约定：
+当前约定：
 
 ```text
-{MEDIA_OBJECT_KEY_PREFIX}/{sourceKeyWithoutExt}/hls/index.m3u8
-{MEDIA_OBJECT_KEY_PREFIX}/{sourceKeyWithoutExt}/hls/segment_00001.ts
+{MEDIA_OBJECT_KEY_PREFIX}/{sourceKeyWithoutExt}/hls/master.m3u8
+{MEDIA_OBJECT_KEY_PREFIX}/{sourceKeyWithoutExt}/hls/720p/index.m3u8
+{MEDIA_OBJECT_KEY_PREFIX}/{sourceKeyWithoutExt}/hls/720p/segment_00001.ts
+{MEDIA_OBJECT_KEY_PREFIX}/{sourceKeyWithoutExt}/hls/1080p/index.m3u8
+{MEDIA_OBJECT_KEY_PREFIX}/{sourceKeyWithoutExt}/hls/1080p/segment_00001.ts
 {MEDIA_OBJECT_KEY_PREFIX}/{sourceKeyWithoutExt}/cover/cover.jpg
 ```
 
@@ -149,20 +146,21 @@ object key 必须稳定、可预测，并且不包含用户本地文件名。
 
 - `MEDIA_OBJECT_KEY_PREFIX` 默认是 `media`。
 - `{sourceKeyWithoutExt}` 由媒体库相对路径自动推导，例如 `sample-show/season-01/episode-01`。
-- `media_episodes.media_url` 指向 `hls/index.m3u8` 的公开 URL。
+- `media_episodes.media_url` 指向 `hls/master.m3u8` 的公开 URL。
+- `media_episode_variants` 记录同一个 episode 下的 `720p / 1080p` variant playlist URL、分辨率和带宽信息。
 - `media_episodes.cover_url` 或 `media_seasons.cover_url` 指向封面 URL。
 
 本地静态服务下的 URL 示例：
 
 ```text
-http://127.0.0.1:9000/media/tmp/media/sample-show/season-01/episode-01/hls/index.m3u8
+http://127.0.0.1:9000/media/tmp/media/sample-show/season-01/episode-01/hls/master.m3u8
 http://127.0.0.1:9000/media/tmp/media/sample-show/season-01/episode-01/cover/cover.jpg
 ```
 
 MinIO / S3-compatible 下的 URL 示例：
 
 ```text
-https://cdn.example.com/media/sample-show/season-01/episode-01/hls/index.m3u8
+https://cdn.example.com/media/sample-show/season-01/episode-01/hls/master.m3u8
 https://cdn.example.com/media/sample-show/season-01/episode-01/cover/cover.jpg
 ```
 
@@ -183,6 +181,12 @@ PostgreSQL 保存业务元数据：
 - `media_episodes.episode_label`
 - `media_episodes.source_key`
 - `media_episodes.source_hash`
+- `media_episode_variants.variant_key`
+- `media_episode_variants.playlist_url`
+- `media_episode_variants.width`
+- `media_episode_variants.height`
+- `media_episode_variants.bandwidth_bps`
+- `media_episode_variants.codecs`
 - `media_tags`
 - `media_season_tags`
 
@@ -198,48 +202,61 @@ PostgreSQL 不保存：
 
 媒体源文件应通过 `ffmpeg` 转成 HLS。
 
-第一版建议：
+当前建议：
 
 - HLS segment 时长：4 到 6 秒。
-- 输出 `index.m3u8`。
-- 输出 `.ts` 或 `.m4s` 分片，第一版优先 `.ts`，兼容性更直接。
+- 输出 `master.m3u8`。
+- 默认输出 `720p` 和 `1080p` variant，其中 `1080p` 会在源视频高度不足时自动跳过。
+- 源视频高度低于 720p 时直接失败，因为 720p 是当前产品最低清晰度基线。
+- 输出 `.ts` 分片，第一版优先 `.ts`，兼容性更直接。
 - 保留源视频时长，写入 `media_episodes.duration_ms`。
 - 生成或接收封面图，写入 `media_episodes.cover_url` 或 `media_seasons.cover_url`。
+- 生成后通过 `ffprobe` 校验每个 variant 的实际 `width / height`，不符合目标清晰度则失败。
 
-示例方向：
+手工调试时可以先理解为每个 variant 独立执行一次 ffmpeg，再由 `mediactl` 写出 `master.m3u8`。实际生产命令以 `mediactl ingest` 为准，不建议长期手写分散命令。
 
 ```bash
 ffmpeg -i input.mp4 \
+  -vf scale=-2:720 \
   -c:v libx264 \
   -preset veryfast \
-  -crf 23 \
+  -crf 24 \
+  -profile:v main \
+  -level 3.1 \
   -pix_fmt yuv420p \
   -force_key_frames "expr:gte(t,n_forced*6)" \
   -sc_threshold 0 \
+  -tune fastdecode \
+  -bf 0 \
+  -refs 1 \
+  -maxrate 2200k \
+  -bufsize 4400k \
   -c:a aac \
   -b:a 128k \
   -hls_time 6 \
   -hls_playlist_type vod \
   -hls_flags independent_segments \
   -hls_segment_filename "segment_%05d.ts" \
-  index.m3u8
+  720p/index.m3u8
 ```
 
 注意：HLS 分片应尽量和关键帧对齐。只设置 `-hls_time 6` 不一定能得到稳定 6 秒分片，如果源视频关键帧间隔不规则，playlist 可能出现 9 到 10 秒长分片和 1 秒左右短分片。2 倍速播放会放大这种不稳定，Android 模拟器更容易进入 rebuffer。
 
-当前 `mediactl ingest --dry-run=false` 会固化第一版单码率 HLS 生成参数，避免手工命令分散。
+当前 `mediactl ingest --dry-run=false` 会固化多码率 HLS 生成参数，避免手工命令分散。
 
 第一版实际命令语义：
 
 - 使用 `ffmpeg` 生成 VOD HLS。
 - 默认 segment 时长为 6 秒，可通过 `--hls-segment-seconds` 在 4 到 6 秒之间调整。
-- 输出 `index.m3u8`。
-- 输出 `segment_%05d.ts`。
+- 输出 `master.m3u8`。
+- 输出 `720p/index.m3u8` 和必要时的 `1080p/index.m3u8`。
+- 输出各 variant 目录下的 `segment_%05d.ts`。
 - 使用 `ffprobe` 读取源视频时长，后续写入 `media_episodes.duration_ms`。
+- 使用 `ffprobe` 读取源视频和生成结果的分辨率，确认 variant 清晰度符合 `720p / 1080p` 要求。
 - 自动根据 `--library-root + --input` 推导 `source_key`。
 - 自动根据源文件内容计算 `source_hash`。
 - 不负责上传，上传由 `INT-141` 补齐。
-- 传入 `--write-db` 后可写入 PostgreSQL，当前由 `INT-140` 落地。
+- 传入 `--write-db` 后可写入 PostgreSQL，包含 `media_seasons / media_episodes / media_episode_variants / media_tags / media_season_tags`。
 
 ## CLI-first 入库工具
 
@@ -280,9 +297,9 @@ mediactl ingest \
 - 根据源文件内容自动计算 `source_hash`。
 - 读取媒体存储相关环境变量。
 - 输出 dry-run summary。
-- 在 `--dry-run=false` 时调用 `ffmpeg` 输出单码率 HLS。
+- 在 `--dry-run=false` 时调用 `ffmpeg` 输出多码率 HLS 和 master playlist。
 - 在 `--dry-run=false` 时调用 `ffprobe` 读取源视频时长。
-- 在 `--dry-run=false --write-db` 时写入或更新 `media_seasons / media_episodes`，并写入 `media_tags / media_season_tags`。
+- 在 `--dry-run=false --write-db` 时写入或更新 `media_seasons / media_episodes / media_episode_variants`，并写入 `media_tags / media_season_tags`。
 
 后续任务继续补齐：
 
@@ -314,13 +331,13 @@ Android 侧不直接使用这些变量。Android 继续通过 API 获取 `mediaU
 如果 `MEDIA_LOCAL_ROOT=../media/tmp`，并且 object key 是：
 
 ```text
-media/{mediaItemId}/hls/index.m3u8
+media/{sourceKeyWithoutExt}/hls/master.m3u8
 ```
 
 那么本地文件路径应为：
 
 ```text
-media/tmp/media/{mediaItemId}/hls/index.m3u8
+media/tmp/media/{sourceKeyWithoutExt}/hls/master.m3u8
 ```
 
 本地静态服务可以这样启动：

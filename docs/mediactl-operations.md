@@ -11,8 +11,9 @@ server/cmd/mediactl
 当前已实现：
 
 - `mediactl ingest` dry-run。
-- 本地单码率 HLS 生成。
+- 本地多码率 HLS 生成，默认 `720p,1080p`，不默认生成 4K。
 - 源视频时长探测。
+- 生成后清晰度校验。
 - 基于媒体库目录自动推导 `source_key`。
 - 基于源文件内容自动计算 `source_hash`。
 - PostgreSQL season/episode 元数据 upsert，需要显式传 `--write-db`。
@@ -20,7 +21,6 @@ server/cmd/mediactl
 当前未实现：
 
 - 上传到 MinIO / S3 / OSS / COS / BOS / R2。
-- 多码率 HLS。
 - 字幕、音轨、封面自动截图。
 
 ## 前置条件
@@ -99,7 +99,7 @@ go run ./cmd/mediactl ingest \
 
 ### 生成本地 HLS
 
-传入 `--dry-run=false` 后，CLI 会调用 `ffmpeg` 生成单码率 HLS。
+传入 `--dry-run=false` 后，CLI 会调用 `ffmpeg` 生成多码率 HLS。默认生成 `720p`，源视频高度足够时同时生成 `1080p`。
 
 ```bash
 cd server
@@ -128,10 +128,13 @@ go run ./cmd/mediactl ingest \
 默认产物：
 
 ```text
-index.m3u8
-segment_00000.ts
-segment_00001.ts
-...
+master.m3u8
+720p/index.m3u8
+720p/segment_00000.ts
+720p/segment_00001.ts
+1080p/index.m3u8
+1080p/segment_00000.ts
+1080p/segment_00001.ts
 ```
 
 输出 summary 中会包含：
@@ -212,6 +215,7 @@ go run ./cmd/mediactl ingest \
 | `--cover` | 否 | 封面文件路径，当前只校验存在，后续由 `INT-141` 上传。 |
 | `--output-dir` | 否 | 覆盖 HLS 输出目录，适合临时测试。 |
 | `--hls-segment-seconds` | 否 | HLS 分片时长，允许 4 到 6 秒，默认 6。 |
+| `--renditions` | 否 | 逗号分隔输出清晰度，默认 `720p,1080p`。当前支持 `720p / 1080p`，且必须包含 `720p`。 |
 | `--upload` | 否 | 当前只记录上传意图，后续由 `INT-141` 实现。 |
 | `--write-db` | 否 | HLS 成功生成后写入 PostgreSQL。 |
 | `--database-url` | 否 | 覆盖 `DATABASE_URL`。 |
@@ -221,33 +225,36 @@ go run ./cmd/mediactl ingest \
 
 当前规则：
 
-- 单码率 HLS。
-- VOD playlist。
-- 输出 `index.m3u8`。
-- 输出 `.ts` 分片。
-- 分片命名：`segment_%05d.ts`。
+- 多码率 VOD HLS。
+- 输出 `master.m3u8` 作为播放入口。
+- 默认生成 `720p/index.m3u8` 和 `1080p/index.m3u8`。
+- 如果源视频高度不足 1080p，会自动跳过 1080p。
+- 如果源视频高度低于 720p，会直接失败，因为 720p 是当前同步播放器的最低清晰度基线。
+- 各 variant 输出 `.ts` 分片。
+- 各 variant 分片命名：`segment_%05d.ts`。
 - 默认分片时长：6 秒。
 - 允许分片时长：4 到 6 秒。
 - 使用 `libx264 + aac` 重新编码。
+- 720p 使用 `fastdecode + no B-frames` 的偏稳配置，优先降低 Android 模拟器和中低端设备的 1.5x/2.0x 解码压力。
 - 通过 `-force_key_frames` 让 HLS 分片边界尽量对齐关键帧。
 - 使用 `-hls_flags independent_segments` 标记独立分片，降低 Android/ExoPlayer 在 seek、倍速和 rebuffer 场景下的解码压力。
 - 使用 `ffprobe` 读取 `durationMs`。
+- 生成后使用 `ffprobe` 校验每个 variant 的实际分辨率，确保 `720p / 1080p` 输出符合目标清晰度。
 
 当前不做：
 
-- 多码率 master playlist。
 - DRM。
 - 字幕处理。
 - 多音轨处理。
 - 自动封面截图。
-- 视频画质参数精细调优。
+- 4K 转码。
 
 ## 本地播放验证
 
 如果 HLS 输出到了：
 
 ```text
-media/tmp/media/sample-show/season-01/episode-01/hls/index.m3u8
+media/tmp/media/sample-show/season-01/episode-01/hls/master.m3u8
 ```
 
 可以在仓库根目录启动静态服务：
@@ -259,13 +266,13 @@ python3 -m http.server 9000
 本机访问地址：
 
 ```text
-http://127.0.0.1:9000/media/tmp/media/sample-show/season-01/episode-01/hls/index.m3u8
+http://127.0.0.1:9000/media/tmp/media/sample-show/season-01/episode-01/hls/master.m3u8
 ```
 
 Android 模拟器访问宿主机时通常使用：
 
 ```text
-http://10.0.2.2:9000/media/tmp/media/sample-show/season-01/episode-01/hls/index.m3u8
+http://10.0.2.2:9000/media/tmp/media/sample-show/season-01/episode-01/hls/master.m3u8
 ```
 
 ## 与数据库的关系
@@ -292,6 +299,13 @@ http://10.0.2.2:9000/media/tmp/media/sample-show/season-01/episode-01/hls/index.
 - `media_episodes.episode_label`
 - `media_episodes.source_key`
 - `media_episodes.source_hash`
+- `media_episode_variants.variant_key`
+- `media_episode_variants.label`
+- `media_episode_variants.playlist_url`
+- `media_episode_variants.width`
+- `media_episode_variants.height`
+- `media_episode_variants.bandwidth_bps`
+- `media_episode_variants.codecs`
 - `media_tags`
 - `media_season_tags`
 
@@ -378,26 +392,27 @@ export FFPROBE_BIN=/absolute/path/to/ffprobe
 
 - 静态服务是否启动。
 - Android 使用的是 `10.0.2.2` 而不是 `127.0.0.1`。
-- `index.m3u8` 和 `.ts` 分片是否都能通过浏览器访问。
-- PostgreSQL 中 `media_episodes.media_url` 是否指向 `index.m3u8`。
+- `master.m3u8`、variant `index.m3u8` 和 `.ts` 分片是否都能通过浏览器访问。
+- PostgreSQL 中 `media_episodes.media_url` 是否指向 `master.m3u8`。
+- PostgreSQL 中 `media_episode_variants` 是否存在同一 episode 下的 `720p` 记录。
 
 本机浏览器可以访问：
 
 ```text
-http://127.0.0.1:9000/media/tmp/media/sample-show/season-01/episode-01-720p/hls/index.m3u8
+http://127.0.0.1:9000/media/tmp/media/sample-show/season-01/episode-01/hls/master.m3u8
 ```
 
 但 Android 模拟器应该使用：
 
 ```text
-http://10.0.2.2:9000/media/tmp/media/sample-show/season-01/episode-01-720p/hls/index.m3u8
+http://10.0.2.2:9000/media/tmp/media/sample-show/season-01/episode-01/hls/master.m3u8
 ```
 
 如果需要直接更新本地 PostgreSQL：
 
 ```sql
 UPDATE media_episodes
-SET media_url = 'http://10.0.2.2:9000/media/tmp/media/sample-show/season-01/episode-01-720p/hls/index.m3u8'
+SET media_url = 'http://10.0.2.2:9000/media/tmp/media/sample-show/season-01/episode-01/hls/master.m3u8'
 WHERE id = '40000000-0000-0000-0000-000000000001';
 ```
 
@@ -406,8 +421,8 @@ WHERE id = '40000000-0000-0000-0000-000000000001';
 如果 Android 能访问资源但播放中频繁 `BUFFERING`，先用本机工具排除 HLS 封装问题：
 
 ```bash
-ffprobe -hide_banner media/tmp/sample_001/index.m3u8
-ffmpeg -v warning -i media/tmp/sample_001/index.m3u8 -f null -
+ffprobe -hide_banner media/tmp/media/sample-show/season-01/episode-01/hls/master.m3u8
+ffmpeg -v warning -i media/tmp/media/sample-show/season-01/episode-01/hls/master.m3u8 -f null -
 ```
 
 - `ffprobe` 应该能识别出 `h264` 视频流、`aac` 音频流和正确时长。

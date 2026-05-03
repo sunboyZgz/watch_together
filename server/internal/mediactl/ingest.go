@@ -29,6 +29,7 @@ const (
 	defaultFFmpegExecutable  = "ffmpeg"
 	defaultFFprobeExecutable = "ffprobe"
 	defaultHLSSegmentTime    = 6
+	defaultRenditions        = "720p,1080p"
 )
 
 // EnvLookup reads environment values while keeping command parsing testable.
@@ -71,6 +72,7 @@ type IngestOptions struct {
 	Cover          string        `json:"cover,omitempty"`
 	OutputDir      string        `json:"outputDir,omitempty"`
 	HLSSegment     int           `json:"hlsSegmentSeconds"`
+	Renditions     []string      `json:"renditions"`
 	Upload         bool          `json:"upload"`
 	WriteDB        bool          `json:"writeDb"`
 	DryRun         bool          `json:"dryRun"`
@@ -81,10 +83,11 @@ type IngestOptions struct {
 // IngestSummary reports either planned or completed local ingest work.
 type IngestSummary struct {
 	IngestOptions
-	HLSPlaylistPath string `json:"hlsPlaylistPath,omitempty"`
-	MediaURL        string `json:"mediaUrl,omitempty"`
-	DurationMs      int64  `json:"durationMs,omitempty"`
-	DatabaseUpsert  bool   `json:"databaseUpsert"`
+	HLSPlaylistPath string       `json:"hlsPlaylistPath,omitempty"`
+	MediaURL        string       `json:"mediaUrl,omitempty"`
+	DurationMs      int64        `json:"durationMs,omitempty"`
+	Variants        []HLSVariant `json:"variants,omitempty"`
+	DatabaseUpsert  bool         `json:"databaseUpsert"`
 }
 
 // Run executes the mediactl command and returns a process-style exit code.
@@ -132,6 +135,7 @@ func runIngest(args []string, getenv EnvLookup, stdout io.Writer, stderr io.Writ
 	summary.HLSPlaylistPath = result.PlaylistPath
 	summary.DurationMs = result.DurationMs
 	summary.MediaURL = publicMediaURL(options)
+	summary.Variants = result.Variants
 
 	if options.WriteDB {
 		if err := UpsertMediaMetadata(context.Background(), options, result); err != nil {
@@ -162,6 +166,7 @@ func ParseIngestOptions(args []string, getenv EnvLookup, stderr io.Writer) (Inge
 
 	var tags string
 	var searchAliases string
+	var renditions string
 	options := IngestOptions{DryRun: true, HLSSegment: defaultHLSSegmentTime}
 	flags.StringVar(&options.MediaID, "media-id", "", "legacy media id override; normal ingest should use --library-root")
 	flags.StringVar(&options.Input, "input", "", "source video file path")
@@ -179,6 +184,7 @@ func ParseIngestOptions(args []string, getenv EnvLookup, stderr io.Writer) (Inge
 	flags.StringVar(&options.Cover, "cover", "", "optional cover image path")
 	flags.StringVar(&options.OutputDir, "output-dir", "", "optional HLS output directory")
 	flags.IntVar(&options.HLSSegment, "hls-segment-seconds", defaultHLSSegmentTime, "HLS segment duration in seconds")
+	flags.StringVar(&renditions, "renditions", defaultRenditions, "comma-separated HLS renditions; supported values: 720p,1080p")
 	flags.BoolVar(&options.Upload, "upload", false, "request upload in later ingest stages")
 	flags.BoolVar(&options.WriteDB, "write-db", false, "upsert media metadata into PostgreSQL after local HLS generation")
 	flags.StringVar(&options.DatabaseURL, "database-url", "", "PostgreSQL connection string; falls back to DATABASE_URL")
@@ -206,6 +212,7 @@ func ParseIngestOptions(args []string, getenv EnvLookup, stderr io.Writer) (Inge
 	options.OutputDir = strings.TrimSpace(options.OutputDir)
 	options.Tags = splitTags(tags)
 	options.SearchAliases = splitTags(searchAliases)
+	options.Renditions = splitTags(renditions)
 	options.Storage = LoadStorageConfig(getenv)
 	if strings.TrimSpace(options.DatabaseURL) == "" {
 		options.DatabaseURL = strings.TrimSpace(getenv("DATABASE_URL"))
@@ -222,6 +229,12 @@ func ParseIngestOptions(args []string, getenv EnvLookup, stderr io.Writer) (Inge
 	}
 	if options.HLSSegment < 4 || options.HLSSegment > 6 {
 		return IngestOptions{}, errors.New("--hls-segment-seconds must be between 4 and 6")
+	}
+	if len(options.Renditions) == 0 {
+		return IngestOptions{}, errors.New("--renditions must include at least one rendition")
+	}
+	if _, err := ResolveRenditionSpecs(options.Renditions); err != nil {
+		return IngestOptions{}, err
 	}
 	if options.WriteDB && options.DryRun {
 		return IngestOptions{}, errors.New("--write-db requires --dry-run=false")
@@ -281,7 +294,11 @@ func UpsertMediaMetadata(ctx context.Context, options IngestOptions, result HLSR
 	if err != nil {
 		return err
 	}
-	if err := upsertMediaEpisode(ctx, tx, seasonID, options, result); err != nil {
+	episodeID, err := upsertMediaEpisode(ctx, tx, seasonID, options, result)
+	if err != nil {
+		return err
+	}
+	if err := replaceMediaEpisodeVariants(ctx, tx, episodeID, result.Variants); err != nil {
 		return err
 	}
 	if err := replaceMediaSeasonTags(ctx, tx, seasonID, options.Tags); err != nil {
@@ -353,7 +370,7 @@ func upsertMediaSeason(ctx context.Context, tx *sql.Tx, options IngestOptions) (
 	return seasonID, nil
 }
 
-func upsertMediaEpisode(ctx context.Context, tx *sql.Tx, seasonID string, options IngestOptions, result HLSResult) error {
+func upsertMediaEpisode(ctx context.Context, tx *sql.Tx, seasonID string, options IngestOptions, result HLSResult) (string, error) {
 	const query = `
 		INSERT INTO media_episodes (
 			season_id,
@@ -386,8 +403,10 @@ func upsertMediaEpisode(ctx context.Context, tx *sql.Tx, seasonID string, option
 			source_hash = EXCLUDED.source_hash,
 			status = EXCLUDED.status,
 			updated_at = NOW()
+		RETURNING id::text
 	`
-	if _, err := tx.ExecContext(
+	var episodeID string
+	if err := tx.QueryRowContext(
 		ctx,
 		query,
 		seasonID,
@@ -401,10 +420,10 @@ func upsertMediaEpisode(ctx context.Context, tx *sql.Tx, seasonID string, option
 		options.EpisodeLabel,
 		options.SourceKey,
 		options.SourceHash,
-	); err != nil {
-		return fmt.Errorf("upsert media episode: %w", err)
+	).Scan(&episodeID); err != nil {
+		return "", fmt.Errorf("upsert media episode: %w", err)
 	}
-	return nil
+	return episodeID, nil
 }
 
 func replaceMediaSeasonTags(ctx context.Context, tx *sql.Tx, seasonID string, tags []string) error {
@@ -427,6 +446,42 @@ func replaceMediaSeasonTags(ctx context.Context, tx *sql.Tx, seasonID string, ta
 			tagID,
 		); err != nil {
 			return fmt.Errorf("link media tag %q: %w", slug, err)
+		}
+	}
+	return nil
+}
+
+func replaceMediaEpisodeVariants(ctx context.Context, tx *sql.Tx, episodeID string, variants []HLSVariant) error {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM media_episode_variants WHERE media_episode_id = $1`, episodeID); err != nil {
+		return fmt.Errorf("clear media episode variants: %w", err)
+	}
+	for _, variant := range variants {
+		if _, err := tx.ExecContext(
+			ctx,
+			`INSERT INTO media_episode_variants (
+				media_episode_id,
+				variant_key,
+				label,
+				playlist_url,
+				width,
+				height,
+				bandwidth_bps,
+				codecs,
+				is_default,
+				sort_order
+			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+			episodeID,
+			variant.Key,
+			variant.Label,
+			variant.PlaylistURL,
+			nullableInt(variant.Width),
+			nullableInt(variant.Height),
+			nullableInt(variant.BandwidthBps),
+			nullableString(variant.Codecs),
+			variant.IsDefault,
+			variant.SortOrder,
+		); err != nil {
+			return fmt.Errorf("insert media episode variant %q: %w", variant.Key, err)
 		}
 	}
 	return nil
@@ -470,22 +525,106 @@ type HLSResult struct {
 	OutputDir    string
 	PlaylistPath string
 	DurationMs   int64
+	Variants     []HLSVariant
 }
 
-// GenerateHLS creates a single-bitrate VOD HLS output with ffmpeg.
+// HLSVariant records one generated rendition under the episode master playlist.
+type HLSVariant struct {
+	Key          string `json:"key"`
+	Label        string `json:"label"`
+	PlaylistPath string `json:"playlistPath,omitempty"`
+	PlaylistURL  string `json:"playlistUrl"`
+	Width        int    `json:"width,omitempty"`
+	Height       int    `json:"height,omitempty"`
+	BandwidthBps int    `json:"bandwidthBps,omitempty"`
+	Codecs       string `json:"codecs,omitempty"`
+	IsDefault    bool   `json:"isDefault"`
+	SortOrder    int    `json:"sortOrder"`
+}
+
+// RenditionSpec describes one supported HLS output ladder rung.
+type RenditionSpec struct {
+	Key            string
+	Label          string
+	TargetHeight   int
+	BandwidthBps   int
+	CRF            string
+	MaxRate        string
+	BufSize        string
+	Profile        string
+	Level          string
+	Codecs         string
+	Tune           string
+	DisableBFrames bool
+	IsDefault      bool
+	SortOrder      int
+}
+
+// VideoMetadata is the small ffprobe result needed for quality checks.
+type VideoMetadata struct {
+	Width  int
+	Height int
+}
+
+// GenerateHLS creates a multi-rendition VOD HLS output with a master playlist.
 func GenerateHLS(options IngestOptions) (HLSResult, error) {
 	outputDir := resolveOutputDir(options)
 	if err := os.MkdirAll(outputDir, 0o755); err != nil {
 		return HLSResult{}, fmt.Errorf("create hls output directory: %w", err)
 	}
 
-	playlistPath := filepath.Join(outputDir, "index.m3u8")
-	segmentPattern := filepath.Join(outputDir, "segment_%05d.ts")
-	args := BuildFFmpegHLSArgs(options.Input, playlistPath, segmentPattern, options.HLSSegment)
+	sourceMetadata, err := ProbeVideoMetadata(options.Storage.FFprobeBin, options.Input)
+	if err != nil {
+		return HLSResult{}, err
+	}
+	specs, err := ResolveRenditionSpecs(options.Renditions)
+	if err != nil {
+		return HLSResult{}, err
+	}
+	specs, err = SelectRenditionSpecsForSource(sourceMetadata, specs)
+	if err != nil {
+		return HLSResult{}, err
+	}
 
-	cmd := exec.Command(options.Storage.FFmpegBin, args...)
-	if output, err := cmd.CombinedOutput(); err != nil {
-		return HLSResult{}, fmt.Errorf("ffmpeg hls generation failed: %w: %s", err, strings.TrimSpace(string(output)))
+	variants := make([]HLSVariant, 0, len(specs))
+	for _, spec := range specs {
+		variantDir := filepath.Join(outputDir, spec.Key)
+		if err := os.MkdirAll(variantDir, 0o755); err != nil {
+			return HLSResult{}, fmt.Errorf("create hls variant directory %q: %w", spec.Key, err)
+		}
+		playlistPath := filepath.Join(variantDir, "index.m3u8")
+		segmentPattern := filepath.Join(variantDir, "segment_%05d.ts")
+		args := BuildFFmpegVariantHLSArgs(options.Input, playlistPath, segmentPattern, options.HLSSegment, spec)
+
+		cmd := exec.Command(options.Storage.FFmpegBin, args...)
+		if output, err := cmd.CombinedOutput(); err != nil {
+			return HLSResult{}, fmt.Errorf("ffmpeg hls generation failed for %s: %w: %s", spec.Key, err, strings.TrimSpace(string(output)))
+		}
+
+		variantMetadata, err := ProbeVideoMetadata(options.Storage.FFprobeBin, playlistPath)
+		if err != nil {
+			return HLSResult{}, fmt.Errorf("probe generated %s playlist: %w", spec.Key, err)
+		}
+		if err := ValidateGeneratedRendition(sourceMetadata, variantMetadata, spec); err != nil {
+			return HLSResult{}, err
+		}
+		variants = append(variants, HLSVariant{
+			Key:          spec.Key,
+			Label:        spec.Label,
+			PlaylistPath: playlistPath,
+			PlaylistURL:  publicVariantURL(options, spec.Key),
+			Width:        variantMetadata.Width,
+			Height:       variantMetadata.Height,
+			BandwidthBps: spec.BandwidthBps,
+			Codecs:       spec.Codecs,
+			IsDefault:    spec.IsDefault,
+			SortOrder:    spec.SortOrder,
+		})
+	}
+
+	masterPlaylistPath := filepath.Join(outputDir, "master.m3u8")
+	if err := WriteMasterPlaylist(masterPlaylistPath, variants); err != nil {
+		return HLSResult{}, err
 	}
 
 	durationMs, err := ProbeDurationMs(options.Storage.FFprobeBin, options.Input)
@@ -495,13 +634,228 @@ func GenerateHLS(options IngestOptions) (HLSResult, error) {
 
 	return HLSResult{
 		OutputDir:    outputDir,
-		PlaylistPath: playlistPath,
+		PlaylistPath: masterPlaylistPath,
 		DurationMs:   durationMs,
+		Variants:     variants,
 	}, nil
 }
 
-// BuildFFmpegHLSArgs returns the single-bitrate HLS command used by INT-139.
+// ResolveRenditionSpecs validates user-facing rendition keys and maps them to encoding settings.
+func ResolveRenditionSpecs(keys []string) ([]RenditionSpec, error) {
+	supported := map[string]RenditionSpec{
+		"720p": {
+			Key:            "720p",
+			Label:          "720p",
+			TargetHeight:   720,
+			BandwidthBps:   2_000_000,
+			CRF:            "24",
+			MaxRate:        "2200k",
+			BufSize:        "4400k",
+			Profile:        "main",
+			Level:          "3.1",
+			Codecs:         "avc1.4d401f,mp4a.40.2",
+			Tune:           "fastdecode",
+			DisableBFrames: true,
+			IsDefault:      true,
+			SortOrder:      0,
+		},
+		"1080p": {
+			Key:          "1080p",
+			Label:        "1080p",
+			TargetHeight: 1080,
+			BandwidthBps: 5_000_000,
+			CRF:          "22",
+			MaxRate:      "5200k",
+			BufSize:      "10400k",
+			Profile:      "high",
+			Level:        "4.0",
+			Codecs:       "avc1.640028,mp4a.40.2",
+			SortOrder:    1,
+		},
+	}
+
+	specs := make([]RenditionSpec, 0, len(keys))
+	seen := make(map[string]struct{}, len(keys))
+	has720p := false
+	for _, rawKey := range keys {
+		key := strings.ToLower(strings.TrimSpace(rawKey))
+		if key == "" {
+			continue
+		}
+		spec, ok := supported[key]
+		if !ok {
+			return nil, fmt.Errorf("unsupported rendition %q; supported values are 720p,1080p", rawKey)
+		}
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		if key == "720p" {
+			has720p = true
+		}
+		specs = append(specs, spec)
+	}
+	if len(specs) == 0 {
+		return nil, errors.New("--renditions must include at least one rendition")
+	}
+	if !has720p {
+		return nil, errors.New("--renditions must include 720p as the baseline playback variant")
+	}
+	return specs, nil
+}
+
+// SelectRenditionSpecsForSource skips variants above source resolution while preserving 720p as the minimum product baseline.
+func SelectRenditionSpecsForSource(source VideoMetadata, specs []RenditionSpec) ([]RenditionSpec, error) {
+	if source.Height < 720 {
+		return nil, fmt.Errorf("source video height %dp is below the required 720p baseline", source.Height)
+	}
+	selected := make([]RenditionSpec, 0, len(specs))
+	for _, spec := range specs {
+		if spec.TargetHeight > source.Height {
+			continue
+		}
+		selected = append(selected, spec)
+	}
+	if len(selected) == 0 {
+		return nil, fmt.Errorf("no requested renditions can be generated from source height %dp", source.Height)
+	}
+	if selected[0].Key != "720p" {
+		selected[0].IsDefault = true
+	}
+	return selected, nil
+}
+
+// ValidateGeneratedRendition fails fast when ffmpeg output does not match the requested quality rung.
+func ValidateGeneratedRendition(source VideoMetadata, generated VideoMetadata, spec RenditionSpec) error {
+	if generated.Height != spec.TargetHeight {
+		return fmt.Errorf("generated %s height mismatch: expected %dp from source %dp, got %dp", spec.Key, spec.TargetHeight, source.Height, generated.Height)
+	}
+	if generated.Width <= 0 {
+		return fmt.Errorf("generated %s width must be positive, got %d", spec.Key, generated.Width)
+	}
+	return nil
+}
+
+// BuildFFmpegHLSArgs returns the baseline HLS command used by tests and single-variant callers.
 func BuildFFmpegHLSArgs(input string, playlistPath string, segmentPattern string, segmentSeconds int) []string {
+	specs, _ := ResolveRenditionSpecs([]string{"720p"})
+	return BuildFFmpegVariantHLSArgs(input, playlistPath, segmentPattern, segmentSeconds, specs[0])
+}
+
+// BuildFFmpegVariantHLSArgs returns the ffmpeg command for one HLS rendition.
+func BuildFFmpegVariantHLSArgs(input string, playlistPath string, segmentPattern string, segmentSeconds int, spec RenditionSpec) []string {
+	args := []string{
+		"-y",
+		"-i", input,
+		"-vf", fmt.Sprintf("scale=-2:%d", spec.TargetHeight),
+		"-c:v", "libx264",
+		"-preset", "veryfast",
+		"-crf", spec.CRF,
+		"-profile:v", spec.Profile,
+		"-level", spec.Level,
+		"-pix_fmt", "yuv420p",
+		"-force_key_frames", fmt.Sprintf("expr:gte(t,n_forced*%d)", segmentSeconds),
+		"-sc_threshold", "0",
+	}
+	if spec.Tune != "" {
+		args = append(args, "-tune", spec.Tune)
+	}
+	if spec.DisableBFrames {
+		args = append(args, "-bf", "0", "-refs", "1")
+	}
+	if spec.MaxRate != "" {
+		args = append(args, "-maxrate", spec.MaxRate, "-bufsize", spec.BufSize)
+	}
+	args = append(args,
+		"-c:a", "aac",
+		"-b:a", "128k",
+		"-hls_time", strconv.Itoa(segmentSeconds),
+		"-hls_playlist_type", "vod",
+		"-hls_flags", "independent_segments",
+		"-hls_segment_filename", segmentPattern,
+		playlistPath,
+	)
+	return args
+}
+
+// WriteMasterPlaylist writes the adaptive HLS master playlist for all generated variants.
+func WriteMasterPlaylist(path string, variants []HLSVariant) error {
+	if len(variants) == 0 {
+		return errors.New("master playlist requires at least one variant")
+	}
+	var builder strings.Builder
+	builder.WriteString("#EXTM3U\n")
+	builder.WriteString("#EXT-X-VERSION:6\n")
+	builder.WriteString("#EXT-X-INDEPENDENT-SEGMENTS\n")
+	for _, variant := range variants {
+		if variant.Width <= 0 || variant.Height <= 0 {
+			return fmt.Errorf("variant %q has invalid resolution %dx%d", variant.Key, variant.Width, variant.Height)
+		}
+		builder.WriteString(fmt.Sprintf(
+			"#EXT-X-STREAM-INF:BANDWIDTH=%d,RESOLUTION=%dx%d,CODECS=\"%s\"\n",
+			variant.BandwidthBps,
+			variant.Width,
+			variant.Height,
+			variant.Codecs,
+		))
+		builder.WriteString(fmt.Sprintf("%s/index.m3u8\n", variant.Key))
+	}
+	if err := os.WriteFile(path, []byte(builder.String()), 0o644); err != nil {
+		return fmt.Errorf("write master playlist: %w", err)
+	}
+	return nil
+}
+
+// ParseVideoMetadata parses ffprobe's compact width/height output.
+func ParseVideoMetadata(output string) (VideoMetadata, error) {
+	trimmed := firstNonEmptyLine(output)
+	parts := strings.Split(trimmed, "x")
+	if len(parts) != 2 {
+		return VideoMetadata{}, fmt.Errorf("parse ffprobe video metadata %q", strings.TrimSpace(output))
+	}
+	width, err := strconv.Atoi(strings.TrimSpace(parts[0]))
+	if err != nil {
+		return VideoMetadata{}, fmt.Errorf("parse ffprobe width %q: %w", parts[0], err)
+	}
+	height, err := strconv.Atoi(strings.TrimSpace(parts[1]))
+	if err != nil {
+		return VideoMetadata{}, fmt.Errorf("parse ffprobe height %q: %w", parts[1], err)
+	}
+	if width <= 0 || height <= 0 {
+		return VideoMetadata{}, fmt.Errorf("ffprobe video dimensions must be positive, got %dx%d", width, height)
+	}
+	return VideoMetadata{Width: width, Height: height}, nil
+}
+
+func firstNonEmptyLine(output string) string {
+	for _, line := range strings.Split(output, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
+}
+
+// ProbeVideoMetadata reads the first video stream's width and height with ffprobe.
+func ProbeVideoMetadata(ffprobeBin string, input string) (VideoMetadata, error) {
+	cmd := exec.Command(
+		ffprobeBin,
+		"-v", "error",
+		"-select_streams", "v:0",
+		"-show_entries", "stream=width,height",
+		"-of", "csv=s=x:p=0",
+		input,
+	)
+	output, err := cmd.Output()
+	if err != nil {
+		return VideoMetadata{}, fmt.Errorf("ffprobe video metadata failed: %w", err)
+	}
+	return ParseVideoMetadata(string(output))
+}
+
+// BuildLegacySingleBitrateHLSArgs is kept for old call-site compatibility.
+func BuildLegacySingleBitrateHLSArgs(input string, playlistPath string, segmentPattern string, segmentSeconds int) []string {
 	return []string{
 		"-y",
 		"-i", input,
@@ -552,14 +906,18 @@ func resolveOutputDir(options IngestOptions) string {
 }
 
 func plannedPlaylistPath(options IngestOptions) string {
-	if options.OutputDir == "" && options.MediaID == "" {
+	if options.SourceKey == "" && options.OutputDir == "" {
 		return ""
 	}
-	return filepath.Join(resolveOutputDir(options), "index.m3u8")
+	return filepath.Join(resolveOutputDir(options), "master.m3u8")
 }
 
 func publicMediaURL(options IngestOptions) string {
-	return joinURLPath(options.Storage.PublicBaseURL, sourceObjectKey(options), "hls", "index.m3u8")
+	return joinURLPath(options.Storage.PublicBaseURL, sourceObjectKey(options), "hls", "master.m3u8")
+}
+
+func publicVariantURL(options IngestOptions, variantKey string) string {
+	return joinURLPath(options.Storage.PublicBaseURL, sourceObjectKey(options), "hls", variantKey, "index.m3u8")
 }
 
 func plannedMediaURL(options IngestOptions) string {
@@ -720,6 +1078,21 @@ func nullableInt64(value *int) sql.NullInt64 {
 		return sql.NullInt64{}
 	}
 	return sql.NullInt64{Int64: int64(*value), Valid: true}
+}
+
+func nullableInt(value int) sql.NullInt64 {
+	if value <= 0 {
+		return sql.NullInt64{}
+	}
+	return sql.NullInt64{Int64: int64(value), Valid: true}
+}
+
+func nullableString(value string) sql.NullString {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return sql.NullString{}
+	}
+	return sql.NullString{String: trimmed, Valid: true}
 }
 
 func requireExistingFile(path string, flagName string) error {

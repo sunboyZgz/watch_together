@@ -58,6 +58,7 @@ internal fun PlayerCoreShell(
     duration: Long,
     isPlaying: Boolean,
     playbackSpeed: Float,
+    videoQualityLabel: String,
     controlHint: String,
     playbackButtonEnabled: Boolean,
     secondaryControlsEnabled: Boolean,
@@ -76,6 +77,7 @@ internal fun PlayerCoreShell(
             adapter = adapter,
             isPlaying = isPlaying,
             playbackSpeed = playbackSpeed,
+            videoQualityLabel = videoQualityLabel,
             controlHint = controlHint,
             playbackButtonEnabled = playbackButtonEnabled,
             secondaryControlsEnabled = secondaryControlsEnabled,
@@ -98,6 +100,7 @@ private fun PlayerViewport(
     adapter: PlayerAdapter,
     isPlaying: Boolean,
     playbackSpeed: Float,
+    videoQualityLabel: String,
     controlHint: String,
     playbackButtonEnabled: Boolean,
     secondaryControlsEnabled: Boolean,
@@ -133,6 +136,7 @@ private fun PlayerViewport(
         adapter = adapter,
         isPlaying = isPlaying,
         playbackSpeed = playbackSpeed,
+        videoQualityLabel = videoQualityLabel,
         controlHint = controlHint,
         playbackButtonEnabled = playbackButtonEnabled,
         secondaryControlsEnabled = secondaryControlsEnabled,
@@ -183,6 +187,7 @@ private fun PlayerViewport(
                 adapter = adapter,
                 isPlaying = isPlaying,
                 playbackSpeed = playbackSpeed,
+                videoQualityLabel = videoQualityLabel,
                 controlHint = controlHint,
                 playbackButtonEnabled = playbackButtonEnabled,
                 secondaryControlsEnabled = secondaryControlsEnabled,
@@ -229,6 +234,7 @@ private fun PlayerSurface(
     adapter: PlayerAdapter,
     isPlaying: Boolean,
     playbackSpeed: Float,
+    videoQualityLabel: String,
     controlHint: String,
     playbackButtonEnabled: Boolean,
     secondaryControlsEnabled: Boolean,
@@ -282,6 +288,12 @@ private fun PlayerSurface(
             )
 
             if (controlsVisible) {
+                QualityPill(
+                    label = videoQualityLabel,
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(12.dp)
+                )
                 PlayerOverlayControls(
                     isPlaying = isPlaying,
                     playbackSpeed = playbackSpeed,
@@ -299,6 +311,38 @@ private fun PlayerSurface(
                     modifier = Modifier.align(Alignment.BottomCenter)
                 )
             }
+        }
+    }
+}
+
+@Composable
+private fun QualityPill(
+    label: String,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        modifier = modifier,
+        color = Color(0xA6121420),
+        shape = RoundedCornerShape(999.dp),
+        border = BorderStroke(1.dp, Color(0x18FFFFFF))
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(6.dp)
+                    .clip(CircleShape)
+                    .background(PlayerAccent)
+            )
+            Text(
+                text = label,
+                color = PlayerText,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold
+            )
         }
     }
 }

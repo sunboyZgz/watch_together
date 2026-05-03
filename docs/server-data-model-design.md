@@ -99,7 +99,39 @@
 
 - `source_key` 由媒体库相对路径自动推导，例如 `violet-evergarden/season-01/episode-09.mp4`。
 - `source_hash` 由源文件内容计算，用于识别源文件是否变化。
-- `media_url` 指向 HLS `index.m3u8` 的可播放公开 URL。
+- `media_url` 指向 HLS `master.m3u8` 的可播放公开 URL。
+- 一集可以拥有多个清晰度 variant，具体 variant URL 不重复塞进 `media_episodes`，而是进入 `media_episode_variants`。
+
+### `media_episode_variants`
+
+用途：
+
+- 记录同一个 `media_episodes` 下的多码率播放资源
+- 让 `mediactl` 生成 `720p / 1080p` 后可以把每个 variant 的 URL、分辨率、带宽写入数据库
+- 支撑后续播放端按网络、设备能力、倍速播放压力选择更合适的清晰度
+
+核心字段：
+
+- `id`
+- `media_episode_id`
+- `variant_key`
+- `label`
+- `playlist_url`
+- `width`
+- `height`
+- `bandwidth_bps`
+- `codecs`
+- `is_default`
+- `sort_order`
+- `created_at`
+- `updated_at`
+
+说明：
+
+- `variant_key` 当前支持 `720p / 1080p`。
+- 默认不生成 4K；大多数项目资源没有 4K，且同步播放器当前优先稳定 720p 以上体验。
+- `media_episodes.media_url` 仍作为 Android 播放入口，指向 master playlist。
+- `media_episode_variants.playlist_url` 指向具体 variant 的 `index.m3u8`。
 
 ### `media_tags`
 
@@ -218,6 +250,7 @@
 - `users (1) -> (n) user_media_progress`
 - `rooms (1) -> (n) room_members`
 - `media_seasons (1) -> (n) media_episodes`
+- `media_episodes (1) -> (n) media_episode_variants`
 - `media_episodes (1) -> (n) rooms`
 - `media_episodes (1) -> (n) user_media_progress`
 - `media_seasons (n) -> (n) media_tags`，通过 `media_season_tags`

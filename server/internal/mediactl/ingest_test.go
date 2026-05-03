@@ -75,6 +75,9 @@ func TestParseIngestOptionsBuildsDryRunContract(t *testing.T) {
 	if options.HLSSegment != 4 {
 		t.Fatalf("expected hls segment 4, got %d", options.HLSSegment)
 	}
+	if got := strings.Join(options.Renditions, ","); got != "720p,1080p" {
+		t.Fatalf("expected default renditions, got %q", got)
+	}
 	if !options.DryRun {
 		t.Fatalf("expected dry run by default")
 	}
@@ -217,12 +220,20 @@ func TestBuildFFmpegHLSArgs(t *testing.T) {
 	joined := strings.Join(args, " ")
 	for _, want := range []string{
 		"-i input.mp4",
+		"-vf scale=-2:720",
 		"-c:v libx264",
 		"-preset veryfast",
-		"-crf 23",
+		"-crf 24",
+		"-profile:v main",
+		"-level 3.1",
 		"-pix_fmt yuv420p",
 		"-force_key_frames expr:gte(t,n_forced*6)",
 		"-sc_threshold 0",
+		"-tune fastdecode",
+		"-bf 0",
+		"-refs 1",
+		"-maxrate 2200k",
+		"-bufsize 4400k",
 		"-c:a aac",
 		"-b:a 128k",
 		"-hls_time 6",
@@ -247,9 +258,106 @@ func TestPlannedMediaURLUsesStableObjectKey(t *testing.T) {
 	}
 
 	got := plannedMediaURL(options)
-	want := "http://127.0.0.1:9000/media/tmp/media/violet-evergarden/season-01/episode-09/hls/index.m3u8"
+	want := "http://127.0.0.1:9000/media/tmp/media/violet-evergarden/season-01/episode-09/hls/master.m3u8"
 	if got != want {
 		t.Fatalf("expected media url %q, got %q", want, got)
+	}
+}
+
+func TestResolveRenditionSpecsRequires720pBaseline(t *testing.T) {
+	_, err := ResolveRenditionSpecs([]string{"1080p"})
+	if err == nil {
+		t.Fatalf("expected missing 720p to fail")
+	}
+	if !strings.Contains(err.Error(), "must include 720p") {
+		t.Fatalf("expected baseline error, got %v", err)
+	}
+}
+
+func TestSelectRenditionSpecsSkipsAboveSourceHeight(t *testing.T) {
+	specs, err := ResolveRenditionSpecs([]string{"720p", "1080p"})
+	if err != nil {
+		t.Fatalf("resolve rendition specs: %v", err)
+	}
+	selected, err := SelectRenditionSpecsForSource(VideoMetadata{Width: 1280, Height: 720}, specs)
+	if err != nil {
+		t.Fatalf("select rendition specs: %v", err)
+	}
+	if len(selected) != 1 || selected[0].Key != "720p" {
+		t.Fatalf("expected only 720p, got %#v", selected)
+	}
+}
+
+func TestSelectRenditionSpecsRejectsBelow720p(t *testing.T) {
+	specs, err := ResolveRenditionSpecs([]string{"720p"})
+	if err != nil {
+		t.Fatalf("resolve rendition specs: %v", err)
+	}
+	_, err = SelectRenditionSpecsForSource(VideoMetadata{Width: 854, Height: 480}, specs)
+	if err == nil {
+		t.Fatalf("expected below-baseline source to fail")
+	}
+	if !strings.Contains(err.Error(), "below the required 720p baseline") {
+		t.Fatalf("expected baseline height error, got %v", err)
+	}
+}
+
+func TestWriteMasterPlaylist(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "master.m3u8")
+	err := WriteMasterPlaylist(path, []HLSVariant{
+		{
+			Key:          "720p",
+			Width:        1280,
+			Height:       720,
+			BandwidthBps: 2_000_000,
+			Codecs:       "avc1.4d401f,mp4a.40.2",
+		},
+		{
+			Key:          "1080p",
+			Width:        1920,
+			Height:       1080,
+			BandwidthBps: 5_000_000,
+			Codecs:       "avc1.640028,mp4a.40.2",
+		},
+	})
+	if err != nil {
+		t.Fatalf("write master playlist: %v", err)
+	}
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read master playlist: %v", err)
+	}
+	got := string(content)
+	for _, want := range []string{
+		"#EXTM3U",
+		"#EXT-X-STREAM-INF:BANDWIDTH=2000000,RESOLUTION=1280x720,CODECS=\"avc1.4d401f,mp4a.40.2\"",
+		"720p/index.m3u8",
+		"#EXT-X-STREAM-INF:BANDWIDTH=5000000,RESOLUTION=1920x1080,CODECS=\"avc1.640028,mp4a.40.2\"",
+		"1080p/index.m3u8",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("expected master playlist to contain %q, got %s", want, got)
+		}
+	}
+}
+
+func TestParseVideoMetadata(t *testing.T) {
+	metadata, err := ParseVideoMetadata("1920x1080\n")
+	if err != nil {
+		t.Fatalf("parse video metadata: %v", err)
+	}
+	if metadata.Width != 1920 || metadata.Height != 1080 {
+		t.Fatalf("unexpected metadata %#v", metadata)
+	}
+}
+
+func TestParseVideoMetadataUsesFirstNonEmptyLine(t *testing.T) {
+	metadata, err := ParseVideoMetadata("1280x720\n\n1280x720\n")
+	if err != nil {
+		t.Fatalf("parse video metadata: %v", err)
+	}
+	if metadata.Width != 1280 || metadata.Height != 720 {
+		t.Fatalf("unexpected metadata %#v", metadata)
 	}
 }
 

@@ -98,8 +98,8 @@ FFPROBE_BIN=ffprobe
 推荐本地 object key 形态：
 
 ```text
-media/{mediaItemId}/hls/index.m3u8
-media/{mediaItemId}/cover/cover.jpg
+media/{sourceKeyWithoutExt}/hls/master.m3u8
+media/{sourceKeyWithoutExt}/cover/cover.jpg
 ```
 
 ## Current Structure
@@ -259,7 +259,7 @@ server/
 
 `mediactl` 是后续媒体资源制作、上传和入库的 CLI 入口。
 
-当前 `INT-140` 阶段已经支持本地单码率 HLS 生成和 PostgreSQL 媒体元数据写入；上传文件仍由后续任务补齐。
+当前已经支持本地多码率 HLS 生成和 PostgreSQL 媒体元数据写入；上传文件仍由后续任务补齐。
 
 示例：
 
@@ -286,9 +286,10 @@ go run ./cmd/mediactl ingest \
 - 校验 `--title` 不为空
 - 读取媒体存储环境变量
 - 默认输出 dry-run summary
-- `--dry-run=false` 时调用 `ffmpeg` 生成 `index.m3u8` 和 `.ts` 分片
+- `--dry-run=false` 时调用 `ffmpeg` 生成 `master.m3u8`、`720p/index.m3u8`、必要时的 `1080p/index.m3u8` 和 `.ts` 分片
 - `--dry-run=false` 时调用 `ffprobe` 读取源视频时长
-- `--dry-run=false --write-db` 时写入 `media_seasons / media_episodes / media_tags / media_season_tags`
+- `--dry-run=false` 时调用 `ffprobe` 校验每个 variant 的实际分辨率
+- `--dry-run=false --write-db` 时写入 `media_seasons / media_episodes / media_episode_variants / media_tags / media_season_tags`
 
 后续任务会继续补充：
 
@@ -399,6 +400,7 @@ make migration-up
 - `users`
 - `media_seasons`
 - `media_episodes`
+- `media_episode_variants`
 - `media_tags`
 - `media_season_tags`
 - `rooms`
@@ -425,6 +427,7 @@ make migration-up
 
 - `media_seasons` 表达一季、篇章、合集或作品容器
 - `media_episodes` 表达真正可播放的一集或视频资源
+- `media_episode_variants` 表达同一 episode 下的多码率 HLS variant，例如 `720p / 1080p`
 - `media_season_tags` 表达 season 与标签目录的关系
 - 服务端媒体列表、创建房间、房间详情、首页 summary 和观看进度均使用 `media_episodes / media_seasons`
 - HTTP 字段名 `mediaItemId` 暂时保留，但语义已经是 `media_episodes.id`

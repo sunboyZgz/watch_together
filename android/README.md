@@ -194,11 +194,13 @@ android/
 - 放映室媒体状态会区分 `等待载入 / 缓冲中 / 正在播放 / 已暂停 / 跟随同步中 / 已结束`，避免把播放器 rebuffer 误显示成同步等待
 - 播放器只有进入 `Player.STATE_READY` 后才允许播放/暂停、seek 和倍速操作；`IDLE / BUFFERING / ENDED` 状态下控制层会保持禁用，避免资源未成功加载时仍发出本地播放或同步事件
 - ExoPlayer 使用自定义 `DefaultLoadControl`，当前缓冲策略为 `minBuffer=30s / maxBuffer=90s / playbackStart=2.5s / rebufferStart=5s`，优先保障 2 倍速播放时有更充足的可播放缓存
+- ExoPlayer 使用 `DefaultTrackSelector` 接入 `master.m3u8` 的 ABR，当前最低视频尺寸约束为 720p，并通过 Logcat `WatchTogetherABR` 输出当前 variant
 - 2 倍速播放时会通过 Logcat `WatchTogetherBuffer` 输出低频 buffer debug 日志，包含 `state / pos / buffered / ahead / percent / speed`，用于判断是否真的发生 rebuffer
 - 全屏按钮位于播放/暂停按钮左侧，点击后进入播放器全屏层，再次点击退出
 - 播放/暂停使用轻量 icon 按钮，位于浮层控制栏最左侧
 - `-10` 和 `+10` 跟随播放/暂停按钮靠左排列
 - 倍速默认展示 `倍速 + 当前倍率`，固定在浮层控制栏右侧，点击后从右侧上方展开窄型深色倍率列表
+- 当前清晰度使用播放器浮层右上角的轻量 pill 展示，例如 `自动 · 720p`，避免把清晰度信息做成干扰播放的大面板
 - 播放、暂停、seek 和倍速入口显示在播放器画面 overlay 上
 - 点击播放器画面时显示控制层，无操作一段时间后自动隐藏
 - Media3 原生控制器关闭，避免和自定义控制层重复
