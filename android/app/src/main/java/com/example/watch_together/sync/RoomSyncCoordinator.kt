@@ -11,11 +11,20 @@ import kotlin.math.min
 import kotlin.math.abs
 import kotlin.math.roundToLong
 
+enum class DriftCorrectionType {
+    None,
+    SpeedNudge,
+    Seek
+}
+
 data class DriftCheck(
     val localPositionMs: Long,
     val expectedPositionMs: Long,
     val driftMs: Long,
-    val shouldCorrect: Boolean
+    val shouldCorrect: Boolean,
+    val correctionType: DriftCorrectionType = DriftCorrectionType.None,
+    val speedNudgeRate: Float = 1f,
+    val speedNudgeDurationMs: Long = RoomSyncCoordinator.DEFAULT_SPEED_NUDGE_DURATION_MS
 )
 
 class RoomSyncCoordinator(
@@ -24,8 +33,13 @@ class RoomSyncCoordinator(
 ) {
 
     companion object {
-        const val DEFAULT_DRIFT_THRESHOLD_MS = 750L
+        const val DEFAULT_DRIFT_THRESHOLD_MS = 150L
         const val DEFAULT_CORRECTION_INTERVAL_MS = 1_000L
+        const val DEFAULT_SEEK_DRIFT_THRESHOLD_MS = 2_000L
+        const val DEFAULT_SPEED_NUDGE_DURATION_MS = 1_500L
+        private const val SPEED_NUDGE_DELTA = 0.03f
+        private const val MIN_SPEED_NUDGE_RATE = 0.25f
+        private const val MAX_SPEED_NUDGE_RATE = 2.25f
     }
 
     // applyInitialState treats room_state as the authoritative baseline when a client
@@ -164,8 +178,8 @@ class RoomSyncCoordinator(
         return min(expectedPositionMs, durationMs)
     }
 
-    // evaluateDrift compares the local player with the extrapolated authority timeline
-    // and decides whether one correction seek is worth doing.
+    // evaluateDrift compares the local player with the extrapolated authority timeline.
+    // Small drift is corrected with a temporary speed nudge; large drift falls back to seek.
     fun evaluateDrift(
         authorityState: RoomSyncState,
         nowMs: Long,
@@ -174,6 +188,7 @@ class RoomSyncCoordinator(
         playbackEnded: Boolean = false,
         playbackBuffering: Boolean = false,
         thresholdMs: Long = DEFAULT_DRIFT_THRESHOLD_MS,
+        seekThresholdMs: Long = DEFAULT_SEEK_DRIFT_THRESHOLD_MS,
         correctionIntervalMs: Long = DEFAULT_CORRECTION_INTERVAL_MS
     ): DriftCheck {
         val localPositionMs = playerAdapter.getCurrentPosition().coerceAtLeast(0L)
@@ -183,34 +198,62 @@ class RoomSyncCoordinator(
         )
         val driftMs = localPositionMs - expectedPositionMs
 
-        val shouldCorrect = !playbackEnded &&
+        val canCorrect = !playbackEnded &&
             !playbackBuffering &&
             !authorityState.paused &&
             !authorityState.ended &&
             authorityState.authorityAppliedAtMs > 0L &&
             nowMs - authorityState.authorityAppliedAtMs >= correctionIntervalMs &&
             (lastCorrectionAtMs <= 0L || nowMs - lastCorrectionAtMs >= correctionIntervalMs) &&
-            (durationMs <= 0L || localPositionMs < durationMs) &&
-            abs(driftMs) >= thresholdMs
+            (durationMs <= 0L || localPositionMs < durationMs)
+
+        val correctionType = when {
+            !canCorrect || abs(driftMs) < thresholdMs -> DriftCorrectionType.None
+            abs(driftMs) >= seekThresholdMs -> DriftCorrectionType.Seek
+            else -> DriftCorrectionType.SpeedNudge
+        }
 
         return DriftCheck(
             localPositionMs = localPositionMs,
             expectedPositionMs = expectedPositionMs,
             driftMs = driftMs,
-            shouldCorrect = shouldCorrect
+            shouldCorrect = correctionType != DriftCorrectionType.None,
+            correctionType = correctionType,
+            speedNudgeRate = calculateSpeedNudgeRate(authorityState.playbackRate, driftMs)
         )
     }
 
-    // applyDriftCorrection pulls the local player back to the extrapolated authority
-    // timeline without emitting a new sync event.
+    // applyDriftCorrection adjusts local playback without emitting a new sync event.
     fun applyDriftCorrection(check: DriftCheck, authorityState: RoomSyncState) {
         if (!check.shouldCorrect) return
 
-        playerAdapter.seekTo(check.expectedPositionMs)
-        if (authorityState.paused) {
-            playerAdapter.pause()
-        } else {
-            playerAdapter.play()
+        when (check.correctionType) {
+            DriftCorrectionType.None -> Unit
+            DriftCorrectionType.SpeedNudge -> {
+                playerAdapter.setPlaybackSpeed(check.speedNudgeRate)
+            }
+            DriftCorrectionType.Seek -> {
+                playerAdapter.seekTo(check.expectedPositionMs)
+                if (authorityState.paused) {
+                    playerAdapter.pause()
+                } else {
+                    playerAdapter.play()
+                }
+            }
         }
+    }
+
+    fun restoreAuthorityPlaybackRate(authorityState: RoomSyncState) {
+        playerAdapter.setPlaybackSpeed(authorityState.playbackRate.toFloat())
+    }
+
+    private fun calculateSpeedNudgeRate(authorityPlaybackRate: Double, driftMs: Long): Float {
+        val baseRate = authorityPlaybackRate.toFloat()
+        val multiplier = if (driftMs > 0L) {
+            1f - SPEED_NUDGE_DELTA
+        } else {
+            1f + SPEED_NUDGE_DELTA
+        }
+        return (baseRate * multiplier).coerceIn(MIN_SPEED_NUDGE_RATE, MAX_SPEED_NUDGE_RATE)
     }
 }

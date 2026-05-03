@@ -198,6 +198,13 @@ android/app/src/main/java/com/example/watch_together/
 - drift correction 判断和执行
 - ended-state 应用
 
+当前 drift correction 采用 `speed-nudge + seek fallback`：
+
+- `abs(driftMs) < 150ms`：视为正常误差，不做 correction。
+- `150ms <= abs(driftMs) < 2000ms`：临时把播放器倍率调整为 authority 倍率的 `0.97x / 1.03x`，约 `1500ms` 后恢复。
+- `abs(driftMs) >= 2000ms`：执行 `seekTo(expectedPositionMs)` 作为兜底。
+- 本地 `BUFFERING / ENDED` 或 authority 已暂停、已结束时不会做 correction。
+
 如果要改同步算法、drift 阈值或 authority baseline 外推规则，优先改这里。
 
 ### 8. `PlayerAdapter` / `AndroidExoPlayerAdapter`
@@ -327,6 +334,7 @@ PlayerScreen
 - 当前播放 variant 会通过 Logcat `WatchTogetherABR` 输出，播放器 overlay 右上角也会显示 `自动 · 当前清晰度`
 - 2 倍速及以上调试时，`PlayerScreen` 会通过 Logcat `WatchTogetherBuffer` 低频写入 buffer debug 日志，格式包含 `state / pos / buffered / ahead / percent / speed`
 - 播放器 telemetry 会通过 Logcat `WatchTogetherTelemetry` 输出 rebuffer start/end、rebuffer 次数、累计 rebuffer 时长和 correction 类型计数
+- drift correction 日志会区分 `speed_nudge / speed_nudge_restore / drift_seek`，用于判断同步层是在温和追平还是发生了硬 seek
 - 初始载入的 `BUFFERING` 会标记为 `initial_buffer`，播放开始后的再次 `BUFFERING` 才计为 `rebuffer`
 - 全屏按钮位于播放/暂停按钮左侧，并由 `PlayerCoreShell` 内部管理全屏显示/退出
 - 倍速默认显示 `倍速 + 当前倍率`，点击后在右侧上方展开窄型深色倍率列表，当前倍率用粉色文字和小点标记

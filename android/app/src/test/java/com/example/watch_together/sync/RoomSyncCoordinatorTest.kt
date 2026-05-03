@@ -189,6 +189,98 @@ class RoomSyncCoordinatorTest {
         assertEquals(13_000L, check.expectedPositionMs)
         assertEquals(2_000L, check.driftMs)
         assertTrue(check.shouldCorrect)
+        assertEquals(DriftCorrectionType.Seek, check.correctionType)
+    }
+
+    @Test
+    fun `evaluateDrift ignores tiny drift inside dead zone`() {
+        val fakePlayerAdapter = FakePlayerAdapter().apply {
+            currentPositionMs = 13_100L
+        }
+        val coordinator = RoomSyncCoordinator(fakePlayerAdapter)
+        val authority = RoomSyncState(
+            roomId = "ROOM01",
+            mediaId = "sample_001",
+            hostUserId = "user_a",
+            paused = false,
+            ended = false,
+            positionMs = 10_000L,
+            playbackRate = 1.0,
+            seq = 5L,
+            authorityAppliedAtMs = 2_000L
+        )
+
+        val check = coordinator.evaluateDrift(
+            authorityState = authority,
+            nowMs = 5_000L,
+            lastCorrectionAtMs = 0L,
+            correctionIntervalMs = 1_000L
+        )
+
+        assertEquals(100L, check.driftMs)
+        assertFalse(check.shouldCorrect)
+        assertEquals(DriftCorrectionType.None, check.correctionType)
+    }
+
+    @Test
+    fun `evaluateDrift uses speed nudge for small drift instead of seek`() {
+        val fakePlayerAdapter = FakePlayerAdapter().apply {
+            currentPositionMs = 13_500L
+        }
+        val coordinator = RoomSyncCoordinator(fakePlayerAdapter)
+        val authority = RoomSyncState(
+            roomId = "ROOM01",
+            mediaId = "sample_001",
+            hostUserId = "user_a",
+            paused = false,
+            ended = false,
+            positionMs = 10_000L,
+            playbackRate = 1.0,
+            seq = 5L,
+            authorityAppliedAtMs = 2_000L
+        )
+
+        val check = coordinator.evaluateDrift(
+            authorityState = authority,
+            nowMs = 5_000L,
+            lastCorrectionAtMs = 0L,
+            correctionIntervalMs = 1_000L
+        )
+
+        assertEquals(500L, check.driftMs)
+        assertTrue(check.shouldCorrect)
+        assertEquals(DriftCorrectionType.SpeedNudge, check.correctionType)
+        assertEquals(0.97f, check.speedNudgeRate, 0.001f)
+    }
+
+    @Test
+    fun `evaluateDrift speeds up when local player is behind authority`() {
+        val fakePlayerAdapter = FakePlayerAdapter().apply {
+            currentPositionMs = 12_500L
+        }
+        val coordinator = RoomSyncCoordinator(fakePlayerAdapter)
+        val authority = RoomSyncState(
+            roomId = "ROOM01",
+            mediaId = "sample_001",
+            hostUserId = "user_a",
+            paused = false,
+            ended = false,
+            positionMs = 10_000L,
+            playbackRate = 1.0,
+            seq = 5L,
+            authorityAppliedAtMs = 2_000L
+        )
+
+        val check = coordinator.evaluateDrift(
+            authorityState = authority,
+            nowMs = 5_000L,
+            lastCorrectionAtMs = 0L,
+            correctionIntervalMs = 1_000L
+        )
+
+        assertEquals(-500L, check.driftMs)
+        assertEquals(DriftCorrectionType.SpeedNudge, check.correctionType)
+        assertEquals(1.03f, check.speedNudgeRate, 0.001f)
     }
 
     @Test
@@ -304,13 +396,67 @@ class RoomSyncCoordinatorTest {
             localPositionMs = 15_000L,
             expectedPositionMs = 13_000L,
             driftMs = 2_000L,
-            shouldCorrect = true
+            shouldCorrect = true,
+            correctionType = DriftCorrectionType.Seek
         )
 
         coordinator.applyDriftCorrection(check, authority)
 
         assertEquals(13_000L, fakePlayerAdapter.seekPositionMs)
         assertTrue(fakePlayerAdapter.playCalled)
+    }
+
+    @Test
+    fun `applyDriftCorrection applies speed nudge without seeking`() {
+        val fakePlayerAdapter = FakePlayerAdapter()
+        val coordinator = RoomSyncCoordinator(fakePlayerAdapter)
+        val authority = RoomSyncState(
+            roomId = "ROOM01",
+            mediaId = "sample_001",
+            hostUserId = "user_a",
+            paused = false,
+            ended = false,
+            positionMs = 10_000L,
+            playbackRate = 1.0,
+            seq = 5L,
+            authorityAppliedAtMs = 2_000L
+        )
+        val check = DriftCheck(
+            localPositionMs = 13_500L,
+            expectedPositionMs = 13_000L,
+            driftMs = 500L,
+            shouldCorrect = true,
+            correctionType = DriftCorrectionType.SpeedNudge,
+            speedNudgeRate = 0.97f
+        )
+
+        coordinator.applyDriftCorrection(check, authority)
+
+        assertEquals(-1L, fakePlayerAdapter.seekPositionMs)
+        assertEquals(0.97f, fakePlayerAdapter.speed, 0.0f)
+    }
+
+    @Test
+    fun `restoreAuthorityPlaybackRate returns player to authority speed`() {
+        val fakePlayerAdapter = FakePlayerAdapter().apply {
+            speed = 1.03f
+        }
+        val coordinator = RoomSyncCoordinator(fakePlayerAdapter)
+        val authority = RoomSyncState(
+            roomId = "ROOM01",
+            mediaId = "sample_001",
+            hostUserId = "user_a",
+            paused = false,
+            ended = false,
+            positionMs = 10_000L,
+            playbackRate = 1.5,
+            seq = 5L,
+            authorityAppliedAtMs = 2_000L
+        )
+
+        coordinator.restoreAuthorityPlaybackRate(authority)
+
+        assertEquals(1.5f, fakePlayerAdapter.speed, 0.0f)
     }
 
     @Test

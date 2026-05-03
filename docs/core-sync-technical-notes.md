@@ -231,7 +231,8 @@ drift correction 是当前最值得持续跟踪的核心技术点之一。
 - 周期性比较：
   - 本地播放器位置
   - 根据 authority baseline 外推出来的 expected position
-- 偏差超过阈值时执行本地 correction seek
+- 轻微偏差使用 speed nudge 温和追平
+- 严重偏差才 fallback 到本地 correction seek
 - correction 只影响本地播放器，不回传 sync 事件
 
 当前实现里的 authority baseline 至少包含：
@@ -245,7 +246,11 @@ drift correction 是当前最值得持续跟踪的核心技术点之一。
 当前建议的初始参数：
 
 - correction interval: `1s`
-- drift threshold: `750ms`
+- drift dead zone: `< 150ms`
+- speed nudge range: `150ms <= abs(driftMs) < 2000ms`
+- seek fallback threshold: `abs(driftMs) >= 2000ms`
+- speed nudge delta: `authority playbackRate * 0.97 / 1.03`
+- speed nudge duration: `1500ms`
 - local ended guard: enabled
 - local buffering guard: enabled
 
@@ -274,13 +279,13 @@ drift correction 是当前最值得持续跟踪的核心技术点之一。
 
    也就是说，当前并不是依赖服务端持续推位置，而是本地从最近一次权威基线向前做时间外推。
 
-3. 判断是否需要 correction  
+3. 判断 correction 类型  
    取：
 
    - `localPositionMs = player.currentPosition`
    - `driftMs = localPositionMs - expectedPositionMs`
 
-   当满足下面条件时，执行一次本地 correction seek：
+   只有满足下面条件时，才允许做 correction：
 
    - 当前不是暂停态
    - 本地播放器还没有进入 ended 状态
@@ -288,17 +293,31 @@ drift correction 是当前最值得持续跟踪的核心技术点之一。
    - 已经拿到有效 authority baseline
    - 距离上次 authority baseline 应用已有一个最小检查窗口
    - 距离上一次 correction 已经超过 cooldown
-   - `abs(driftMs) >= driftThresholdMs`
+
+   满足 guard 后按漂移大小分层：
+
+   - `abs(driftMs) < 150ms`
+     - 不做 correction
+     - 这部分属于正常播放器误差，避免过度调节
+   - `150ms <= abs(driftMs) < 2000ms`
+     - 执行 speed nudge
+     - 如果 `driftMs > 0`，说明本地跑得比 authority 快，临时降速到 `authorityRate * 0.97`
+     - 如果 `driftMs < 0`，说明本地落后 authority，临时升速到 `authorityRate * 1.03`
+     - 持续约 `1500ms` 后恢复 authority playbackRate
+   - `abs(driftMs) >= 2000ms`
+     - 执行 seek fallback
+     - 直接 `seekTo(expectedPositionMs)`，避免长时间靠变速追不上
 
 4. 处理 buffering 边界  
    如果本地播放器处于 `BUFFERING`：
 
    - 暂停本轮 drift correction
+   - 不执行 speed nudge
    - 不执行 correction seek
    - 不丢弃最新 authority baseline
    - 等播放器恢复 `READY` 后继续按同一 authority baseline 做 drift 判断
 
-   这样可以避免播放器已经在 rebuffer 或解码器 flush 时，又被 correction seek 打断，导致 `BUFFERING -> seek -> flush -> BUFFERING` 的连锁抖动。
+   这样可以避免播放器已经在 rebuffer 或解码器 flush 时，又被 correction 打断，导致 `BUFFERING -> seek/变速 -> flush -> BUFFERING` 的连锁抖动。
 
 5. 播放器缓冲策略  
    Android 端当前通过 `AndroidExoPlayerAdapter` 配置 `DefaultLoadControl`，使用 `minBuffer=30s / maxBuffer=90s / playbackStart=2.5s / rebufferStart=5s`。
@@ -327,12 +346,14 @@ drift correction 是当前最值得持续跟踪的核心技术点之一。
 - 实现简单
 - 不需要服务端高频广播位置
 - 足够解决“越播越偏”的明显问题
+- 小漂移不再依赖硬 seek，观感更接近正常播放器
 - 适合当前 2 人房间、小规模事件频率的阶段
 
 它的限制也很明确：
 
 - 使用的是本地 wall-clock 外推，不是精确时钟同步
-- correction 仍然是 seek，观感上可能比速度微调更硬
+- 大漂移仍然需要 seek fallback
+- speed nudge 只能处理短时间小偏差，不能替代资源缓冲和解码性能优化
 - 网络抖动、后台恢复、设备性能差异仍会影响误差大小
 
 所以它是当前阶段“足够好”的最小方案，而不是最终极方案。
@@ -505,7 +526,9 @@ drift correction 是当前最值得持续跟踪的核心技术点之一。
    - `rebufferCount` 和 `totalRebufferDurationMs` 用来比较优化前后是否真的变好。
 
 4. 看 correction 日志
-   - 如果 rebuffer 附近频繁出现 `correction type=drift_seek`，说明同步 correction 可能在打断播放器。
+   - 如果主要出现 `correction type=speed_nudge`，说明漂移较小，播放器正在用临时变速温和追平。
+   - 如果 rebuffer 附近频繁出现 `correction type=drift_seek`，说明漂移已经超过 seek fallback 阈值，同步 correction 可能在打断播放器。
+   - 如果出现 `correction type=speed_nudge_restore`，说明临时变速已经恢复到 authority playbackRate。
    - 如果 correction 很少但 rebuffer 很多，说明更可能是播放资源、ABR 或解码能力问题。
 
 5. 结合播放倍率

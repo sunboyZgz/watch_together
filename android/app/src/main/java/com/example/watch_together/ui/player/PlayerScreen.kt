@@ -18,6 +18,7 @@ import androidx.media3.common.Player
 import com.example.watch_together.config.AppConfig
 import com.example.watch_together.pages.room.RoomTheaterPage
 import com.example.watch_together.sync.ProgressHttpClient
+import com.example.watch_together.sync.DriftCorrectionType
 import com.example.watch_together.sync.RoomMedia
 import com.example.watch_together.sync.RoomSessionController
 import com.example.watch_together.sync.RoomSyncCoordinator
@@ -82,6 +83,7 @@ fun PlayerScreen(
     var lastBufferingDriftSkipAtMs by rememberSaveable { mutableStateOf(0L) }
     var bufferingStartedAtMs by rememberSaveable { mutableStateOf(0L) }
     var bufferingCountsAsRebuffer by rememberSaveable { mutableStateOf(false) }
+    var activeSpeedNudgeRestoreAtMs by rememberSaveable { mutableStateOf(0L) }
     val currentUiState by rememberUpdatedState(uiState)
 
     val isHostController = remember(uiState.activeUserId, uiState.latestSyncState) {
@@ -222,6 +224,27 @@ fun PlayerScreen(
             val authorityState = uiState.latestSyncState ?: continue
             val nowMs = System.currentTimeMillis()
             val playbackBuffering = uiState.player.playbackState == Player.STATE_BUFFERING
+
+            if (activeSpeedNudgeRestoreAtMs > 0L) {
+                if (nowMs >= activeSpeedNudgeRestoreAtMs) {
+                    roomSyncCoordinator.restoreAuthorityPlaybackRate(authorityState)
+                    activeSpeedNudgeRestoreAtMs = 0L
+                    updateUiState { current ->
+                        current.copy(
+                            player = current.player.copy(
+                                playbackSpeed = authorityState.playbackRate.toFloat()
+                            )
+                        )
+                    }
+                    logTelemetry(
+                        syncLogs,
+                        "correction type=speed_nudge_restore targetRate=${authorityState.playbackRate}x"
+                    )
+                } else {
+                    continue
+                }
+            }
+
             val driftCheck = roomSyncCoordinator.evaluateDrift(
                 authorityState = authorityState,
                 nowMs = nowMs,
@@ -244,29 +267,67 @@ fun PlayerScreen(
             }
 
             roomSyncCoordinator.applyDriftCorrection(driftCheck, authorityState)
+            val correctionReason = when (driftCheck.correctionType) {
+                DriftCorrectionType.None -> "drift_none"
+                DriftCorrectionType.SpeedNudge -> "drift_speed_nudge"
+                DriftCorrectionType.Seek -> "drift_seek"
+            }
+            if (driftCheck.correctionType == DriftCorrectionType.SpeedNudge) {
+                activeSpeedNudgeRestoreAtMs = nowMs + driftCheck.speedNudgeDurationMs
+            }
             updateUiState { current ->
                 current.copy(
                     lastDriftCorrectionAtMs = nowMs,
+                    player = if (driftCheck.correctionType == DriftCorrectionType.SpeedNudge) {
+                        current.player.copy(playbackSpeed = driftCheck.speedNudgeRate)
+                    } else {
+                        current.player
+                    },
                     telemetry = current.telemetry.copy(
                         driftCorrectionCount = current.telemetry.driftCorrectionCount + 1,
-                        seekCorrectionCount = current.telemetry.seekCorrectionCount + 1,
-                        lastCorrectionReason = "drift_seek",
+                        seekCorrectionCount = current.telemetry.seekCorrectionCount +
+                            if (driftCheck.correctionType == DriftCorrectionType.Seek) 1 else 0,
+                        speedNudgeCorrectionCount = current.telemetry.speedNudgeCorrectionCount +
+                            if (driftCheck.correctionType == DriftCorrectionType.SpeedNudge) 1 else 0,
+                        lastCorrectionReason = correctionReason,
                         lastCorrectionDriftMs = driftCheck.driftMs
                     )
                 )
             }
-            appendLog(
-                syncLogs,
-                "drift correction local=${driftCheck.localPositionMs} expected=${driftCheck.expectedPositionMs} drift=${driftCheck.driftMs}"
-            )
-            logTelemetry(
-                syncLogs,
-                "correction type=drift_seek count=${currentUiState.telemetry.driftCorrectionCount + 1} drift=${driftCheck.driftMs}ms"
-            )
+            when (driftCheck.correctionType) {
+                DriftCorrectionType.None -> Unit
+                DriftCorrectionType.SpeedNudge -> {
+                    appendLog(
+                        syncLogs,
+                        "drift speed nudge local=${driftCheck.localPositionMs} expected=${driftCheck.expectedPositionMs} " +
+                            "drift=${driftCheck.driftMs} rate=${driftCheck.speedNudgeRate}x"
+                    )
+                    logTelemetry(
+                        syncLogs,
+                        "correction type=speed_nudge count=${currentUiState.telemetry.driftCorrectionCount + 1} " +
+                            "drift=${driftCheck.driftMs}ms rate=${driftCheck.speedNudgeRate}x " +
+                            "restoreIn=${driftCheck.speedNudgeDurationMs}ms"
+                    )
+                }
+                DriftCorrectionType.Seek -> {
+                    appendLog(
+                        syncLogs,
+                        "drift seek correction local=${driftCheck.localPositionMs} expected=${driftCheck.expectedPositionMs} drift=${driftCheck.driftMs}"
+                    )
+                    logTelemetry(
+                        syncLogs,
+                        "correction type=drift_seek count=${currentUiState.telemetry.driftCorrectionCount + 1} drift=${driftCheck.driftMs}ms"
+                    )
+                }
+            }
         }
     }
 
     fun applySyncEventResult(result: RoomPlayerSyncEventResult) {
+        if (activeSpeedNudgeRestoreAtMs > 0L) {
+            result.uiState.latestSyncState?.let(roomSyncCoordinator::restoreAuthorityPlaybackRate)
+        }
+        activeSpeedNudgeRestoreAtMs = 0L
         uiState = result.uiState
         result.logs.forEach { line ->
             appendLog(syncLogs, line)
@@ -399,6 +460,7 @@ fun PlayerScreen(
                 lastDriftCorrectionAtMs = 0L
             )
         }
+        activeSpeedNudgeRestoreAtMs = 0L
         appendLog(syncLogs, "$reason starting roomId=$roomId userId=$userId")
 
         coroutineScope.launch {
@@ -587,6 +649,7 @@ fun PlayerScreen(
             appendLog(syncLogs, "playbackRate ignored: media is not ready")
             return
         }
+        activeSpeedNudgeRestoreAtMs = 0L
         val previousPlaybackSpeed = uiState.player.playbackSpeed
         updateUiState { current ->
             current.copy(
