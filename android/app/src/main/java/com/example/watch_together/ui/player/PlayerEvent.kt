@@ -50,7 +50,9 @@ data class PlayerVideoVariant(
         }
 
     val displayLabel: String
-        get() = if (adaptive) {
+        get() = if (qualityLabel == "自动") {
+            "自动 · 识别中"
+        } else if (adaptive) {
             "自动 · $qualityLabel"
         } else {
             qualityLabel

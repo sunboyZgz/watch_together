@@ -80,6 +80,8 @@ fun PlayerScreen(
     var lastBufferLogAtMs by rememberSaveable { mutableStateOf(0L) }
     var lastBufferLogState by rememberSaveable { mutableStateOf(-1) }
     var lastBufferingDriftSkipAtMs by rememberSaveable { mutableStateOf(0L) }
+    var bufferingStartedAtMs by rememberSaveable { mutableStateOf(0L) }
+    var bufferingCountsAsRebuffer by rememberSaveable { mutableStateOf(false) }
     val currentUiState by rememberUpdatedState(uiState)
 
     val isHostController = remember(uiState.activeUserId, uiState.latestSyncState) {
@@ -122,15 +124,32 @@ fun PlayerScreen(
                 appendLog(syncLogs, "video variant ${event.variant.debugLabel}")
             }
             if (event is PlayerEvent.PlaybackStateChanged) {
+                val nowMs = System.currentTimeMillis()
+                val previousPlayer = currentUiState.player
+                val previousTelemetry = currentUiState.telemetry
                 val snapshot = playerSnapshotFromAdapter(
                     adapter = adapter,
                     playbackState = event.playbackState,
                     playbackSpeed = currentUiState.player.playbackSpeed,
                     videoVariant = currentUiState.player.videoVariant
                 )
+                val telemetry = updateRebufferTelemetry(
+                    previousPlayer = previousPlayer,
+                    previousTelemetry = previousTelemetry,
+                    nextPlaybackState = event.playbackState,
+                    nowMs = nowMs,
+                    bufferingStartedAtMs = bufferingStartedAtMs,
+                    bufferingCountsAsRebuffer = bufferingCountsAsRebuffer,
+                    onBufferingSessionUpdate = { startedAtMs, countsAsRebuffer ->
+                        bufferingStartedAtMs = startedAtMs
+                        bufferingCountsAsRebuffer = countsAsRebuffer
+                    },
+                    onLog = { line -> logTelemetry(syncLogs, line) }
+                )
                 updateUiState { current ->
                     current.copy(
-                        player = snapshot
+                        player = snapshot,
+                        telemetry = telemetry
                     )
                 }
                 logBufferDebug(syncLogs, bufferDebugLogLine("buffer state", snapshot))
@@ -183,6 +202,11 @@ fun PlayerScreen(
 
         adapter.load(mediaUrl)
         loadedRoomId = roomId
+        bufferingStartedAtMs = 0L
+        bufferingCountsAsRebuffer = false
+        updateUiState { current ->
+            current.copy(telemetry = PlayerTelemetryUiState(currentMediaUrl = mediaUrl))
+        }
         appendLog(syncLogs, "media auto-loaded for roomId=$roomId url=$mediaUrl")
     }
 
@@ -220,10 +244,24 @@ fun PlayerScreen(
             }
 
             roomSyncCoordinator.applyDriftCorrection(driftCheck, authorityState)
-            updateUiState { current -> current.copy(lastDriftCorrectionAtMs = nowMs) }
+            updateUiState { current ->
+                current.copy(
+                    lastDriftCorrectionAtMs = nowMs,
+                    telemetry = current.telemetry.copy(
+                        driftCorrectionCount = current.telemetry.driftCorrectionCount + 1,
+                        seekCorrectionCount = current.telemetry.seekCorrectionCount + 1,
+                        lastCorrectionReason = "drift_seek",
+                        lastCorrectionDriftMs = driftCheck.driftMs
+                    )
+                )
+            }
             appendLog(
                 syncLogs,
                 "drift correction local=${driftCheck.localPositionMs} expected=${driftCheck.expectedPositionMs} drift=${driftCheck.driftMs}"
+            )
+            logTelemetry(
+                syncLogs,
+                "correction type=drift_seek count=${currentUiState.telemetry.driftCorrectionCount + 1} drift=${driftCheck.driftMs}ms"
             )
         }
     }
@@ -733,10 +771,71 @@ private fun appendLog(
 
 private const val BUFFER_DEBUG_LOG_INTERVAL_MS = 3_000L
 private const val BUFFER_DEBUG_LOG_TAG = "WatchTogetherBuffer"
+private const val TELEMETRY_LOG_TAG = "WatchTogetherTelemetry"
 
 private fun logBufferDebug(logs: MutableList<String>, line: String) {
     appendLog(logs, line)
     Log.d(BUFFER_DEBUG_LOG_TAG, line)
+}
+
+private fun logTelemetry(logs: MutableList<String>, line: String) {
+    appendLog(logs, line)
+    Log.d(TELEMETRY_LOG_TAG, line)
+}
+
+private fun updateRebufferTelemetry(
+    previousPlayer: PlayerRuntimeUiState,
+    previousTelemetry: PlayerTelemetryUiState,
+    nextPlaybackState: Int,
+    nowMs: Long,
+    bufferingStartedAtMs: Long,
+    bufferingCountsAsRebuffer: Boolean,
+    onBufferingSessionUpdate: (startedAtMs: Long, countsAsRebuffer: Boolean) -> Unit,
+    onLog: (String) -> Unit,
+): PlayerTelemetryUiState {
+    if (nextPlaybackState == Player.STATE_BUFFERING && bufferingStartedAtMs <= 0L) {
+        val countsAsRebuffer = previousPlayer.hasPlaybackStartedForTelemetry()
+        onBufferingSessionUpdate(nowMs, countsAsRebuffer)
+        val nextTelemetry = if (countsAsRebuffer) {
+            previousTelemetry.copy(
+                rebufferCount = previousTelemetry.rebufferCount + 1,
+                activeRebufferStartedAtMs = nowMs
+            )
+        } else {
+            previousTelemetry
+        }
+        val type = if (countsAsRebuffer) "rebuffer" else "initial_buffer"
+        onLog(
+            "buffering start type=$type count=${nextTelemetry.rebufferCount} " +
+                "pos=${previousPlayer.currentPosition}ms ahead=${previousPlayer.bufferedAheadMs}ms " +
+                "variant=${previousPlayer.videoVariant.displayLabel}"
+        )
+        return nextTelemetry
+    }
+
+    if (previousPlayer.playbackState == Player.STATE_BUFFERING &&
+        nextPlaybackState != Player.STATE_BUFFERING &&
+        bufferingStartedAtMs > 0L
+    ) {
+        val durationMs = (nowMs - bufferingStartedAtMs).coerceAtLeast(0L)
+        onBufferingSessionUpdate(0L, false)
+        if (!bufferingCountsAsRebuffer) {
+            onLog("buffering end type=initial_buffer duration=${durationMs}ms")
+            return previousTelemetry
+        }
+        val nextTelemetry = previousTelemetry.copy(
+            totalRebufferDurationMs = previousTelemetry.totalRebufferDurationMs + durationMs,
+            lastRebufferDurationMs = durationMs,
+            activeRebufferStartedAtMs = 0L
+        )
+        onLog(
+            "rebuffer end duration=${durationMs}ms " +
+                "count=${nextTelemetry.rebufferCount} total=${nextTelemetry.totalRebufferDurationMs}ms"
+        )
+        return nextTelemetry
+    }
+
+    return previousTelemetry
 }
 
 private fun bufferDebugLogLine(prefix: String, snapshot: PlayerRuntimeUiState): String {
@@ -752,6 +851,13 @@ private fun bufferDebugLogLine(prefix: String, snapshot: PlayerRuntimeUiState): 
 private fun PlayerRuntimeUiState.hasActivePlaybackState(): Boolean {
     return playbackState == Player.STATE_BUFFERING ||
         playbackState == Player.STATE_READY
+}
+
+private fun PlayerRuntimeUiState.hasPlaybackStartedForTelemetry(): Boolean {
+    return playbackState == Player.STATE_READY ||
+        currentPosition > 0L ||
+        bufferedPosition > 0L ||
+        isPlaying
 }
 
 private fun playerSnapshotFromAdapter(

@@ -438,6 +438,79 @@ drift correction 是当前最值得持续跟踪的核心技术点之一。
 - correction 触发次数
 - average drift before correction
 - average drift after correction
+
+### 7. Player Telemetry And Rebuffer Diagnosis
+
+播放器优化必须先能观测，再谈调参。当前 Android 端已经把播放、缓冲、ABR 和同步 correction 的关键信息拆成三个 Logcat 标签：
+
+- `WatchTogetherBuffer`
+  记录播放状态、当前位置、buffered position、buffered ahead、buffer percentage、倍速和当前 variant。
+- `WatchTogetherABR`
+  记录 master playlist 中可用的 video variants，以及 ExoPlayer 当前选择的分辨率、码率和 codecs。
+- `WatchTogetherTelemetry`
+  记录 buffering / rebuffer session 的开始和结束、rebuffer 次数、累计 rebuffer 时长，以及 correction 类型计数。
+
+当前 telemetry 指标：
+
+- `playbackState`
+- `currentPosition`
+- `bufferedPosition`
+- `bufferedAheadMs`
+- `playbackSpeed`
+- `videoVariant`
+- `currentMediaUrl`
+- `rebufferCount`
+- `totalRebufferDurationMs`
+- `lastRebufferDurationMs`
+- `driftCorrectionCount`
+- `seekCorrectionCount`
+- `speedNudgeCorrectionCount`
+- `lastCorrectionReason`
+- `lastCorrectionDriftMs`
+
+#### Rebuffer Session
+
+不是所有 `BUFFERING` 都算卡顿。初次加载进入 `BUFFERING` 是正常启动流程，只有播放已经开始后再次进入 `BUFFERING` 才计为 rebuffer。
+
+当前判断：
+
+1. 如果播放器首次载入资源时进入 `BUFFERING`
+   - 记录为 `initial_buffer`
+   - 不增加 `rebufferCount`
+
+2. 如果播放器已经 `READY`、已有播放位置、已有 buffer 或正在播放后进入 `BUFFERING`
+   - 记录为 `rebuffer`
+   - `rebufferCount += 1`
+   - 记录 `activeRebufferStartedAtMs`
+
+3. 离开 `BUFFERING` 时
+   - 计算本次 rebuffer duration
+   - 累加 `totalRebufferDurationMs`
+   - 更新 `lastRebufferDurationMs`
+
+#### Diagnosis Flow
+
+排查 1.5x / 2.0x 卡顿时，优先按这个顺序看：
+
+1. 看 `WatchTogetherABR`
+   - 如果当前 variant 是 `1080p`，而设备或模拟器解码吃力，可以优先怀疑 ABR 选档过高。
+   - 如果已经是 `720p` 仍频繁 rebuffer，继续看 buffer。
+
+2. 看 `WatchTogetherBuffer`
+   - 如果 `BUFFERING` 发生时 `ahead` 接近 `0ms`，更像下载、静态服务吞吐、segment 生成或 buffer 策略不足。
+   - 如果 `ahead` 仍然很高但进入 `BUFFERING`，更像解码器、模拟器能力、HLS 封装或 codec 参数问题。
+
+3. 看 `WatchTogetherTelemetry`
+   - `rebuffer start/end` 可以确认每次卡顿是否真的进入 rebuffer。
+   - `rebufferCount` 和 `totalRebufferDurationMs` 用来比较优化前后是否真的变好。
+
+4. 看 correction 日志
+   - 如果 rebuffer 附近频繁出现 `correction type=drift_seek`，说明同步 correction 可能在打断播放器。
+   - 如果 correction 很少但 rebuffer 很多，说明更可能是播放资源、ABR 或解码能力问题。
+
+5. 结合播放倍率
+   - 1.0x 稳定、1.5x 稳定、2.0x 不稳定，通常说明资源和设备在高倍率下触达了吞吐或解码上限。
+   - 1.0x 都不稳定，优先检查 HLS 文件、静态服务、URL 和 ExoPlayer 错误。
 - ignored stale event 次数
 - repeated join / reconnect 后的 resync 成功率
 

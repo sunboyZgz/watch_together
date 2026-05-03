@@ -34,6 +34,22 @@ data class PlayerRuntimeUiState(
         get() = (bufferedPosition - currentPosition).coerceAtLeast(0L)
 }
 
+data class PlayerTelemetryUiState(
+    val currentMediaUrl: String = "",
+    val rebufferCount: Int = 0,
+    val totalRebufferDurationMs: Long = 0L,
+    val lastRebufferDurationMs: Long = 0L,
+    val activeRebufferStartedAtMs: Long = 0L,
+    val driftCorrectionCount: Int = 0,
+    val seekCorrectionCount: Int = 0,
+    val speedNudgeCorrectionCount: Int = 0,
+    val lastCorrectionReason: String = "",
+    val lastCorrectionDriftMs: Long = 0L,
+) {
+    val isRebuffering: Boolean
+        get() = activeRebufferStartedAtMs > 0L
+}
+
 data class RoomPlayerUiState(
     val joinRoomInput: String = "",
     val activeUserId: String? = null,
@@ -41,6 +57,7 @@ data class RoomPlayerUiState(
     val latestSyncState: RoomSyncState? = null,
     val syncStatus: SyncStatus = SyncStatus.Idle,
     val player: PlayerRuntimeUiState = PlayerRuntimeUiState(),
+    val telemetry: PlayerTelemetryUiState = PlayerTelemetryUiState(),
     val lastDriftCorrectionAtMs: Long = 0L,
     val lastEndedReportedSeq: Long = -1L,
 ) {

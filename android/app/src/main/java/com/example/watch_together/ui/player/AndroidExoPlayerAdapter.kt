@@ -82,7 +82,14 @@ class AndroidExoPlayerAdapter(
         }
 
         override fun onTracksChanged(tracks: Tracks) {
-            logAvailableVideoTracks(tracks)
+            val variants = videoVariantsFromTracks(tracks, selectedOnly = false)
+            logAvailableVideoTracks(variants)
+            videoVariantsFromTracks(tracks, selectedOnly = true)
+                .filter { variant -> variant.height >= MinVideoHeight }
+                .minByOrNull { variant -> variant.height }
+                ?.let { variant ->
+                    emitVideoVariantIfChanged(variant, reason = "selected-track")
+                }
         }
 
         override fun onVideoSizeChanged(videoSize: VideoSize) {
@@ -177,17 +184,23 @@ class AndroidExoPlayerAdapter(
         emit(PlayerEvent.VideoVariantChanged(variant))
     }
 
-    private fun logAvailableVideoTracks(tracks: Tracks) {
-        val variants = tracks.groups
+    private fun videoVariantsFromTracks(
+        tracks: Tracks,
+        selectedOnly: Boolean
+    ): List<PlayerVideoVariant> {
+        return tracks.groups
             .filter { group -> group.type == C.TRACK_TYPE_VIDEO }
             .flatMap { group ->
                 (0 until group.length)
                     .filter { index -> group.isTrackSupported(index, false) }
+                    .filter { index -> !selectedOnly || group.isTrackSelected(index) }
                     .map { index -> group.getTrackFormat(index).toVideoVariant() }
             }
             .distinctBy { variant -> variant.height to variant.bitrate }
             .sortedWith(compareBy<PlayerVideoVariant> { it.height }.thenBy { it.bitrate })
+    }
 
+    private fun logAvailableVideoTracks(variants: List<PlayerVideoVariant>) {
         if (variants.isEmpty()) return
         Log.d(
             ABR_LOG_TAG,

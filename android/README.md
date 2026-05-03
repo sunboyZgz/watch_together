@@ -196,6 +196,7 @@ android/
 - ExoPlayer 使用自定义 `DefaultLoadControl`，当前缓冲策略为 `minBuffer=30s / maxBuffer=90s / playbackStart=2.5s / rebufferStart=5s`，优先保障 2 倍速播放时有更充足的可播放缓存
 - ExoPlayer 使用 `DefaultTrackSelector` 接入 `master.m3u8` 的 ABR，当前最低视频尺寸约束为 720p，并通过 Logcat `WatchTogetherABR` 输出当前 variant
 - 2 倍速播放时会通过 Logcat `WatchTogetherBuffer` 输出低频 buffer debug 日志，包含 `state / pos / buffered / ahead / percent / speed`，用于判断是否真的发生 rebuffer
+- 播放器 telemetry 会通过 Logcat `WatchTogetherTelemetry` 输出 rebuffer start/end、rebuffer 次数、累计 rebuffer 时长和 correction 类型计数，用于区分下载不足、解码压力和同步 seek 干预
 - 全屏按钮位于播放/暂停按钮左侧，点击后进入播放器全屏层，再次点击退出
 - 播放/暂停使用轻量 icon 按钮，位于浮层控制栏最左侧
 - `-10` 和 `+10` 跟随播放/暂停按钮靠左排列
