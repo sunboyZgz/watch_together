@@ -336,6 +336,9 @@ PlayerScreen
 - `AndroidExoPlayerAdapter` 使用 `DefaultTrackSelector` 接入 ABR，当前最低视频尺寸约束为 720p，避免 master playlist 中意外出现低清晰度时被常规选择
 - `2.0x` 或 rebuffer 过多时会启用 `mobile_fast_720p` 策略，把 ABR 最高限制到 720p
 - 当前播放 variant 会通过 Logcat `WatchTogetherABR` 输出，播放器 overlay 右上角也会显示 `自动 · 当前清晰度`
+- HLS 播放通过 Media3 `SimpleCache + CacheDataSource + HlsMediaSource` 接入本地缓存，缓存目录为 Android `cacheDir/watch_together_media_cache`，当前上限为 `512MB`
+- 本地 HLS cache 主要解决 seek、rejoin、重复进入房间、短时间重播和后续 ahead prefetch 时对已下载 playlist / segment 的重复读取问题；它不是离线下载，也不替代服务端存储或 CDN
+- cache 命中、cache ignored 和 HLS cache 载入会通过 Logcat `WatchTogetherCache` 输出；播放器 `release()` 不会删除缓存，缓存由 LRU 策略和系统 cache 目录生命周期管理
 - 2 倍速及以上调试时，`PlayerScreen` 会通过 Logcat `WatchTogetherBuffer` 低频写入 buffer debug 日志，格式包含 `state / pos / buffered / ahead / effectiveAhead / estimatedSegmentsAhead / percent / speed`
 - 播放器 telemetry 会通过 Logcat `WatchTogetherTelemetry` 输出 rebuffer start/end、rebuffer 次数、累计 rebuffer 时长和 correction 类型计数
 - 高倍速起播门槛使用 `effectiveAheadMs = bufferedAheadMs / playbackSpeed` 和估算 segment 数，而不是只看原始 `bufferedAheadMs`

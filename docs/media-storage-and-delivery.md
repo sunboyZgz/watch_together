@@ -204,6 +204,13 @@ PostgreSQL 不保存：
 - 封面图片二进制
 - 对象存储上传临时文件
 
+Android 本地播放器 cache 也不属于 PostgreSQL 或服务端资源存储：
+
+- Android 使用 Media3 `SimpleCache` 缓存已下载的 HLS playlist / segment。
+- cache 目录位于应用 `cacheDir/watch_together_media_cache`，当前上限 `512MB`，由 LRU 淘汰。
+- 该 cache 主要解决 seek、rejoin、重复进入房间、短时间重播和后续 ahead prefetch 时的重复请求复用。
+- 该 cache 不是离线下载，不保证长期存在，也不应该作为业务数据来源。
+
 ## HLS 制作规范
 
 媒体源文件应通过 `ffmpeg` 转成 HLS。

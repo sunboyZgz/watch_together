@@ -249,6 +249,15 @@ android/
 - 已将 `03 放映室` 业务页面移出 `ui/player`，落到 `pages/room/RoomTheaterPage`
 - `PlayerScreen` 现在更接近“页面入口 + 状态协调 + 壳层组合”
 
+当前播放器核心性能策略：
+
+- HLS 播放使用 Media3 `SimpleCache + CacheDataSource + HlsMediaSource`
+- 本地缓存目录为 `cacheDir/watch_together_media_cache`
+- 当前缓存上限为 `512MB`，使用 LRU 淘汰
+- cache 主要用于复用已下载 HLS playlist / segment，改善 seek、rejoin、重复进入房间、短时间重播和后续 ahead prefetch 的恢复速度
+- cache 不是离线下载能力，不承诺长期保存，也不替代服务端存储或 CDN
+- 相关日志统一使用 `WatchTogetherCache`
+
 ## Debug Boundary
 
 当前页面中可见的：

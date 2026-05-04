@@ -12,9 +12,13 @@ import androidx.media3.common.Player
 import androidx.media3.common.Tracks
 import androidx.media3.common.VideoSize
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.DataSource
+import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.datasource.cache.CacheDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.analytics.AnalyticsListener
+import androidx.media3.exoplayer.hls.HlsMediaSource
 import androidx.media3.exoplayer.source.MediaLoadData
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
 import androidx.media3.ui.PlayerView
@@ -24,6 +28,27 @@ class AndroidExoPlayerAdapter(
     context: Context
 ) : PlayerAdapter {
 
+    private val appContext = context.applicationContext
+    private val cache = PlayerCacheProvider.get(appContext)
+    private val upstreamDataSourceFactory = DefaultHttpDataSource.Factory()
+    private val cacheEventListener = object : CacheDataSource.EventListener {
+        override fun onCachedBytesRead(cacheSizeBytes: Long, cachedBytesRead: Long) {
+            Log.d(
+                CACHE_LOG_TAG,
+                "cache hit cachedBytesRead=$cachedBytesRead cacheSizeBytes=$cacheSizeBytes"
+            )
+        }
+
+        override fun onCacheIgnored(reason: Int) {
+            Log.d(CACHE_LOG_TAG, "cache ignored reason=${reason.toCacheIgnoreReasonLabel()}")
+        }
+    }
+    private val cacheDataSourceFactory: DataSource.Factory = CacheDataSource.Factory()
+        .setCache(cache)
+        .setUpstreamDataSourceFactory(upstreamDataSourceFactory)
+        .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
+        .setEventListener(cacheEventListener)
+    private val hlsMediaSourceFactory = HlsMediaSource.Factory(cacheDataSourceFactory)
     private val trackSelector = DefaultTrackSelector(context).apply {
         setParameters(
             buildUponParameters()
@@ -136,7 +161,13 @@ class AndroidExoPlayerAdapter(
         latestVideoVariant = PlayerVideoVariant()
         emit(PlayerEvent.VideoVariantChanged(latestVideoVariant))
         val mediaItem = MediaItem.fromUri(url)
-        exoPlayer.setMediaItem(mediaItem)
+        if (url.isHlsPlaylistUrl()) {
+            Log.d(CACHE_LOG_TAG, "load HLS with local cache url=$url cacheSizeBytes=${cache.cacheSpace}")
+            exoPlayer.setMediaSource(hlsMediaSourceFactory.createMediaSource(mediaItem))
+        } else {
+            Log.d(CACHE_LOG_TAG, "load without HLS cache url=$url")
+            exoPlayer.setMediaItem(mediaItem)
+        }
         exoPlayer.prepare()
     }
 
@@ -250,6 +281,7 @@ class AndroidExoPlayerAdapter(
     private companion object {
         // Keep a larger VOD buffer so 2x playback does not immediately drain short HLS segments.
         const val ABR_LOG_TAG = "WatchTogetherABR"
+        const val CACHE_LOG_TAG = "WatchTogetherCache"
         const val MinVideoWidth = 1_280
         const val MinVideoHeight = 720
         const val MobileFastVideoWidth = 1_280
@@ -258,6 +290,19 @@ class AndroidExoPlayerAdapter(
         const val MaxBufferMs = 90_000
         const val BufferForPlaybackMs = 3_500
         const val BufferForPlaybackAfterRebufferMs = 10_000
+    }
+}
+
+private fun String.isHlsPlaylistUrl(): Boolean {
+    return substringBefore('?').substringBefore('#').endsWith(".m3u8", ignoreCase = true)
+}
+
+@OptIn(UnstableApi::class)
+private fun Int.toCacheIgnoreReasonLabel(): String {
+    return when (this) {
+        CacheDataSource.CACHE_IGNORED_REASON_ERROR -> "error"
+        CacheDataSource.CACHE_IGNORED_REASON_UNSET_LENGTH -> "unset_length"
+        else -> "unknown_$this"
     }
 }
 
