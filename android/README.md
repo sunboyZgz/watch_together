@@ -257,6 +257,8 @@ android/
 - cache 主要用于复用已下载 HLS playlist / segment，改善 seek、rejoin、重复进入房间、短时间重播和后续 ahead prefetch 的恢复速度
 - cache 不是离线下载能力，不承诺长期保存，也不替代服务端存储或 CDN
 - 相关日志统一使用 `WatchTogetherCache`
+- 已接入 HLS ahead prefetch，播放中会根据 current position 估算当前 segment，并在高倍速、rebuffer 较多或 effective buffer 偏低时提前把后续有限 segment 写入同一个 Media3 cache
+- prefetch 日志统一使用 `WatchTogetherPrefetch`
 
 ## Debug Boundary
 

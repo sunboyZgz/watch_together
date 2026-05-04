@@ -12,7 +12,6 @@ import androidx.media3.common.Player
 import androidx.media3.common.Tracks
 import androidx.media3.common.VideoSize
 import androidx.media3.common.util.UnstableApi
-import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.datasource.cache.CacheDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
@@ -43,12 +42,13 @@ class AndroidExoPlayerAdapter(
             Log.d(CACHE_LOG_TAG, "cache ignored reason=${reason.toCacheIgnoreReasonLabel()}")
         }
     }
-    private val cacheDataSourceFactory: DataSource.Factory = CacheDataSource.Factory()
+    private val cacheDataSourceFactory: CacheDataSource.Factory = CacheDataSource.Factory()
         .setCache(cache)
         .setUpstreamDataSourceFactory(upstreamDataSourceFactory)
         .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
         .setEventListener(cacheEventListener)
     private val hlsMediaSourceFactory = HlsMediaSource.Factory(cacheDataSourceFactory)
+    private val hlsAheadPrefetcher = HlsAheadPrefetcher(cacheDataSourceFactory)
     private val trackSelector = DefaultTrackSelector(context).apply {
         setParameters(
             buildUponParameters()
@@ -225,8 +225,31 @@ class AndroidExoPlayerAdapter(
         )
     }
 
+    override fun updateAheadPrefetch(
+        mediaUrl: String,
+        currentPositionMs: Long,
+        playbackSpeed: Float,
+        effectiveBufferedAheadMs: Long,
+        estimatedSegmentsAhead: Int,
+        rebufferCount: Int,
+        videoVariant: PlayerVideoVariant
+    ) {
+        hlsAheadPrefetcher.update(
+            HlsAheadPrefetchRequest(
+                mediaUrl = mediaUrl,
+                currentPositionMs = currentPositionMs,
+                playbackSpeed = playbackSpeed,
+                effectiveBufferedAheadMs = effectiveBufferedAheadMs,
+                estimatedSegmentsAhead = estimatedSegmentsAhead,
+                rebufferCount = rebufferCount,
+                videoVariant = videoVariant
+            )
+        )
+    }
+
     override fun release() {
         detach()
+        hlsAheadPrefetcher.release()
         exoPlayer.removeAnalyticsListener(analyticsListener)
         exoPlayer.removeListener(playerListener)
         eventListener = null
@@ -291,10 +314,6 @@ class AndroidExoPlayerAdapter(
         const val BufferForPlaybackMs = 3_500
         const val BufferForPlaybackAfterRebufferMs = 10_000
     }
-}
-
-private fun String.isHlsPlaylistUrl(): Boolean {
-    return substringBefore('?').substringBefore('#').endsWith(".m3u8", ignoreCase = true)
 }
 
 @OptIn(UnstableApi::class)

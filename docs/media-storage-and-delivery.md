@@ -211,6 +211,13 @@ Android 本地播放器 cache 也不属于 PostgreSQL 或服务端资源存储�
 - 该 cache 主要解决 seek、rejoin、重复进入房间、短时间重播和后续 ahead prefetch 时的重复请求复用。
 - 该 cache 不是离线下载，不保证长期存在，也不应该作为业务数据来源。
 
+Android ahead prefetch 基于同一个 cache 工作：
+
+- 播放器会解析 VOD HLS playlist，并根据当前播放位置估算当前 segment。
+- 在 1.5x、2.0x、rebuffer 较多或 effective buffer 偏低时，提前把未来有限 segment 写入 Media3 cache。
+- 第一版只预取当前将要播放的 variant，不做多 variant 大规模预取。
+- 预取窗口是性能策略，不会写入 PostgreSQL，也不会改变服务端 HLS 文件结构。
+
 ## HLS 制作规范
 
 媒体源文件应通过 `ffmpeg` 转成 HLS。

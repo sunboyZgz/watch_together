@@ -538,13 +538,18 @@ drift correction 是当前最值得持续跟踪的核心技术点之一。
    - 如果频繁出现 `cache ignored`，需要检查资源是否支持缓存复用、URL 是否稳定，以及是否发生了 cache error。
    - 如果 cache 命中正常但仍然频繁 rebuffer，问题更可能在解码能力、ABR 选档、HLS segment 结构或同步 correction。
 
-5. 看 correction 日志
+5. 看 `WatchTogetherPrefetch`
+   - `prefetch start` 会显示当前 segment、预取数量、播放速度、effective buffer 和当前 variant。
+   - `prefetch done` 说明未来 segment 已经写入播放器同一个 Media3 cache，后续正式播放可以复用。
+   - 如果预取成功但仍然卡顿，优先回看 `WatchTogetherBuffer` 的 `effectiveAhead / segments` 和设备解码能力；如果预取失败，优先检查 HLS URL、静态服务和 segment 路径。
+
+6. 看 correction 日志
    - 如果主要出现 `correction type=speed_nudge`，说明漂移较小，播放器正在用临时变速温和追平。
    - 如果 rebuffer 附近频繁出现 `correction type=drift_seek`，说明漂移已经超过 seek fallback 阈值，同步 correction 可能在打断播放器。
    - 如果出现 `correction type=speed_nudge_restore`，说明临时变速已经恢复到 authority playbackRate。
    - 如果 correction 很少但 rebuffer 很多，说明更可能是播放资源、ABR 或解码能力问题。
 
-6. 结合播放倍率
+7. 结合播放倍率
    - 1.0x 稳定、1.5x 稳定、2.0x 不稳定，通常说明资源和设备在高倍率下触达了吞吐或解码上限。
    - 1.0x 都不稳定，优先检查 HLS 文件、静态服务、URL 和 ExoPlayer 错误。
 
@@ -566,6 +571,7 @@ drift correction 是当前最值得持续跟踪的核心技术点之一。
 - 当前 variant：`WatchTogetherABR`
 - buffer ahead：`WatchTogetherBuffer`
 - cache 行为：`WatchTogetherCache`
+- ahead prefetch 行为：`WatchTogetherPrefetch`
 - rebuffer 次数与时长：`WatchTogetherTelemetry`
 - correction 类型：`speed_nudge / drift_seek`
 - 播放设备：模拟器配置或真机型号

@@ -21,6 +21,15 @@ interface PlayerAdapter {
 
     fun setPlaybackSpeed(speed: Float)
     fun updatePlaybackStrategy(playbackSpeed: Float, rebufferCount: Int) = Unit
+    fun updateAheadPrefetch(
+        mediaUrl: String,
+        currentPositionMs: Long,
+        playbackSpeed: Float,
+        effectiveBufferedAheadMs: Long,
+        estimatedSegmentsAhead: Int,
+        rebufferCount: Int,
+        videoVariant: PlayerVideoVariant
+    ) = Unit
 
     fun release()
 }
