@@ -669,6 +669,29 @@ fun PlayerScreen(
         appendLog(syncLogs, "seek sent=$sent to ${targetPositionMs}ms")
     }
 
+    fun commitProgressSeek(targetPositionMs: Long) {
+        if (!uiState.canControlPlayback) {
+            appendLog(syncLogs, "progress seek ignored: media is not ready")
+            return
+        }
+        val safeDuration = uiState.player.duration.takeIf { it > 0L }
+        val target = if (safeDuration != null) {
+            targetPositionMs.coerceIn(0L, safeDuration)
+        } else {
+            targetPositionMs.coerceAtLeast(0L)
+        }
+        updateUiState { current ->
+            current.copy(lastDriftCorrectionAtMs = System.currentTimeMillis())
+        }
+        if (isHostController && uiState.latestSyncState != null) {
+            appendLog(syncLogs, "progress seek commit path=sync target=${target}ms")
+            sendSeek(target)
+        } else {
+            appendLog(syncLogs, "progress seek commit path=local target=${target}ms")
+            adapter.seekTo(target)
+        }
+    }
+
     fun sendPlaybackRateSync(speed: Float) {
         val currentState = uiState.latestSyncState ?: return
         if (!uiState.canControlPlayback) {
@@ -817,6 +840,9 @@ fun PlayerScreen(
             } else {
                 adapter.seekTo(target)
             }
+        },
+        onProgressSeekCommit = { targetPositionMs ->
+            commitProgressSeek(targetPositionMs)
         },
         onPlaybackSpeedChange = speedChange@{ speed ->
             if (!uiState.canControlPlayback) {

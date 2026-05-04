@@ -19,6 +19,9 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Surface
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -65,6 +68,7 @@ internal fun PlayerCoreShell(
     onPlaybackToggleClick: () -> Unit,
     onSeekBackwardClick: () -> Unit,
     onSeekForwardClick: () -> Unit,
+    onProgressSeekCommit: (Long) -> Unit,
     onPlaybackSpeedChange: (Float) -> Unit,
     modifier: Modifier = Modifier,
     compactWidth: Boolean = false
@@ -90,7 +94,9 @@ internal fun PlayerCoreShell(
             mediaTitle = mediaTitle,
             mediaMeta = mediaMeta,
             currentPosition = currentPosition,
-            duration = duration
+            duration = duration,
+            seekEnabled = secondaryControlsEnabled,
+            onProgressSeekCommit = onProgressSeekCommit
         )
     }
 }
@@ -352,13 +358,17 @@ private fun MediaSummary(
     mediaTitle: String,
     mediaMeta: String,
     currentPosition: Long,
-    duration: Long
+    duration: Long,
+    seekEnabled: Boolean,
+    onProgressSeekCommit: (Long) -> Unit
 ) {
-    val progress = if (duration > 0L) {
-        (currentPosition.toFloat() / duration.toFloat()).coerceIn(0f, 1f)
-    } else {
-        0f
-    }
+    var dragging by rememberSaveable { mutableStateOf(false) }
+    var dragPositionMs by rememberSaveable { mutableStateOf(0L) }
+    val safeDuration = duration.coerceAtLeast(0L)
+    val displayPosition = if (dragging) dragPositionMs else currentPosition
+    val progress = if (safeDuration > 0L) {
+        (displayPosition.toFloat() / safeDuration.toFloat()).coerceIn(0f, 1f)
+    } else 0f
 
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Text(
@@ -371,13 +381,78 @@ private fun MediaSummary(
             overflow = TextOverflow.Ellipsis
         )
         Text(
-            text = "$mediaMeta · ${formatMs(currentPosition)} / ${formatMs(duration)}",
+            text = "$mediaMeta · ${formatMs(displayPosition)} / ${formatMs(duration)}",
             color = PlayerTextMuted,
             fontSize = 14.sp,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
         )
         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            SeekProgressBar(
+                progress = progress,
+                enabled = seekEnabled && safeDuration > 0L,
+                onProgressChange = { nextProgress ->
+                    dragging = true
+                    dragPositionMs = (safeDuration * nextProgress).toLong()
+                        .coerceIn(0L, safeDuration)
+                },
+                onProgressCommit = {
+                    if (dragging && safeDuration > 0L) {
+                        onProgressSeekCommit(dragPositionMs.coerceIn(0L, safeDuration))
+                    }
+                    dragging = false
+                }
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(text = formatMs(displayPosition), color = PlayerTextMuted, fontSize = 12.sp)
+                Text(text = formatMs(duration), color = PlayerTextMuted, fontSize = 12.sp)
+            }
+        }
+    }
+}
+
+@Composable
+@OptIn(ExperimentalMaterial3Api::class)
+private fun SeekProgressBar(
+    progress: Float,
+    enabled: Boolean,
+    onProgressChange: (Float) -> Unit,
+    onProgressCommit: () -> Unit
+) {
+    val colors = SliderDefaults.colors(
+        thumbColor = PlayerText,
+        activeTrackColor = PlayerPrimary,
+        inactiveTrackColor = Color(0x22FFFFFF),
+        disabledThumbColor = PlayerTextMuted.copy(alpha = 0.55f),
+        disabledActiveTrackColor = PlayerPrimary.copy(alpha = 0.45f),
+        disabledInactiveTrackColor = Color(0x18FFFFFF)
+    )
+    Slider(
+        value = progress.coerceIn(0f, 1f),
+        onValueChange = { value -> onProgressChange(value.coerceIn(0f, 1f)) },
+        onValueChangeFinished = onProgressCommit,
+        enabled = enabled,
+        colors = colors,
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(24.dp),
+        thumb = {
+            Box(
+                modifier = Modifier
+                    .size(if (enabled) 14.dp else 10.dp)
+                    .clip(CircleShape)
+                    .background(
+                        Brush.radialGradient(
+                            listOf(PlayerText, PlayerPrimary)
+                        )
+                    )
+            )
+        },
+        track = { sliderState ->
+            val activeProgress = sliderState.value.coerceIn(0f, 1f)
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -387,25 +462,14 @@ private fun MediaSummary(
             ) {
                 Box(
                     modifier = Modifier
-                        .fillMaxWidth(progress)
+                        .fillMaxWidth(activeProgress)
                         .height(8.dp)
                         .clip(RoundedCornerShape(999.dp))
-                        .background(
-                            Brush.horizontalGradient(
-                                listOf(PlayerPrimary, PlayerAccent)
-                            )
-                        )
+                        .background(Brush.horizontalGradient(listOf(PlayerPrimary, PlayerAccent)))
                 )
             }
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text(text = formatMs(currentPosition), color = PlayerTextMuted, fontSize = 12.sp)
-                Text(text = formatMs(duration), color = PlayerTextMuted, fontSize = 12.sp)
-            }
         }
-    }
+    )
 }
 
 @Composable

@@ -82,6 +82,7 @@ internal fun RoomTheaterPage(
     onPlaybackToggleClick: () -> Unit,
     onSeekBackwardClick: () -> Unit,
     onSeekForwardClick: () -> Unit,
+    onProgressSeekCommit: (Long) -> Unit,
     onPlaybackSpeedChange: (Float) -> Unit,
     onJoinRoomInputChange: (String) -> Unit,
     onCreateAndJoinAsHost: () -> Unit,
@@ -145,6 +146,7 @@ internal fun RoomTheaterPage(
                 onPlaybackToggleClick = onPlaybackToggleClick,
                 onSeekBackwardClick = onSeekBackwardClick,
                 onSeekForwardClick = onSeekForwardClick,
+                onProgressSeekCommit = onProgressSeekCommit,
                 onPlaybackSpeedChange = onPlaybackSpeedChange
             )
 
@@ -579,6 +581,7 @@ private fun RoomTheaterPagePreview() {
             onPlaybackToggleClick = {},
             onSeekBackwardClick = {},
             onSeekForwardClick = {},
+            onProgressSeekCommit = {},
             onPlaybackSpeedChange = {},
             onJoinRoomInputChange = {},
             onCreateAndJoinAsHost = {},

@@ -341,7 +341,8 @@ PlayerScreen
 - cache 命中、cache ignored 和 HLS cache 载入会通过 Logcat `WatchTogetherCache` 输出；播放器 `release()` 不会删除缓存，缓存由 LRU 策略和系统 cache 目录生命周期管理
 - HLS ahead prefetch 基于同一个 `CacheDataSource` 工作：播放器会解析 VOD HLS playlist，根据当前播放位置估算 segment index，并在 1.5x、2.0x、rebuffer 较多或 effective buffer 偏低时提前缓存后续有限 segment
 - 当前预取窗口：`2.0x` 预取约 10 个后续 segment，`1.5x` 预取约 5 个后续 segment，rebuffer 较多时预取约 8 个，低 effective buffer 时预取约 3 个；预取不是整集下载
-- 预取日志使用 `WatchTogetherPrefetch`，需要和 `WatchTogetherCache / WatchTogetherBuffer / WatchTogetherTelemetry` 一起看，判断是下载不足、cache 未命中、还是解码/封装问题
+- 预取日志使用 `WatchTogetherPrefetch`，会记录 selected variant、segment prefetch start/done、segment URL 和 cache space before/after，需要和 `WatchTogetherCache / WatchTogetherBuffer / WatchTogetherTelemetry` 一起看
+- 进度条支持拖拽 seek preview：拖动中只更新 UI 预览，松手后才提交一次 seek；host 提交同步 seek，viewer 第一版只做本地 seek，不向房间广播
 - 2 倍速及以上调试时，`PlayerScreen` 会通过 Logcat `WatchTogetherBuffer` 低频写入 buffer debug 日志，格式包含 `state / pos / buffered / ahead / effectiveAhead / estimatedSegmentsAhead / percent / speed`
 - 播放器 telemetry 会通过 Logcat `WatchTogetherTelemetry` 输出 rebuffer start/end、rebuffer 次数、累计 rebuffer 时长和 correction 类型计数
 - 高倍速起播门槛使用 `effectiveAheadMs = bufferedAheadMs / playbackSpeed` 和估算 segment 数，而不是只看原始 `bufferedAheadMs`

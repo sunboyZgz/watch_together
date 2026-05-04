@@ -467,7 +467,161 @@ drift correction 是当前最值得持续跟踪的核心技术点之一。
 - average drift before correction
 - average drift after correction
 
-### 7. Player Telemetry And Rebuffer Diagnosis
+### 10. Player Cache And Ahead Prefetch
+
+播放器 cache 是 Android 端播放器核心性能层的一部分，不属于 WebSocket 同步协议，也不属于服务端业务存储。它的目标是让已经下载过的 HLS playlist / segment 可以被后续播放、seek、rejoin 和预取复用。
+
+当前实现位置：
+
+- `PlayerCacheProvider`
+  - 管理 Media3 `SimpleCache` 单例。
+  - 缓存目录：`cacheDir/watch_together_media_cache`。
+  - 当前缓存上限：`512MB`。
+  - 淘汰策略：`LeastRecentlyUsedCacheEvictor`。
+  - 不在 `PlayerAdapter.release()` 时删除缓存，避免退出房间后马上丢失可复用 segment。
+- `AndroidExoPlayerAdapter`
+  - `.m3u8` 资源通过 `HlsMediaSource.Factory(CacheDataSource.Factory)` 加载。
+  - 正式播放链路和 ahead prefetch 使用同一个 `CacheDataSource.Factory`。
+  - 非 HLS URL 保留普通 `setMediaItem` 路径。
+- `HlsAheadPrefetcher`
+  - 解析 VOD HLS playlist。
+  - 根据当前播放位置估算 segment index。
+  - 按有限窗口提前把未来 segment 写入同一个 Media3 cache。
+
+#### Cache 当前做了什么
+
+当前 cache 做的是 HLS 请求级复用：
+
+1. 播放器加载 HLS 时，`HlsMediaSource` 通过 `CacheDataSource` 读取 playlist 和 segment。
+2. 如果请求的数据已经存在于 `SimpleCache`，Media3 可以直接从本地 cache 读取。
+3. 如果不存在，则走上游 HTTP 数据源下载，并写入 `SimpleCache`。
+4. ahead prefetch 使用 `CacheWriter` 提前请求未来 segment，并写入同一个 `SimpleCache`。
+5. 后续正式播放到这些 segment 时，可以命中本地 cache，而不是重新请求静态服务或对象存储。
+
+当前为了方便判断 cache 是否真的被写入和复用，`WatchTogetherPrefetch` 会记录：
+
+- selected variant URL 和 preferred variant profile。
+- segment prefetch start URL。
+- segment prefetch done URL。
+- cache space before / after。
+- segment prefetch failed error。
+
+它当前不做：
+
+- 整集离线下载。
+- 后台跨集预下载。
+- 跨账号共享缓存。
+- 长期持久保存承诺。
+- 用户可视化缓存管理。
+- DRM / 加密缓存。
+
+#### 哪些功能依赖 Cache
+
+当前已经依赖 cache 的功能：
+
+- HLS 正式播放链路：`.m3u8` 通过 `HlsMediaSource + CacheDataSource` 加载。
+- `INT-168` HLS ahead prefetch：预取未来 segment 时必须写入同一个 cache，否则预取数据无法被正式播放复用。
+- seek / 回退体验：拖回已下载过的位置时，如果 segment 仍在 cache 中，恢复速度应该更快。
+- repeated join / rejoin：同一设备短时间重新进入同一房间时，已经下载过的 playlist / segment 有机会被复用。
+- 高倍速播放稳定性：1.5x / 2.0x 下，cache 和 ahead prefetch 可以降低下载吞吐抖动对 buffer 的影响。
+
+后续计划依赖或扩展 cache 的功能：
+
+- draggable progress bar seek preview / seek commit。
+- bandwidth-aware prefetch scheduler。
+- decode-aware quality strategy。
+- cache-aware ABR 策略。
+- 手动清晰度切换后的 variant cache 复用。
+- 更细粒度的 cache hit / miss telemetry。
+
+后续升级 bandwidth-aware、decode-aware、manual quality 或更智能 prefetch 时，必须同步更新本小节，说明新策略如何读取或写入 cache，以及会不会改变当前 cache 边界。
+
+#### Buffer 与 Cache 的区别
+
+`buffer` 和 `cache` 很容易混淆，但它们解决的问题不同：
+
+- `buffer`
+  - 是播放器当前播放会话中的“可立即播放的数据水位”。
+  - 通常由 ExoPlayer 管理，和当前播放位置、解码队列、加载队列直接相关。
+  - 典型指标是 `bufferedPosition / bufferedAheadMs / bufferedPercentage`。
+  - buffer 充足意味着“现在继续播放一段时间大概率不会卡”。
+  - buffer 会随着播放被消耗，也会因为 seek、切源、释放播放器而变化。
+- `cache`
+  - 是应用磁盘 cache 中保存过的 HLS playlist / segment。
+  - 它不等于当前播放器已经准备好可立即播放的数据。
+  - cache 命中意味着“这段数据不用再从网络拉，可以更快进入播放器加载流程”。
+  - cache 可以跨 seek、rejoin、短时间重播复用。
+  - cache 中有 segment，不代表 ExoPlayer 当前 buffer ahead 一定很高；播放器仍需要把 cache 数据读入播放 pipeline。
+
+判断方式：
+
+- `WatchTogetherBuffer` 回答的是：播放器当前还剩多少可播放水位。
+- `WatchTogetherCache` 回答的是：本次数据请求有没有从本地 cache 复用。
+- `WatchTogetherPrefetch` 回答的是：我们有没有提前把未来 segment 放进 cache。
+
+一个典型情况：
+
+```text
+WatchTogetherPrefetch: prefetch done completed=10 requested=10
+WatchTogetherCache: cache hit cachedBytesRead=...
+WatchTogetherBuffer: ahead=3000ms effectiveAhead=1500ms
+```
+
+这说明“未来数据可能已经被 cache 复用了”，但播放器当前可立即播放的 buffer 仍然偏低。此时问题可能在播放器加载速度、解码能力、ABR 选档或 segment 封装，而不一定是网络请求没有缓存。
+
+#### 如何看 Cache 是否被播放器使用
+
+优先看 Logcat：
+
+1. `WatchTogetherCache`
+   - `cache initialized ...`
+     - 说明 `SimpleCache` 已创建。
+   - `load HLS with local cache url=...`
+     - 说明当前 HLS 正式播放链路已经走 `HlsMediaSource + CacheDataSource`。
+   - `cache hit cachedBytesRead=... cacheSizeBytes=...`
+     - 说明播放器或 prefetch 读取到了本地 cache 数据。
+   - `cache ignored reason=error`
+     - 说明 cache 因错误被忽略，需要检查 cache 目录、数据源错误或 Media3 cache 状态。
+   - `cache ignored reason=unset_length`
+     - 说明部分请求长度未知，Media3 对该请求可能不使用 cache。
+
+2. `WatchTogetherPrefetch`
+   - `playlist ready ...`
+     - 说明预取器已经解析到 HLS media playlist。
+   - `selected variant url=...`
+     - 说明 master playlist 已被解析，并选中了将要预取的 variant。
+   - `prefetch start ...`
+     - 说明开始把未来 segment 写入 cache。
+   - `segment prefetch start url=... cacheBeforeBytes=...`
+     - 说明某个 segment 开始写入 cache。
+   - `segment prefetch done url=... cacheBeforeBytes=... cacheAfterBytes=...`
+     - 说明某个 segment 写入流程完成；如果 `cacheAfterBytes` 增加，通常表示 cache 新增了数据。
+   - `prefetch done completed=... requested=...`
+     - 说明预取写入流程完成。
+   - `segment prefetch failed ...`
+     - 说明某些 segment 没有成功写入 cache，需要检查 URL、静态服务或 HLS 路径。
+
+3. `WatchTogetherBuffer`
+   - 如果 cache / prefetch 生效，重复播放、seek 回已播放区间或 rejoin 后，`BUFFERING` 时长和次数应下降。
+   - 如果 cache hit 很多但 `BUFFERING` 仍持续出现，优先怀疑解码能力、HLS 封装、ABR 选档或同步 correction，而不是 cache 未启用。
+
+#### Cache 相关排查建议
+
+排查时按下面顺序判断：
+
+1. 是否出现 `load HLS with local cache`
+   - 没有出现：说明当前 URL 可能不是 `.m3u8`，或播放链路没有走 HLS cache。
+2. 是否出现 `prefetch start / prefetch done`
+   - 没有出现：说明当前倍率、effective buffer、rebuffer 次数还没有触发 prefetch，或者当前资源不是可解析的 VOD HLS。
+3. seek 回已播放区间后是否出现 `cache hit`
+   - 出现：说明 cache 正在被使用。
+   - 不出现：检查 URL 是否稳定、segment 路径是否一致、是否切换了不同 variant。
+4. `cache hit` 后是否仍 rebuffer
+   - 如果仍 rebuffer，看 `WatchTogetherBuffer` 的 `effectiveAhead / segments`。
+   - 如果 buffer 水位仍低，看播放器加载和解码能力。
+   - 如果 buffer 水位高但进入 `BUFFERING`，看 MediaCodec、HLS 封装和模拟器性能。
+
+### 11. Player Telemetry And Rebuffer Diagnosis
 
 播放器优化必须先能观测，再谈调参。当前 Android 端已经把播放、缓冲、ABR 和同步 correction 的关键信息拆成三个 Logcat 标签：
 

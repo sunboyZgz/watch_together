@@ -258,7 +258,8 @@ android/
 - cache 不是离线下载能力，不承诺长期保存，也不替代服务端存储或 CDN
 - 相关日志统一使用 `WatchTogetherCache`
 - 已接入 HLS ahead prefetch，播放中会根据 current position 估算当前 segment，并在高倍速、rebuffer 较多或 effective buffer 偏低时提前把后续有限 segment 写入同一个 Media3 cache
-- prefetch 日志统一使用 `WatchTogetherPrefetch`
+- prefetch 日志统一使用 `WatchTogetherPrefetch`，会记录 selected variant、segment URL、cache space before/after
+- 进度条支持拖拽 seek preview，拖动过程中不广播同步事件，松手后 host 才提交一次同步 seek
 
 ## Debug Boundary
 

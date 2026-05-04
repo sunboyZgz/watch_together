@@ -48,7 +48,7 @@ class AndroidExoPlayerAdapter(
         .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
         .setEventListener(cacheEventListener)
     private val hlsMediaSourceFactory = HlsMediaSource.Factory(cacheDataSourceFactory)
-    private val hlsAheadPrefetcher = HlsAheadPrefetcher(cacheDataSourceFactory)
+    private val hlsAheadPrefetcher = HlsAheadPrefetcher(cacheDataSourceFactory, cache)
     private val trackSelector = DefaultTrackSelector(context).apply {
         setParameters(
             buildUponParameters()

@@ -8,6 +8,7 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DataSpec
 import androidx.media3.datasource.cache.CacheDataSource
 import androidx.media3.datasource.cache.CacheWriter
+import androidx.media3.datasource.cache.SimpleCache
 import java.io.ByteArrayOutputStream
 import java.net.URI
 import java.util.concurrent.ExecutorService
@@ -18,6 +19,7 @@ import kotlin.math.abs
 @OptIn(UnstableApi::class)
 internal class HlsAheadPrefetcher(
     private val dataSourceFactory: CacheDataSource.Factory,
+    private val cache: SimpleCache,
     private val logTag: String = "WatchTogetherPrefetch",
 ) {
     private val executor: ExecutorService = Executors.newSingleThreadExecutor { runnable ->
@@ -89,6 +91,11 @@ internal class HlsAheadPrefetcher(
         var completed = 0
         segmentUrls.forEach { segmentUrl ->
             runCatching {
+                val cacheBeforeBytes = cache.cacheSpace
+                Log.d(
+                    logTag,
+                    "segment prefetch start url=$segmentUrl cacheBeforeBytes=$cacheBeforeBytes"
+                )
                 CacheWriter(
                     dataSourceFactory.createDataSource(),
                     DataSpec(Uri.parse(segmentUrl)),
@@ -96,6 +103,11 @@ internal class HlsAheadPrefetcher(
                     null
                 ).cache()
                 completed += 1
+                Log.d(
+                    logTag,
+                    "segment prefetch done url=$segmentUrl cacheBeforeBytes=$cacheBeforeBytes " +
+                        "cacheAfterBytes=${cache.cacheSpace}"
+                )
             }.onFailure { error ->
                 Log.d(logTag, "segment prefetch failed url=$segmentUrl error=${error.message}")
             }
@@ -129,6 +141,11 @@ internal class HlsAheadPrefetcher(
                 Log.d(logTag, "prefetch skipped: no playable variant in master url=${request.mediaUrl}")
                 return null
             }
+            Log.d(
+                logTag,
+                "selected variant url=$variantUrl profile=${request.preferredVariantProfile()} " +
+                    "speed=${request.playbackSpeed}x variant=${request.videoVariant.displayLabel}"
+            )
             val variantText = readText(variantUrl)
             parseHlsMediaPlaylist(variantUrl, variantText)
         }
