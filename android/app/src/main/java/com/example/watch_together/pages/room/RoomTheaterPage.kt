@@ -47,6 +47,7 @@ import com.example.watch_together.ui.player.PlayerAdapter
 import com.example.watch_together.ui.player.PlayerCoreShell
 import com.example.watch_together.ui.player.PlayerEvent
 import com.example.watch_together.ui.player.PlayerRuntimeUiState
+import com.example.watch_together.ui.player.PlayerVideoQualityPreference
 import com.example.watch_together.ui.player.RoomPlayerUiState
 import com.example.watch_together.ui.player.SyncStatus
 import com.example.watch_together.ui.theme.Watch_togetherTheme
@@ -84,6 +85,7 @@ internal fun RoomTheaterPage(
     onSeekForwardClick: () -> Unit,
     onProgressSeekCommit: (Long) -> Unit,
     onPlaybackSpeedChange: (Float) -> Unit,
+    onVideoQualityPreferenceChange: (PlayerVideoQualityPreference) -> Unit,
     onJoinRoomInputChange: (String) -> Unit,
     onCreateAndJoinAsHost: () -> Unit,
     onJoinAsViewer: () -> Unit,
@@ -131,6 +133,9 @@ internal fun RoomTheaterPage(
                 isPlaying = uiState.player.isPlaying,
                 playbackSpeed = uiState.player.playbackSpeed,
                 videoQualityLabel = uiState.player.videoVariant.displayLabel,
+                availableVideoQualities = uiState.player.availableVideoQualities,
+                videoQualityPreference = uiState.player.videoQualityPreference,
+                videoQualityNotice = uiState.player.videoQualityNotice,
                 controlHint = when {
                     uiState.player.playbackState == Player.STATE_BUFFERING -> "正在缓冲，播放器恢复后会继续跟随同步。"
                     uiState.player.playbackState == Player.STATE_ENDED -> "当前视频已播放结束。"
@@ -147,7 +152,8 @@ internal fun RoomTheaterPage(
                 onSeekBackwardClick = onSeekBackwardClick,
                 onSeekForwardClick = onSeekForwardClick,
                 onProgressSeekCommit = onProgressSeekCommit,
-                onPlaybackSpeedChange = onPlaybackSpeedChange
+                onPlaybackSpeedChange = onPlaybackSpeedChange,
+                onVideoQualityPreferenceChange = onVideoQualityPreferenceChange
             )
 
             TheaterStatusPanel(
@@ -583,6 +589,7 @@ private fun RoomTheaterPagePreview() {
             onSeekForwardClick = {},
             onProgressSeekCommit = {},
             onPlaybackSpeedChange = {},
+            onVideoQualityPreferenceChange = {},
             onJoinRoomInputChange = {},
             onCreateAndJoinAsHost = {},
             onJoinAsViewer = {},

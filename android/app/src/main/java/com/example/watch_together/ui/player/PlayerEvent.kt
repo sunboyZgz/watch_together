@@ -6,7 +6,12 @@ sealed interface PlayerEvent {
     data object Ready : PlayerEvent
 
     data class VideoVariantChanged(
-        val variant: PlayerVideoVariant
+        val variant: PlayerVideoVariant,
+        val reason: String = ""
+    ) : PlayerEvent
+
+    data class VideoQualitiesChanged(
+        val options: List<PlayerVideoQualityOption>
     ) : PlayerEvent
 
     data class PlayWhenReadyChanged(
@@ -67,6 +72,33 @@ data class PlayerVideoVariant(
         }
 }
 
+data class PlayerVideoQualityOption(
+    val height: Int?,
+    val label: String,
+    val available: Boolean = true
+) {
+    val isAuto: Boolean
+        get() = height == null
+
+    companion object {
+        val Auto = PlayerVideoQualityOption(height = null, label = "自动")
+    }
+}
+
+data class PlayerVideoQualityPreference(
+    val height: Int? = null
+) {
+    val isAuto: Boolean
+        get() = height == null
+
+    val label: String
+        get() = height?.let { "${it}p" } ?: "自动"
+
+    companion object {
+        val Auto = PlayerVideoQualityPreference()
+    }
+}
+
 fun Int.toPlaybackStateLabel(): String {
     return when (this) {
         Player.STATE_IDLE -> "IDLE"
@@ -81,7 +113,10 @@ fun PlayerEvent.toDebugLabel(): String {
     return when (this) {
         PlayerEvent.Ready -> "Ready"
         is PlayerEvent.VideoVariantChanged ->
-            "VideoVariantChanged(${variant.debugLabel})"
+            "VideoVariantChanged(reason=$reason, ${variant.debugLabel})"
+
+        is PlayerEvent.VideoQualitiesChanged ->
+            "VideoQualitiesChanged(${options.joinToString { it.label }})"
 
         is PlayerEvent.PlayWhenReadyChanged ->
             "PlayWhenReadyChanged(playWhenReady=$playWhenReady, reason=$reason)"

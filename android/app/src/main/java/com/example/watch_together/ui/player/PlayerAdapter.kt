@@ -20,6 +20,7 @@ interface PlayerAdapter {
     fun isPlaying(): Boolean
 
     fun setPlaybackSpeed(speed: Float)
+    fun setVideoQualityPreference(preference: PlayerVideoQualityPreference) = Unit
     fun updatePlaybackStrategy(playbackSpeed: Float, rebufferCount: Int) = Unit
     fun updateAheadPrefetch(
         mediaUrl: String,

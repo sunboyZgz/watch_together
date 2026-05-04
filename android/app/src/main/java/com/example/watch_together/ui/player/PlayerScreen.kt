@@ -119,11 +119,22 @@ fun PlayerScreen(
             appendLog(playerEventLogs, event.toDebugLabel(), maxSize = 8)
             if (event is PlayerEvent.VideoVariantChanged) {
                 updateUiState { current ->
+                    val qualityNotice = current.player.nextQualityNotice(event)
                     current.copy(
-                        player = current.player.copy(videoVariant = event.variant)
+                        player = current.player.copy(
+                            videoVariant = event.variant,
+                            videoQualityNotice = qualityNotice
+                        )
                     )
                 }
                 appendLog(syncLogs, "video variant ${event.variant.debugLabel}")
+            }
+            if (event is PlayerEvent.VideoQualitiesChanged) {
+                updateUiState { current ->
+                    current.copy(
+                        player = current.player.copy(availableVideoQualities = event.options)
+                    )
+                }
             }
             if (event is PlayerEvent.PlaybackStateChanged) {
                 val nowMs = System.currentTimeMillis()
@@ -132,8 +143,7 @@ fun PlayerScreen(
                 val snapshot = playerSnapshotFromAdapter(
                     adapter = adapter,
                     playbackState = event.playbackState,
-                    playbackSpeed = currentUiState.player.playbackSpeed,
-                    videoVariant = currentUiState.player.videoVariant
+                    currentPlayer = currentUiState.player
                 )
                 val telemetry = updateRebufferTelemetry(
                     previousPlayer = previousPlayer,
@@ -174,8 +184,7 @@ fun PlayerScreen(
             val snapshot = playerSnapshotFromAdapter(
                 adapter = adapter,
                 playbackState = uiState.player.playbackState,
-                playbackSpeed = uiState.player.playbackSpeed,
-                videoVariant = uiState.player.videoVariant
+                currentPlayer = uiState.player
             )
             updateUiState { current ->
                 current.copy(
@@ -863,6 +872,22 @@ fun PlayerScreen(
                 adapter.setPlaybackSpeed(speed)
             }
         },
+        onVideoQualityPreferenceChange = { preference ->
+            appendLog(syncLogs, "quality preference click value=${preference.label}")
+            updateUiState { current ->
+                current.copy(
+                    player = current.player.copy(
+                        videoQualityPreference = preference,
+                        videoQualityNotice = if (preference.isAuto) {
+                            "已切回自动清晰度，会根据播放流畅度调整。"
+                        } else {
+                            "已切到 ${preference.label}，卡顿时会优先保障流畅。"
+                        }
+                    )
+                )
+            }
+            adapter.setVideoQualityPreference(preference)
+        },
         onJoinRoomInputChange = { value ->
             updateUiState { current -> current.copy(joinRoomInput = value) }
         },
@@ -875,7 +900,8 @@ fun PlayerScreen(
 @Composable
 private fun rememberPlayerAdapter(): PlayerAdapter {
     val context = androidx.compose.ui.platform.LocalContext.current
-    val adapter = remember(context) { AndroidExoPlayerAdapter(context) }
+    val appContext = context.applicationContext
+    val adapter = remember(appContext) { AndroidExoPlayerAdapter(appContext) }
 
     DisposableEffect(adapter) {
         onDispose {
@@ -1018,20 +1044,41 @@ private fun PlayerRuntimeUiState.dynamicSeekFallbackThresholdMs(): Long {
     }
 }
 
+private fun PlayerRuntimeUiState.nextQualityNotice(event: PlayerEvent.VideoVariantChanged): String {
+    val previousHeight = videoVariant.height
+    val nextHeight = event.variant.height
+    if (nextHeight <= 0) return videoQualityNotice
+    if (!videoQualityPreference.isAuto && nextHeight < (videoQualityPreference.height ?: 0)) {
+        return "当前网络或设备压力较高，已优先保障流畅播放。"
+    }
+    if (videoQualityPreference.isAuto &&
+        previousHeight > 0 &&
+        nextHeight < previousHeight &&
+        (event.reason == "abr" || event.reason == "selected-track")
+    ) {
+        return "播放不流畅，已自动切到 ${event.variant.qualityLabel}。"
+    }
+    if (videoQualityPreference.isAuto &&
+        previousHeight > 0 &&
+        nextHeight > previousHeight &&
+        event.reason == "abr"
+    ) {
+        return "网络恢复，已自动升到 ${event.variant.qualityLabel}。"
+    }
+    return videoQualityNotice
+}
+
 private fun playerSnapshotFromAdapter(
     adapter: PlayerAdapter,
     playbackState: Int,
-    playbackSpeed: Float,
-    videoVariant: PlayerVideoVariant
+    currentPlayer: PlayerRuntimeUiState
 ): PlayerRuntimeUiState {
-    return PlayerRuntimeUiState(
+    return currentPlayer.copy(
         currentPosition = adapter.getCurrentPosition(),
         duration = adapter.getDuration().coerceAtLeast(0L),
         bufferedPosition = adapter.getBufferedPosition().coerceAtLeast(0L),
         bufferedPercentage = adapter.getBufferedPercentage().coerceIn(0, 100),
         isPlaying = adapter.isPlaying(),
-        playbackState = playbackState,
-        playbackSpeed = playbackSpeed,
-        videoVariant = videoVariant
+        playbackState = playbackState
     )
 }

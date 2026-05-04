@@ -73,6 +73,7 @@ class AndroidExoPlayerAdapter(
     private var eventListener: ((PlayerEvent) -> Unit)? = null
     private var latestVideoVariant = PlayerVideoVariant()
     private var latestPlaybackStrategy = PlayerPlaybackStrategy.Auto
+    private var latestQualityPreference = PlayerVideoQualityPreference.Auto
     private val playerListener = object : Player.Listener {
         override fun onPlaybackStateChanged(playbackState: Int) {
             emit(PlayerEvent.PlaybackStateChanged(playbackState))
@@ -110,6 +111,7 @@ class AndroidExoPlayerAdapter(
         override fun onTracksChanged(tracks: Tracks) {
             val variants = videoVariantsFromTracks(tracks, selectedOnly = false)
             logAvailableVideoTracks(variants)
+            emit(PlayerEvent.VideoQualitiesChanged(variants.toQualityOptions()))
             videoVariantsFromTracks(tracks, selectedOnly = true)
                 .filter { variant -> variant.height >= MinVideoHeight }
                 .minByOrNull { variant -> variant.height }
@@ -144,6 +146,9 @@ class AndroidExoPlayerAdapter(
     }
 
     override fun attach(playerView: PlayerView) {
+        if (attachedPlayerView !== playerView) {
+            attachedPlayerView?.player = null
+        }
         attachedPlayerView = playerView
         playerView.player = exoPlayer
     }
@@ -159,7 +164,8 @@ class AndroidExoPlayerAdapter(
 
     override fun load(url: String) {
         latestVideoVariant = PlayerVideoVariant()
-        emit(PlayerEvent.VideoVariantChanged(latestVideoVariant))
+        emit(PlayerEvent.VideoVariantChanged(latestVideoVariant, reason = "load"))
+        emit(PlayerEvent.VideoQualitiesChanged(listOf(PlayerVideoQualityOption.Auto)))
         val mediaItem = MediaItem.fromUri(url)
         if (url.isHlsPlaylistUrl()) {
             Log.d(CACHE_LOG_TAG, "load HLS with local cache url=$url cacheSizeBytes=${cache.cacheSpace}")
@@ -197,6 +203,13 @@ class AndroidExoPlayerAdapter(
         exoPlayer.playbackParameters = PlaybackParameters(speed)
     }
 
+    override fun setVideoQualityPreference(preference: PlayerVideoQualityPreference) {
+        if (preference == latestQualityPreference) return
+        latestQualityPreference = preference
+        applyTrackSelection()
+        Log.d(ABR_LOG_TAG, "quality preference=${preference.label} strategy=${latestPlaybackStrategy.logLabel}")
+    }
+
     override fun updatePlaybackStrategy(playbackSpeed: Float, rebufferCount: Int) {
         val nextStrategy = PlayerPlaybackStrategy.forPlayback(
             playbackSpeed = playbackSpeed,
@@ -204,24 +217,11 @@ class AndroidExoPlayerAdapter(
         )
         if (nextStrategy == latestPlaybackStrategy) return
         latestPlaybackStrategy = nextStrategy
-        trackSelector.setParameters(
-            trackSelector.buildUponParameters().apply {
-                setMinVideoSize(MinVideoWidth, MinVideoHeight)
-                setExceedVideoConstraintsIfNecessary(false)
-                setAllowVideoNonSeamlessAdaptiveness(true)
-                if (nextStrategy.lockToMobileFast720p) {
-                    setMaxVideoSize(MobileFastVideoWidth, MobileFastVideoHeight)
-                    setForceHighestSupportedBitrate(false)
-                    setForceLowestBitrate(false)
-                } else {
-                    clearVideoSizeConstraints()
-                    setMinVideoSize(MinVideoWidth, MinVideoHeight)
-                }
-            }
-        )
+        applyTrackSelection()
         Log.d(
             ABR_LOG_TAG,
-            "playback strategy=${nextStrategy.logLabel} speed=${playbackSpeed}x rebufferCount=$rebufferCount"
+            "playback strategy=${nextStrategy.logLabel} speed=${playbackSpeed}x " +
+                "rebufferCount=$rebufferCount qualityPreference=${latestQualityPreference.label}"
         )
     }
 
@@ -264,7 +264,33 @@ class AndroidExoPlayerAdapter(
         if (variant == latestVideoVariant) return
         latestVideoVariant = variant
         Log.d(ABR_LOG_TAG, "variant changed reason=$reason ${variant.debugLabel}")
-        emit(PlayerEvent.VideoVariantChanged(variant))
+        emit(PlayerEvent.VideoVariantChanged(variant, reason = reason))
+    }
+
+    private fun applyTrackSelection() {
+        trackSelector.setParameters(
+            trackSelector.buildUponParameters().apply {
+                setExceedVideoConstraintsIfNecessary(false)
+                setAllowVideoNonSeamlessAdaptiveness(true)
+                setMinVideoSize(MinVideoWidth, MinVideoHeight)
+                clearVideoSizeConstraints()
+                setMinVideoSize(MinVideoWidth, MinVideoHeight)
+                setForceHighestSupportedBitrate(false)
+                setForceLowestBitrate(false)
+
+                val manualHeight = latestQualityPreference.height
+                when {
+                    latestPlaybackStrategy.lockToMobileFast720p -> {
+                        setMaxVideoSize(MobileFastVideoWidth, MobileFastVideoHeight)
+                    }
+                    manualHeight != null -> {
+                        setMaxVideoSize(Int.MAX_VALUE, manualHeight)
+                        setForceHighestSupportedBitrate(true)
+                    }
+                    else -> Unit
+                }
+            }
+        )
     }
 
     private fun videoVariantsFromTracks(
@@ -289,6 +315,16 @@ class AndroidExoPlayerAdapter(
             ABR_LOG_TAG,
             "available variants ${variants.joinToString { it.debugLabel }}"
         )
+    }
+
+    private fun List<PlayerVideoVariant>.toQualityOptions(): List<PlayerVideoQualityOption> {
+        val manualOptions = mapNotNull { variant ->
+            variant.height.takeIf { it >= MinVideoHeight }
+        }
+            .distinct()
+            .sortedDescending()
+            .map { height -> PlayerVideoQualityOption(height = height, label = "${height}p") }
+        return listOf(PlayerVideoQualityOption.Auto) + manualOptions
     }
 
     private fun Format.toVideoVariant(): PlayerVideoVariant {

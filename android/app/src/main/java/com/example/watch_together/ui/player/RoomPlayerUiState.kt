@@ -29,6 +29,9 @@ data class PlayerRuntimeUiState(
     val playbackState: Int = Player.STATE_IDLE,
     val playbackSpeed: Float = 1f,
     val videoVariant: PlayerVideoVariant = PlayerVideoVariant(),
+    val availableVideoQualities: List<PlayerVideoQualityOption> = listOf(PlayerVideoQualityOption.Auto),
+    val videoQualityPreference: PlayerVideoQualityPreference = PlayerVideoQualityPreference.Auto,
+    val videoQualityNotice: String = "",
 ) {
     val bufferedAheadMs: Long
         get() = (bufferedPosition - currentPosition).coerceAtLeast(0L)

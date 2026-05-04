@@ -687,6 +687,12 @@ WatchTogetherBuffer: ahead=3000ms effectiveAhead=1500ms
    - `rebuffer start/end` 可以确认每次卡顿是否真的进入 rebuffer。
    - `rebufferCount` 和 `totalRebufferDurationMs` 用来比较优化前后是否真的变好。
 
+3.5. 看清晰度策略
+   - `自动` 模式下，ABR 会根据带宽和 buffer 选择当前 variant。
+   - 用户手动选择 `720p / 1080p` 时，播放器会把偏好交给 `AndroidExoPlayerAdapter`，由 Media3 `DefaultTrackSelector` 应用。
+   - `2.0x` 或 rebuffer 较多时，`mobile_fast_720p` 稳定策略仍可覆盖手动偏好，优先保障流畅播放。
+   - 如果 UI 提示“播放不流畅，已自动切到 720p”或“优先保障流畅播放”，说明播放器正在牺牲部分清晰度换稳定性。
+
 4. 看 `WatchTogetherCache`
    - 如果 seek、rejoin 或重复进入房间后出现 `cache hit`，说明已下载的 HLS playlist / segment 正在被复用。
    - 如果频繁出现 `cache ignored`，需要检查资源是否支持缓存复用、URL 是否稳定，以及是否发生了 cache error。

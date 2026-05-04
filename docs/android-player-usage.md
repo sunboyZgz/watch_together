@@ -336,6 +336,12 @@ PlayerScreen
 - `AndroidExoPlayerAdapter` 使用 `DefaultTrackSelector` 接入 ABR，当前最低视频尺寸约束为 720p，避免 master playlist 中意外出现低清晰度时被常规选择
 - `2.0x` 或 rebuffer 过多时会启用 `mobile_fast_720p` 策略，把 ABR 最高限制到 720p
 - 当前播放 variant 会通过 Logcat `WatchTogetherABR` 输出，播放器 overlay 右上角也会显示 `自动 · 当前清晰度`
+- 播放器 overlay 右上角清晰度胶囊只负责展示当前清晰度状态：自动模式显示 `自动 · 当前清晰度`，手动选择后只显示具体档位，例如 `720p` 或 `1080p`
+- 倍速、清晰度等低频设置收纳到右侧三点按钮打开的底部设置抽屉中，参考移动端成熟播放器的“更多设置”模式，避免在播放器画面里堆叠多个下拉列表
+- 设置抽屉使用 Dialog 承载，点击抽屉外部会关闭；抽屉内点击不会透传到播放器，避免误触播放层
+- 底部控制栏只放全屏、播放/暂停、`-10`、`+10` 和三点设置入口
+- 清晰度选择仍属于播放器组件能力：业务页面只传入 `availableVideoQualities / videoQualityPreference` 和回调，不直接操作 Media3 track selector
+- `自动` 模式下由 ABR 自适应选择码率；手动选择清晰度后，如果播放不流畅或进入高倍速稳定策略，播放器仍可以优先保障流畅，并通过 overlay 文案提示“已自动切到某档”或“优先保障流畅播放”
 - HLS 播放通过 Media3 `SimpleCache + CacheDataSource + HlsMediaSource` 接入本地缓存，缓存目录为 Android `cacheDir/watch_together_media_cache`，当前上限为 `512MB`
 - 本地 HLS cache 主要解决 seek、rejoin、重复进入房间、短时间重播和后续 ahead prefetch 时对已下载 playlist / segment 的重复读取问题；它不是离线下载，也不替代服务端存储或 CDN
 - cache 命中、cache ignored 和 HLS cache 载入会通过 Logcat `WatchTogetherCache` 输出；播放器 `release()` 不会删除缓存，缓存由 LRU 策略和系统 cache 目录生命周期管理
@@ -350,8 +356,10 @@ PlayerScreen
 - drift correction 日志会区分 `speed_nudge / speed_nudge_restore / drift_seek`，用于判断同步层是在温和追平还是发生了硬 seek
 - 初始载入的 `BUFFERING` 会标记为 `initial_buffer`，播放开始后的再次 `BUFFERING` 才计为 `rebuffer`
 - 全屏按钮位于播放/暂停按钮左侧，并由 `PlayerCoreShell` 内部管理全屏显示/退出
-- 倍速默认显示 `倍速 + 当前倍率`，点击后在右侧上方展开窄型深色倍率列表，当前倍率用粉色文字和小点标记
-- 播放/暂停、seek、倍速入口显示在播放器画面 overlay 上，排列为左侧全屏、播放/暂停、`-10`、`+10`，右侧倍速
+- 全屏使用播放器内部 Dialog；`AndroidExoPlayerAdapter.attach()` 会在切换普通/全屏 `PlayerView` 时先解绑旧 view，避免多个 `PlayerView` 抢同一个 ExoPlayer
+- 退出全屏会递增播放器 attach token，强制普通播放器 surface 重新接回 ExoPlayer，避免全屏退出后画面黑屏但播放状态仍在的问题
+- 倍速设置在底部设置抽屉内展示，当前倍率用粉色文字标记
+- 播放/暂停、seek 和设置入口显示在播放器画面 overlay 上，排列为左侧全屏、播放/暂停、`-10`、`+10`，右侧三点设置
 - 点击播放器画面时显示 overlay，连续无操作后自动隐藏
 - Media3 原生控制器关闭，避免与自定义控制层重叠
 
