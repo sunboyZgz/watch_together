@@ -228,6 +228,9 @@ android/app/src/main/java/com/example/watch_together/
 - ABR 是 Adaptive Bitrate Streaming，即播放器从 `master.m3u8` 读取多个 variant，并根据网络、缓冲、设备解码能力和播放状态自动选择当前清晰度。
 - 当前 track selector 设置最低视频尺寸为 `1280x720`，避免正常体验降到 720p 以下。
 - 当前依赖 Media3 HLS 自适应能力在 `720p / 1080p` 之间切换。
+- 当 `playbackSpeed >= 2.0x` 或本次播放 rebuffer 次数达到 `2` 次后，播放器会切到 `mobile_fast_720p` 策略，限制 ABR 最高到 `1280x720`，避免在高倍速或设备压力较大时继续升到 1080p。
+- 当前 `DefaultLoadControl` 使用 `minBuffer=30s / maxBuffer=90s / playbackStart=3.5s / rebufferStart=10s`，更偏向 VOD 稳定播放。
+- `2.0x` 下点击播放前会检查 `bufferedAheadMs >= 12s`，不足时暂缓起播并输出 `high_speed_start_gate` telemetry。
 - 当前通过 Logcat `WatchTogetherABR` 输出可用 variant 和当前 variant。
 - 当前通过播放器浮层右上角的轻量 pill 展示当前自动清晰度，例如 `自动 · 720p`。
 
@@ -329,11 +332,14 @@ PlayerScreen
 - viewer 入房后默认跟随房主，播放按钮不可用，避免误导为主控
 - 放映室页面层负责把播放器状态映射为展示文案：`IDLE` 是等待载入，`BUFFERING` 是缓冲中，`ENDED` 是已结束，`READY + isPlaying` 是正在播放，`READY + !isPlaying` 再结合 host/viewer 语义显示为已暂停或跟随同步中
 - 播放、暂停、seek 和倍速都必须等到底层播放器进入 `Player.STATE_READY` 后才可用；资源未加载、仍在缓冲或已经 ended 时，不应触发本地控制或同步事件
-- `AndroidExoPlayerAdapter` 使用自定义 `DefaultLoadControl`，当前缓冲策略为 `minBuffer=30s / maxBuffer=90s / playbackStart=2.5s / rebufferStart=5s`，用于降低 2 倍速播放时短 HLS segment 被快速消耗导致的频繁 rebuffer
+- `AndroidExoPlayerAdapter` 使用自定义 `DefaultLoadControl`，当前缓冲策略为 `minBuffer=30s / maxBuffer=90s / playbackStart=3.5s / rebufferStart=10s`，用于降低 2 倍速播放时短 HLS segment 被快速消耗导致的频繁 rebuffer
 - `AndroidExoPlayerAdapter` 使用 `DefaultTrackSelector` 接入 ABR，当前最低视频尺寸约束为 720p，避免 master playlist 中意外出现低清晰度时被常规选择
+- `2.0x` 或 rebuffer 过多时会启用 `mobile_fast_720p` 策略，把 ABR 最高限制到 720p
 - 当前播放 variant 会通过 Logcat `WatchTogetherABR` 输出，播放器 overlay 右上角也会显示 `自动 · 当前清晰度`
-- 2 倍速及以上调试时，`PlayerScreen` 会通过 Logcat `WatchTogetherBuffer` 低频写入 buffer debug 日志，格式包含 `state / pos / buffered / ahead / percent / speed`
+- 2 倍速及以上调试时，`PlayerScreen` 会通过 Logcat `WatchTogetherBuffer` 低频写入 buffer debug 日志，格式包含 `state / pos / buffered / ahead / effectiveAhead / estimatedSegmentsAhead / percent / speed`
 - 播放器 telemetry 会通过 Logcat `WatchTogetherTelemetry` 输出 rebuffer start/end、rebuffer 次数、累计 rebuffer 时长和 correction 类型计数
+- 高倍速起播门槛使用 `effectiveAheadMs = bufferedAheadMs / playbackSpeed` 和估算 segment 数，而不是只看原始 `bufferedAheadMs`
+- 2 倍速下 seek fallback 阈值提高到 `3000ms`，优先让 speed-nudge 吸收中小漂移，减少 codec flush
 - drift correction 日志会区分 `speed_nudge / speed_nudge_restore / drift_seek`，用于判断同步层是在温和追平还是发生了硬 seek
 - 初始载入的 `BUFFERING` 会标记为 `initial_buffer`，播放开始后的再次 `BUFFERING` 才计为 `rebuffer`
 - 全屏按钮位于播放/暂停按钮左侧，并由 `PlayerCoreShell` 内部管理全屏显示/退出

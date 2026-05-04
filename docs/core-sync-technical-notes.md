@@ -320,11 +320,18 @@ drift correction 是当前最值得持续跟踪的核心技术点之一。
    这样可以避免播放器已经在 rebuffer 或解码器 flush 时，又被 correction 打断，导致 `BUFFERING -> seek/变速 -> flush -> BUFFERING` 的连锁抖动。
 
 5. 播放器缓冲策略  
-   Android 端当前通过 `AndroidExoPlayerAdapter` 配置 `DefaultLoadControl`，使用 `minBuffer=30s / maxBuffer=90s / playbackStart=2.5s / rebufferStart=5s`。
+   Android 端当前通过 `AndroidExoPlayerAdapter` 配置 `DefaultLoadControl`，使用 `minBuffer=30s / maxBuffer=90s / playbackStart=3.5s / rebufferStart=10s`。
 
-   这不是同步协议的一部分，而是播放器本地的稳定性策略：2 倍速会更快消耗 HLS segment，如果 `bufferedAheadMs` 经常低于 3 到 5 秒，就容易出现真实 rebuffer。
+   这不是同步协议的一部分，而是播放器本地的稳定性策略：2 倍速会更快消耗 HLS segment。当前除了记录原始 `bufferedAheadMs`，还会记录 `effectiveAheadMs = bufferedAheadMs / playbackSpeed` 和估算剩余 segment 数。
 
-   后续判断是否继续优化时，优先观察 `WatchTogetherBuffer` 日志里的 `ahead`：如果 `BUFFERING` 发生时 `ahead` 接近 0，说明是缓冲不足；如果 `ahead` 仍然很高但频繁 `BUFFERING`，则更可能是 HLS 封装、解码器或模拟器能力问题。
+   2.0x 下还有额外的动态策略：
+
+   - 起播前要求 `effectiveAheadMs >= 12s` 且估算剩余 segment 数至少为 `2`，不足时暂缓播放并输出 `high_speed_start_gate`。
+   - `playbackSpeed >= 2.0x` 时，ABR 进入 `mobile_fast_720p`，最高限制到 720p。
+   - 同一次播放中 rebuffer 次数达到 `2` 次后，继续保持 `mobile_fast_720p`，避免重新升到 1080p。
+   - 2.0x 下 seek fallback 阈值从 `2000ms` 提高到 `3000ms`，减少高倍速下 seek 触发的 codec flush。
+
+   后续判断是否继续优化时，优先观察 `WatchTogetherBuffer` 日志里的 `ahead / effectiveAhead / segments`：如果 `BUFFERING` 发生时 `effectiveAhead` 接近 0，说明是缓冲不足；如果 `effectiveAhead` 仍然很高但频繁 `BUFFERING`，则更可能是 HLS 封装、解码器或模拟器能力问题。
 
 6. 处理 media ended 边界  
    如果本地播放器已经进入 ended：
@@ -515,10 +522,11 @@ drift correction 是当前最值得持续跟踪的核心技术点之一。
 
 1. 看 `WatchTogetherABR`
    - 如果当前 variant 是 `1080p`，而设备或模拟器解码吃力，可以优先怀疑 ABR 选档过高。
+   - 如果 2.0x 下日志出现 `playback strategy=mobile_fast_720p`，说明播放器已经进入稳定优先策略。
    - 如果已经是 `720p` 仍频繁 rebuffer，继续看 buffer。
 
 2. 看 `WatchTogetherBuffer`
-   - 如果 `BUFFERING` 发生时 `ahead` 接近 `0ms`，更像下载、静态服务吞吐、segment 生成或 buffer 策略不足。
+   - 如果 `BUFFERING` 发生时 `effectiveAhead` 接近 `0ms` 或 `segments` 很少，更像下载、静态服务吞吐、segment 生成或 buffer 策略不足。
    - 如果 `ahead` 仍然很高但进入 `BUFFERING`，更像解码器、模拟器能力、HLS 封装或 codec 参数问题。
 
 3. 看 `WatchTogetherTelemetry`
@@ -534,6 +542,27 @@ drift correction 是当前最值得持续跟踪的核心技术点之一。
 5. 结合播放倍率
    - 1.0x 稳定、1.5x 稳定、2.0x 不稳定，通常说明资源和设备在高倍率下触达了吞吐或解码上限。
    - 1.0x 都不稳定，优先检查 HLS 文件、静态服务、URL 和 ExoPlayer 错误。
+
+#### 2.0x Acceptance Notes
+
+2.0x 是当前播放器压力最大的常规倍率，验收时需要区分模拟器和真机：
+
+- Android 模拟器：
+  - 允许偶发短 rebuffer，尤其是 CPU 核心数较低、宿主机负载较高、或 1080p 被选中时。
+  - 重点看优化后是否进入 `mobile_fast_720p`，以及 `rebufferCount / totalRebufferDurationMs` 是否明显下降。
+  - 如果 720p 下仍持续 rebuffer，优先检查模拟器 CPU 核心数、硬件加速和源文件编码参数。
+- Android 真机：
+  - 720p + 2.0x 应作为最低目标体验。
+  - 稳定网络、本地静态服务或对象存储正常的情况下，不应出现连续 rebuffer。
+  - 如果真机仍频繁 rebuffer，需要优先回看 HLS segment、编码 profile、码率、关键帧间隔和 ABR variant。
+
+当前 2.0x 测试建议同时记录：
+
+- 当前 variant：`WatchTogetherABR`
+- buffer ahead：`WatchTogetherBuffer`
+- rebuffer 次数与时长：`WatchTogetherTelemetry`
+- correction 类型：`speed_nudge / drift_seek`
+- 播放设备：模拟器配置或真机型号
 - ignored stale event 次数
 - repeated join / reconnect 后的 resync 成功率
 

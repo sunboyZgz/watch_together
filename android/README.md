@@ -193,11 +193,13 @@ android/
 - viewer 入房后默认跟随房主，不显示成主控交互
 - 放映室媒体状态会区分 `等待载入 / 缓冲中 / 正在播放 / 已暂停 / 跟随同步中 / 已结束`，避免把播放器 rebuffer 误显示成同步等待
 - 播放器只有进入 `Player.STATE_READY` 后才允许播放/暂停、seek 和倍速操作；`IDLE / BUFFERING / ENDED` 状态下控制层会保持禁用，避免资源未成功加载时仍发出本地播放或同步事件
-- ExoPlayer 使用自定义 `DefaultLoadControl`，当前缓冲策略为 `minBuffer=30s / maxBuffer=90s / playbackStart=2.5s / rebufferStart=5s`，优先保障 2 倍速播放时有更充足的可播放缓存
+- ExoPlayer 使用自定义 `DefaultLoadControl`，当前缓冲策略为 `minBuffer=30s / maxBuffer=90s / playbackStart=3.5s / rebufferStart=10s`，优先保障 2 倍速播放时有更充足的可播放缓存
 - ExoPlayer 使用 `DefaultTrackSelector` 接入 `master.m3u8` 的 ABR，当前最低视频尺寸约束为 720p，并通过 Logcat `WatchTogetherABR` 输出当前 variant
-- 2 倍速播放时会通过 Logcat `WatchTogetherBuffer` 输出低频 buffer debug 日志，包含 `state / pos / buffered / ahead / percent / speed`，用于判断是否真的发生 rebuffer
+- 2 倍速或 rebuffer 过多时会启用 `mobile_fast_720p` 策略，把 ABR 最高限制到 720p，避免高倍速下继续升到 1080p
+- 2 倍速播放时会通过 Logcat `WatchTogetherBuffer` 输出低频 buffer debug 日志，包含 `state / pos / buffered / ahead / effectiveAhead / estimatedSegmentsAhead / percent / speed`，用于判断是否真的发生 rebuffer
 - 播放器 telemetry 会通过 Logcat `WatchTogetherTelemetry` 输出 rebuffer start/end、rebuffer 次数、累计 rebuffer 时长和 correction 类型计数，用于区分下载不足、解码压力和同步 seek 干预
 - drift correction 已升级为 `speed-nudge + seek fallback`：小漂移优先用临时变速追平，只有大漂移才执行硬 seek
+- 2 倍速下点击播放前要求至少约 `12s` 的 `effectiveAheadMs` 和至少 2 个估算 segment，并把 drift seek fallback 阈值提高到 `3000ms`
 - 全屏按钮位于播放/暂停按钮左侧，点击后进入播放器全屏层，再次点击退出
 - 播放/暂停使用轻量 icon 按钮，位于浮层控制栏最左侧
 - `-10` 和 `+10` 跟随播放/暂停按钮靠左排列

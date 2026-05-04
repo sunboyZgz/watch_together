@@ -32,7 +32,21 @@ data class PlayerRuntimeUiState(
 ) {
     val bufferedAheadMs: Long
         get() = (bufferedPosition - currentPosition).coerceAtLeast(0L)
+
+    val effectiveBufferedAheadMs: Long
+        get() {
+            val safeSpeed = playbackSpeed.coerceAtLeast(0.25f)
+            return (bufferedAheadMs / safeSpeed).toLong()
+        }
+
+    val estimatedSegmentsAhead: Int
+        get() {
+            if (effectiveBufferedAheadMs <= 0L) return 0
+            return (effectiveBufferedAheadMs / DEFAULT_HLS_SEGMENT_DURATION_MS).toInt()
+        }
 }
+
+private const val DEFAULT_HLS_SEGMENT_DURATION_MS = 6_000L
 
 data class PlayerTelemetryUiState(
     val currentMediaUrl: String = "",

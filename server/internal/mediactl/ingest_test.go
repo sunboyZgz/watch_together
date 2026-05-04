@@ -75,7 +75,7 @@ func TestParseIngestOptionsBuildsDryRunContract(t *testing.T) {
 	if options.HLSSegment != 4 {
 		t.Fatalf("expected hls segment 4, got %d", options.HLSSegment)
 	}
-	if got := strings.Join(options.Renditions, ","); got != "720p,1080p" {
+	if got := strings.Join(options.Renditions, ","); got != "720p-fast,720p-high,1080p" {
 		t.Fatalf("expected default renditions, got %q", got)
 	}
 	if !options.DryRun {
@@ -223,7 +223,7 @@ func TestBuildFFmpegHLSArgs(t *testing.T) {
 		"-vf scale=-2:720",
 		"-c:v libx264",
 		"-preset veryfast",
-		"-crf 24",
+		"-crf 25",
 		"-profile:v main",
 		"-level 3.1",
 		"-pix_fmt yuv420p",
@@ -232,8 +232,8 @@ func TestBuildFFmpegHLSArgs(t *testing.T) {
 		"-tune fastdecode",
 		"-bf 0",
 		"-refs 1",
-		"-maxrate 2200k",
-		"-bufsize 4400k",
+		"-maxrate 1800k",
+		"-bufsize 3600k",
 		"-c:a aac",
 		"-b:a 128k",
 		"-hls_time 6",
@@ -269,13 +269,13 @@ func TestResolveRenditionSpecsRequires720pBaseline(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected missing 720p to fail")
 	}
-	if !strings.Contains(err.Error(), "must include 720p") {
+	if !strings.Contains(err.Error(), "must include a 720p baseline") {
 		t.Fatalf("expected baseline error, got %v", err)
 	}
 }
 
 func TestSelectRenditionSpecsSkipsAboveSourceHeight(t *testing.T) {
-	specs, err := ResolveRenditionSpecs([]string{"720p", "1080p"})
+	specs, err := ResolveRenditionSpecs([]string{"720p-fast", "720p-high", "1080p"})
 	if err != nil {
 		t.Fatalf("resolve rendition specs: %v", err)
 	}
@@ -283,8 +283,8 @@ func TestSelectRenditionSpecsSkipsAboveSourceHeight(t *testing.T) {
 	if err != nil {
 		t.Fatalf("select rendition specs: %v", err)
 	}
-	if len(selected) != 1 || selected[0].Key != "720p" {
-		t.Fatalf("expected only 720p, got %#v", selected)
+	if len(selected) != 2 || selected[0].Key != "720p-fast" || selected[1].Key != "720p-high" {
+		t.Fatalf("expected 720p variants, got %#v", selected)
 	}
 }
 
@@ -306,7 +306,7 @@ func TestWriteMasterPlaylist(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "master.m3u8")
 	err := WriteMasterPlaylist(path, []HLSVariant{
 		{
-			Key:          "720p",
+			Key:          "720p-fast",
 			Width:        1280,
 			Height:       720,
 			BandwidthBps: 2_000_000,
@@ -331,13 +331,43 @@ func TestWriteMasterPlaylist(t *testing.T) {
 	for _, want := range []string{
 		"#EXTM3U",
 		"#EXT-X-STREAM-INF:BANDWIDTH=2000000,RESOLUTION=1280x720,CODECS=\"avc1.4d401f,mp4a.40.2\"",
-		"720p/index.m3u8",
+		"720p-fast/index.m3u8",
 		"#EXT-X-STREAM-INF:BANDWIDTH=5000000,RESOLUTION=1920x1080,CODECS=\"avc1.640028,mp4a.40.2\"",
 		"1080p/index.m3u8",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("expected master playlist to contain %q, got %s", want, got)
 		}
+	}
+}
+
+func TestResolveRenditionSpecsMapsLegacy720pToFastVariant(t *testing.T) {
+	specs, err := ResolveRenditionSpecs([]string{"720p", "1080p"})
+	if err != nil {
+		t.Fatalf("resolve rendition specs: %v", err)
+	}
+	if specs[0].Key != "720p-fast" {
+		t.Fatalf("expected legacy 720p alias to map to 720p-fast, got %#v", specs[0])
+	}
+}
+
+func TestParseHLSHealth(t *testing.T) {
+	health, err := ParseHLSHealth(`#EXTM3U
+#EXT-X-VERSION:6
+#EXTINF:6.000000,
+segment_00000.ts
+#EXTINF:5.500000,
+segment_00001.ts
+#EXT-X-ENDLIST
+`)
+	if err != nil {
+		t.Fatalf("parse hls health: %v", err)
+	}
+	if health.Segments != 2 {
+		t.Fatalf("expected two segments, got %#v", health)
+	}
+	if health.AverageSegmentMs != 5750 {
+		t.Fatalf("expected average 5750ms, got %#v", health)
 	}
 }
 

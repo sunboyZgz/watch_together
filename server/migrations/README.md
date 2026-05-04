@@ -25,7 +25,7 @@
 
 - `media_seasons`：一季、篇章或作品容器，不额外引入 `media_series`
 - `media_episodes`：真正可播放的一集或视频资源
-- `media_episode_variants`：同一个 episode 下的多码率 HLS variant，例如 `720p / 1080p`
+- `media_episode_variants`：同一个 episode 下的多码率 HLS variant，例如 `720p-fast / 720p-high / 1080p`
 - `media_tags`：媒体标签字典
 - `media_season_tags`：season 与标签目录的关系表
 - `rooms.media_episode_id`：房间选择的可播放 episode
@@ -41,6 +41,8 @@
 - `20260501100000_remove_legacy_media_items_schema.down.sql`
 - `20260503110000_add_media_episode_variants.up.sql`
 - `20260503110000_add_media_episode_variants.down.sql`
+- `20260504151557_add_media_episode_variant_health.up.sql`
+- `20260504151557_add_media_episode_variant_health.down.sql`
 
 `20260501100000_remove_legacy_media_items_schema` 会删除旧的 `media_items / media_item_tags` 表，以及 `rooms.media_item_id`、`user_media_progress.media_item_id`、`media_episodes.legacy_media_item_id` 这些兼容字段。执行前会检查现有 `rooms` 与 `user_media_progress` 是否都已经具备 `media_episode_id`，避免静默丢失引用关系。
 

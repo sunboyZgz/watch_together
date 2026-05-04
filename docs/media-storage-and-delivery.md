@@ -110,7 +110,10 @@ media/
 └── {sourceKeyWithoutExt}/
     ├── hls/
     │   ├── master.m3u8
-    │   ├── 720p/
+    │   ├── 720p-fast/
+    │   │   ├── index.m3u8
+    │   │   └── segment_00001.ts
+    │   ├── 720p-high/
     │   │   ├── index.m3u8
     │   │   └── segment_00001.ts
     │   └── 1080p/
@@ -123,7 +126,8 @@ media/
 说明：
 
 - `master.m3u8` 是 Android 播放入口。
-- `720p/index.m3u8` 是默认基线 variant，面向低卡顿同步播放。
+- `720p-fast/index.m3u8` 是默认稳定 variant，面向移动端和 1.5x / 2.0x 高倍速同步播放。
+- `720p-high/index.m3u8` 是 720p 画质优先 variant，供 buffer 健康时 ABR 升档。
 - `1080p/index.m3u8` 仅在源视频高度足够时生成。
 - 4K 不进入默认 ladder，后续只有在明确有 4K 资源和播放端性能验证后再追加。
 
@@ -135,8 +139,10 @@ object key 必须稳定、可预测，并且不包含用户本地文件名。
 
 ```text
 {MEDIA_OBJECT_KEY_PREFIX}/{sourceKeyWithoutExt}/hls/master.m3u8
-{MEDIA_OBJECT_KEY_PREFIX}/{sourceKeyWithoutExt}/hls/720p/index.m3u8
-{MEDIA_OBJECT_KEY_PREFIX}/{sourceKeyWithoutExt}/hls/720p/segment_00001.ts
+{MEDIA_OBJECT_KEY_PREFIX}/{sourceKeyWithoutExt}/hls/720p-fast/index.m3u8
+{MEDIA_OBJECT_KEY_PREFIX}/{sourceKeyWithoutExt}/hls/720p-fast/segment_00001.ts
+{MEDIA_OBJECT_KEY_PREFIX}/{sourceKeyWithoutExt}/hls/720p-high/index.m3u8
+{MEDIA_OBJECT_KEY_PREFIX}/{sourceKeyWithoutExt}/hls/720p-high/segment_00001.ts
 {MEDIA_OBJECT_KEY_PREFIX}/{sourceKeyWithoutExt}/hls/1080p/index.m3u8
 {MEDIA_OBJECT_KEY_PREFIX}/{sourceKeyWithoutExt}/hls/1080p/segment_00001.ts
 {MEDIA_OBJECT_KEY_PREFIX}/{sourceKeyWithoutExt}/cover/cover.jpg
@@ -147,7 +153,7 @@ object key 必须稳定、可预测，并且不包含用户本地文件名。
 - `MEDIA_OBJECT_KEY_PREFIX` 默认是 `media`。
 - `{sourceKeyWithoutExt}` 由媒体库相对路径自动推导，例如 `sample-show/season-01/episode-01`。
 - `media_episodes.media_url` 指向 `hls/master.m3u8` 的公开 URL。
-- `media_episode_variants` 记录同一个 episode 下的 `720p / 1080p` variant playlist URL、分辨率和带宽信息。
+- `media_episode_variants` 记录同一个 episode 下的 `720p-fast / 720p-high / 1080p` variant playlist URL、分辨率、带宽和 segment 健康信息。
 - `media_episodes.cover_url` 或 `media_seasons.cover_url` 指向封面 URL。
 
 本地静态服务下的 URL 示例：
@@ -206,7 +212,7 @@ PostgreSQL 不保存：
 
 - HLS segment 时长：4 到 6 秒。
 - 输出 `master.m3u8`。
-- 默认输出 `720p` 和 `1080p` variant，其中 `1080p` 会在源视频高度不足时自动跳过。
+- 默认输出 `720p-fast / 720p-high / 1080p` variant，其中 `1080p` 会在源视频高度不足时自动跳过。
 - 源视频高度低于 720p 时直接失败，因为 720p 是当前产品最低清晰度基线。
 - 输出 `.ts` 分片，第一版优先 `.ts`，兼容性更直接。
 - 保留源视频时长，写入 `media_episodes.duration_ms`。
@@ -249,10 +255,11 @@ ffmpeg -i input.mp4 \
 - 使用 `ffmpeg` 生成 VOD HLS。
 - 默认 segment 时长为 6 秒，可通过 `--hls-segment-seconds` 在 4 到 6 秒之间调整。
 - 输出 `master.m3u8`。
-- 输出 `720p/index.m3u8` 和必要时的 `1080p/index.m3u8`。
+- 输出 `720p-fast/index.m3u8`、`720p-high/index.m3u8` 和必要时的 `1080p/index.m3u8`。
 - 输出各 variant 目录下的 `segment_%05d.ts`。
 - 使用 `ffprobe` 读取源视频时长，后续写入 `media_episodes.duration_ms`。
 - 使用 `ffprobe` 读取源视频和生成结果的分辨率，确认 variant 清晰度符合 `720p / 1080p` 要求。
+- 解析生成后的 HLS playlist，记录 segment 数量和平均 segment 时长；如果分片结构明显异常则失败。
 - 自动根据 `--library-root + --input` 推导 `source_key`。
 - 自动根据源文件内容计算 `source_hash`。
 - 不负责上传，上传由 `INT-141` 补齐。

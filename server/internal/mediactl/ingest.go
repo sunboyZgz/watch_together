@@ -29,7 +29,7 @@ const (
 	defaultFFmpegExecutable  = "ffmpeg"
 	defaultFFprobeExecutable = "ffprobe"
 	defaultHLSSegmentTime    = 6
-	defaultRenditions        = "720p,1080p"
+	defaultRenditions        = "720p-fast,720p-high,1080p"
 )
 
 // EnvLookup reads environment values while keeping command parsing testable.
@@ -184,7 +184,7 @@ func ParseIngestOptions(args []string, getenv EnvLookup, stderr io.Writer) (Inge
 	flags.StringVar(&options.Cover, "cover", "", "optional cover image path")
 	flags.StringVar(&options.OutputDir, "output-dir", "", "optional HLS output directory")
 	flags.IntVar(&options.HLSSegment, "hls-segment-seconds", defaultHLSSegmentTime, "HLS segment duration in seconds")
-	flags.StringVar(&renditions, "renditions", defaultRenditions, "comma-separated HLS renditions; supported values: 720p,1080p")
+	flags.StringVar(&renditions, "renditions", defaultRenditions, "comma-separated HLS renditions; supported values: 720p-fast,720p-high,720p,1080p")
 	flags.BoolVar(&options.Upload, "upload", false, "request upload in later ingest stages")
 	flags.BoolVar(&options.WriteDB, "write-db", false, "upsert media metadata into PostgreSQL after local HLS generation")
 	flags.StringVar(&options.DatabaseURL, "database-url", "", "PostgreSQL connection string; falls back to DATABASE_URL")
@@ -467,9 +467,11 @@ func replaceMediaEpisodeVariants(ctx context.Context, tx *sql.Tx, episodeID stri
 				height,
 				bandwidth_bps,
 				codecs,
+				segment_count,
+				average_segment_ms,
 				is_default,
 				sort_order
-			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
 			episodeID,
 			variant.Key,
 			variant.Label,
@@ -478,6 +480,8 @@ func replaceMediaEpisodeVariants(ctx context.Context, tx *sql.Tx, episodeID stri
 			nullableInt(variant.Height),
 			nullableInt(variant.BandwidthBps),
 			nullableString(variant.Codecs),
+			nullableInt(variant.Segments),
+			nullableInt64Value(variant.AverageSegmentMs),
 			variant.IsDefault,
 			variant.SortOrder,
 		); err != nil {
@@ -530,16 +534,18 @@ type HLSResult struct {
 
 // HLSVariant records one generated rendition under the episode master playlist.
 type HLSVariant struct {
-	Key          string `json:"key"`
-	Label        string `json:"label"`
-	PlaylistPath string `json:"playlistPath,omitempty"`
-	PlaylistURL  string `json:"playlistUrl"`
-	Width        int    `json:"width,omitempty"`
-	Height       int    `json:"height,omitempty"`
-	BandwidthBps int    `json:"bandwidthBps,omitempty"`
-	Codecs       string `json:"codecs,omitempty"`
-	IsDefault    bool   `json:"isDefault"`
-	SortOrder    int    `json:"sortOrder"`
+	Key              string `json:"key"`
+	Label            string `json:"label"`
+	PlaylistPath     string `json:"playlistPath,omitempty"`
+	PlaylistURL      string `json:"playlistUrl"`
+	Width            int    `json:"width,omitempty"`
+	Height           int    `json:"height,omitempty"`
+	BandwidthBps     int    `json:"bandwidthBps,omitempty"`
+	Codecs           string `json:"codecs,omitempty"`
+	Segments         int    `json:"segments,omitempty"`
+	AverageSegmentMs int64  `json:"averageSegmentMs,omitempty"`
+	IsDefault        bool   `json:"isDefault"`
+	SortOrder        int    `json:"sortOrder"`
 }
 
 // RenditionSpec describes one supported HLS output ladder rung.
@@ -564,6 +570,14 @@ type RenditionSpec struct {
 type VideoMetadata struct {
 	Width  int
 	Height int
+}
+
+// HLSHealth summarizes the generated VOD playlist's segment structure.
+type HLSHealth struct {
+	Segments         int
+	AverageSegmentMs int64
+	MaxSegmentMs     int64
+	MinSegmentMs     int64
 }
 
 // GenerateHLS creates a multi-rendition VOD HLS output with a master playlist.
@@ -608,17 +622,26 @@ func GenerateHLS(options IngestOptions) (HLSResult, error) {
 		if err := ValidateGeneratedRendition(sourceMetadata, variantMetadata, spec); err != nil {
 			return HLSResult{}, err
 		}
+		health, err := AnalyzeHLSPlaylist(playlistPath)
+		if err != nil {
+			return HLSResult{}, fmt.Errorf("analyze generated %s playlist: %w", spec.Key, err)
+		}
+		if err := ValidateHLSHealth(health, options.HLSSegment, spec); err != nil {
+			return HLSResult{}, err
+		}
 		variants = append(variants, HLSVariant{
-			Key:          spec.Key,
-			Label:        spec.Label,
-			PlaylistPath: playlistPath,
-			PlaylistURL:  publicVariantURL(options, spec.Key),
-			Width:        variantMetadata.Width,
-			Height:       variantMetadata.Height,
-			BandwidthBps: spec.BandwidthBps,
-			Codecs:       spec.Codecs,
-			IsDefault:    spec.IsDefault,
-			SortOrder:    spec.SortOrder,
+			Key:              spec.Key,
+			Label:            spec.Label,
+			PlaylistPath:     playlistPath,
+			PlaylistURL:      publicVariantURL(options, spec.Key),
+			Width:            variantMetadata.Width,
+			Height:           variantMetadata.Height,
+			BandwidthBps:     spec.BandwidthBps,
+			Codecs:           spec.Codecs,
+			Segments:         health.Segments,
+			AverageSegmentMs: health.AverageSegmentMs,
+			IsDefault:        spec.IsDefault,
+			SortOrder:        spec.SortOrder,
 		})
 	}
 
@@ -643,14 +666,14 @@ func GenerateHLS(options IngestOptions) (HLSResult, error) {
 // ResolveRenditionSpecs validates user-facing rendition keys and maps them to encoding settings.
 func ResolveRenditionSpecs(keys []string) ([]RenditionSpec, error) {
 	supported := map[string]RenditionSpec{
-		"720p": {
-			Key:            "720p",
-			Label:          "720p",
+		"720p-fast": {
+			Key:            "720p-fast",
+			Label:          "720p Fast",
 			TargetHeight:   720,
-			BandwidthBps:   2_000_000,
-			CRF:            "24",
-			MaxRate:        "2200k",
-			BufSize:        "4400k",
+			BandwidthBps:   1_600_000,
+			CRF:            "25",
+			MaxRate:        "1800k",
+			BufSize:        "3600k",
 			Profile:        "main",
 			Level:          "3.1",
 			Codecs:         "avc1.4d401f,mp4a.40.2",
@@ -658,6 +681,19 @@ func ResolveRenditionSpecs(keys []string) ([]RenditionSpec, error) {
 			DisableBFrames: true,
 			IsDefault:      true,
 			SortOrder:      0,
+		},
+		"720p-high": {
+			Key:          "720p-high",
+			Label:        "720p High",
+			TargetHeight: 720,
+			BandwidthBps: 2_800_000,
+			CRF:          "22",
+			MaxRate:      "3000k",
+			BufSize:      "6000k",
+			Profile:      "high",
+			Level:        "3.1",
+			Codecs:       "avc1.64001f,mp4a.40.2",
+			SortOrder:    1,
 		},
 		"1080p": {
 			Key:          "1080p",
@@ -670,36 +706,39 @@ func ResolveRenditionSpecs(keys []string) ([]RenditionSpec, error) {
 			Profile:      "high",
 			Level:        "4.0",
 			Codecs:       "avc1.640028,mp4a.40.2",
-			SortOrder:    1,
+			SortOrder:    2,
 		},
 	}
 
 	specs := make([]RenditionSpec, 0, len(keys))
 	seen := make(map[string]struct{}, len(keys))
-	has720p := false
+	has720pBaseline := false
 	for _, rawKey := range keys {
 		key := strings.ToLower(strings.TrimSpace(rawKey))
 		if key == "" {
 			continue
 		}
+		if key == "720p" {
+			key = "720p-fast"
+		}
 		spec, ok := supported[key]
 		if !ok {
-			return nil, fmt.Errorf("unsupported rendition %q; supported values are 720p,1080p", rawKey)
+			return nil, fmt.Errorf("unsupported rendition %q; supported values are 720p-fast,720p-high,720p,1080p", rawKey)
 		}
 		if _, exists := seen[key]; exists {
 			continue
 		}
 		seen[key] = struct{}{}
-		if key == "720p" {
-			has720p = true
+		if spec.TargetHeight == 720 {
+			has720pBaseline = true
 		}
 		specs = append(specs, spec)
 	}
 	if len(specs) == 0 {
 		return nil, errors.New("--renditions must include at least one rendition")
 	}
-	if !has720p {
-		return nil, errors.New("--renditions must include 720p as the baseline playback variant")
+	if !has720pBaseline {
+		return nil, errors.New("--renditions must include a 720p baseline playback variant")
 	}
 	return specs, nil
 }
@@ -719,7 +758,7 @@ func SelectRenditionSpecsForSource(source VideoMetadata, specs []RenditionSpec) 
 	if len(selected) == 0 {
 		return nil, fmt.Errorf("no requested renditions can be generated from source height %dp", source.Height)
 	}
-	if selected[0].Key != "720p" {
+	if selected[0].TargetHeight != 720 {
 		selected[0].IsDefault = true
 	}
 	return selected, nil
@@ -736,9 +775,75 @@ func ValidateGeneratedRendition(source VideoMetadata, generated VideoMetadata, s
 	return nil
 }
 
+// AnalyzeHLSPlaylist reads segment duration information from a generated media playlist.
+func AnalyzeHLSPlaylist(path string) (HLSHealth, error) {
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return HLSHealth{}, fmt.Errorf("read hls playlist: %w", err)
+	}
+	return ParseHLSHealth(string(content))
+}
+
+// ParseHLSHealth extracts EXTINF durations into a small validation summary.
+func ParseHLSHealth(content string) (HLSHealth, error) {
+	var totalMs int64
+	var minMs int64
+	var maxMs int64
+	segments := 0
+	for _, rawLine := range strings.Split(content, "\n") {
+		line := strings.TrimSpace(rawLine)
+		if !strings.HasPrefix(line, "#EXTINF:") {
+			continue
+		}
+		value := strings.TrimPrefix(line, "#EXTINF:")
+		value = strings.TrimSuffix(value, ",")
+		seconds, err := strconv.ParseFloat(value, 64)
+		if err != nil {
+			return HLSHealth{}, fmt.Errorf("parse EXTINF duration %q: %w", value, err)
+		}
+		durationMs := int64(math.Round(seconds * 1000))
+		if durationMs <= 0 {
+			return HLSHealth{}, fmt.Errorf("EXTINF duration must be positive, got %dms", durationMs)
+		}
+		segments++
+		totalMs += durationMs
+		if minMs == 0 || durationMs < minMs {
+			minMs = durationMs
+		}
+		if durationMs > maxMs {
+			maxMs = durationMs
+		}
+	}
+	if segments == 0 {
+		return HLSHealth{}, errors.New("hls playlist has no EXTINF segments")
+	}
+	return HLSHealth{
+		Segments:         segments,
+		AverageSegmentMs: totalMs / int64(segments),
+		MaxSegmentMs:     maxMs,
+		MinSegmentMs:     minMs,
+	}, nil
+}
+
+// ValidateHLSHealth catches segment structures that are likely to hurt high-speed playback.
+func ValidateHLSHealth(health HLSHealth, targetSegmentSeconds int, spec RenditionSpec) error {
+	targetMs := int64(targetSegmentSeconds * 1000)
+	if health.Segments <= 0 {
+		return fmt.Errorf("generated %s playlist has no segments", spec.Key)
+	}
+	if health.MaxSegmentMs > targetMs*2 {
+		return fmt.Errorf("generated %s has unstable long segment: max=%dms target=%dms", spec.Key, health.MaxSegmentMs, targetMs)
+	}
+	// The final segment may be short; reject only very short average structure.
+	if health.AverageSegmentMs < targetMs/2 {
+		return fmt.Errorf("generated %s average segment is too short: average=%dms target=%dms", spec.Key, health.AverageSegmentMs, targetMs)
+	}
+	return nil
+}
+
 // BuildFFmpegHLSArgs returns the baseline HLS command used by tests and single-variant callers.
 func BuildFFmpegHLSArgs(input string, playlistPath string, segmentPattern string, segmentSeconds int) []string {
-	specs, _ := ResolveRenditionSpecs([]string{"720p"})
+	specs, _ := ResolveRenditionSpecs([]string{"720p-fast"})
 	return BuildFFmpegVariantHLSArgs(input, playlistPath, segmentPattern, segmentSeconds, specs[0])
 }
 
@@ -1085,6 +1190,13 @@ func nullableInt(value int) sql.NullInt64 {
 		return sql.NullInt64{}
 	}
 	return sql.NullInt64{Int64: int64(value), Valid: true}
+}
+
+func nullableInt64Value(value int64) sql.NullInt64 {
+	if value <= 0 {
+		return sql.NullInt64{}
+	}
+	return sql.NullInt64{Int64: value, Valid: true}
 }
 
 func nullableString(value string) sql.NullString {

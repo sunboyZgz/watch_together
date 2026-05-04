@@ -107,7 +107,7 @@
 用途：
 
 - 记录同一个 `media_episodes` 下的多码率播放资源
-- 让 `mediactl` 生成 `720p / 1080p` 后可以把每个 variant 的 URL、分辨率、带宽写入数据库
+- 让 `mediactl` 生成 `720p-fast / 720p-high / 1080p` 后可以把每个 variant 的 URL、分辨率、带宽和 segment 健康信息写入数据库
 - 支撑后续播放端按网络、设备能力、倍速播放压力选择更合适的清晰度
 
 核心字段：
@@ -121,6 +121,8 @@
 - `height`
 - `bandwidth_bps`
 - `codecs`
+- `segment_count`
+- `average_segment_ms`
 - `is_default`
 - `sort_order`
 - `created_at`
@@ -128,10 +130,11 @@
 
 说明：
 
-- `variant_key` 当前支持 `720p / 1080p`。
+- `variant_key` 当前支持 `720p-fast / 720p-high / 1080p`；旧命令里的 `720p` 会作为兼容别名映射到 `720p-fast`。
 - 默认不生成 4K；大多数项目资源没有 4K，且同步播放器当前优先稳定 720p 以上体验。
 - `media_episodes.media_url` 仍作为 Android 播放入口，指向 master playlist。
 - `media_episode_variants.playlist_url` 指向具体 variant 的 `index.m3u8`。
+- `segment_count / average_segment_ms` 来自生成后对 HLS playlist 的 `EXTINF` 解析，用于后续 segment-aware buffer telemetry 和高倍速策略。
 
 ### `media_tags`
 

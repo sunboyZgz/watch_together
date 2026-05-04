@@ -251,7 +251,8 @@ fun PlayerScreen(
                 lastCorrectionAtMs = uiState.lastDriftCorrectionAtMs,
                 durationMs = uiState.player.duration,
                 playbackEnded = uiState.player.playbackState == Player.STATE_ENDED,
-                playbackBuffering = playbackBuffering
+                playbackBuffering = playbackBuffering,
+                seekThresholdMs = uiState.player.dynamicSeekFallbackThresholdMs()
             )
 
             if (playbackBuffering && nowMs - lastBufferingDriftSkipAtMs >= BUFFER_DEBUG_LOG_INTERVAL_MS) {
@@ -609,6 +610,20 @@ fun PlayerScreen(
             appendLog(syncLogs, "play ignored: media is not ready")
             return
         }
+        if (!uiState.player.canStartHighSpeedPlayback()) {
+            appendLog(
+                syncLogs,
+                "play delayed: 2.0x needs more effective buffer effectiveAhead=${uiState.player.effectiveBufferedAheadMs}ms"
+            )
+            logTelemetry(
+                syncLogs,
+                "high_speed_start_gate blocked speed=${uiState.player.playbackSpeed}x " +
+                    "ahead=${uiState.player.bufferedAheadMs}ms " +
+                    "effectiveAhead=${uiState.player.effectiveBufferedAheadMs}ms " +
+                    "segments=${uiState.player.estimatedSegmentsAhead}"
+            )
+            return
+        }
         val sent = roomSessionController.sendPlay(
             positionMs = uiState.player.currentPosition,
             seq = currentState.seq
@@ -699,6 +714,13 @@ fun PlayerScreen(
         }
     }
 
+    LaunchedEffect(uiState.player.playbackSpeed, uiState.telemetry.rebufferCount) {
+        adapter.updatePlaybackStrategy(
+            playbackSpeed = uiState.player.playbackSpeed,
+            rebufferCount = uiState.telemetry.rebufferCount
+        )
+    }
+
     LaunchedEffect(
         uiState.player.playbackState,
         isHostController,
@@ -735,6 +757,20 @@ fun PlayerScreen(
                     reportProgress(force = true)
                 }
             } else {
+                if (!uiState.player.canStartHighSpeedPlayback()) {
+                    appendLog(
+                        syncLogs,
+                        "playback ignored: 2.0x needs more effective buffer effectiveAhead=${uiState.player.effectiveBufferedAheadMs}ms"
+                    )
+                    logTelemetry(
+                        syncLogs,
+                        "high_speed_start_gate blocked speed=${uiState.player.playbackSpeed}x " +
+                            "ahead=${uiState.player.bufferedAheadMs}ms " +
+                            "effectiveAhead=${uiState.player.effectiveBufferedAheadMs}ms " +
+                            "segments=${uiState.player.estimatedSegmentsAhead}"
+                    )
+                    return@playbackToggle
+                }
                 if (isHostController) {
                     sendPlay()
                 } else {
@@ -835,6 +871,10 @@ private fun appendLog(
 private const val BUFFER_DEBUG_LOG_INTERVAL_MS = 3_000L
 private const val BUFFER_DEBUG_LOG_TAG = "WatchTogetherBuffer"
 private const val TELEMETRY_LOG_TAG = "WatchTogetherTelemetry"
+private const val HIGH_SPEED_PLAYBACK_THRESHOLD = 2.0f
+private const val HIGH_SPEED_START_EFFECTIVE_AHEAD_MS = 12_000L
+private const val HIGH_SPEED_START_SEGMENTS_AHEAD = 2
+private const val HIGH_SPEED_SEEK_FALLBACK_THRESHOLD_MS = 3_000L
 
 private fun logBufferDebug(logs: MutableList<String>, line: String) {
     appendLog(logs, line)
@@ -871,7 +911,9 @@ private fun updateRebufferTelemetry(
         onLog(
             "buffering start type=$type count=${nextTelemetry.rebufferCount} " +
                 "pos=${previousPlayer.currentPosition}ms ahead=${previousPlayer.bufferedAheadMs}ms " +
-                "variant=${previousPlayer.videoVariant.displayLabel}"
+                "effectiveAhead=${previousPlayer.effectiveBufferedAheadMs}ms " +
+                "segments=${previousPlayer.estimatedSegmentsAhead} " +
+                "speed=${previousPlayer.playbackSpeed}x variant=${previousPlayer.videoVariant.displayLabel}"
         )
         return nextTelemetry
     }
@@ -906,6 +948,8 @@ private fun bufferDebugLogLine(prefix: String, snapshot: PlayerRuntimeUiState): 
         "pos=${snapshot.currentPosition}ms " +
         "buffered=${snapshot.bufferedPosition}ms " +
         "ahead=${snapshot.bufferedAheadMs}ms " +
+        "effectiveAhead=${snapshot.effectiveBufferedAheadMs}ms " +
+        "segments=${snapshot.estimatedSegmentsAhead} " +
         "percent=${snapshot.bufferedPercentage}% " +
         "speed=${snapshot.playbackSpeed}x " +
         "variant=${snapshot.videoVariant.displayLabel}"
@@ -921,6 +965,20 @@ private fun PlayerRuntimeUiState.hasPlaybackStartedForTelemetry(): Boolean {
         currentPosition > 0L ||
         bufferedPosition > 0L ||
         isPlaying
+}
+
+private fun PlayerRuntimeUiState.canStartHighSpeedPlayback(): Boolean {
+    if (playbackSpeed < HIGH_SPEED_PLAYBACK_THRESHOLD) return true
+    return effectiveBufferedAheadMs >= HIGH_SPEED_START_EFFECTIVE_AHEAD_MS &&
+        estimatedSegmentsAhead >= HIGH_SPEED_START_SEGMENTS_AHEAD
+}
+
+private fun PlayerRuntimeUiState.dynamicSeekFallbackThresholdMs(): Long {
+    return if (playbackSpeed >= HIGH_SPEED_PLAYBACK_THRESHOLD) {
+        HIGH_SPEED_SEEK_FALLBACK_THRESHOLD_MS
+    } else {
+        RoomSyncCoordinator.DEFAULT_SEEK_DRIFT_THRESHOLD_MS
+    }
 }
 
 private fun playerSnapshotFromAdapter(

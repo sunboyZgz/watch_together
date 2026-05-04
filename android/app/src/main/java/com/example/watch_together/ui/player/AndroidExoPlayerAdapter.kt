@@ -47,6 +47,7 @@ class AndroidExoPlayerAdapter(
     private var attachedPlayerView: PlayerView? = null
     private var eventListener: ((PlayerEvent) -> Unit)? = null
     private var latestVideoVariant = PlayerVideoVariant()
+    private var latestPlaybackStrategy = PlayerPlaybackStrategy.Auto
     private val playerListener = object : Player.Listener {
         override fun onPlaybackStateChanged(playbackState: Int) {
             emit(PlayerEvent.PlaybackStateChanged(playbackState))
@@ -165,6 +166,34 @@ class AndroidExoPlayerAdapter(
         exoPlayer.playbackParameters = PlaybackParameters(speed)
     }
 
+    override fun updatePlaybackStrategy(playbackSpeed: Float, rebufferCount: Int) {
+        val nextStrategy = PlayerPlaybackStrategy.forPlayback(
+            playbackSpeed = playbackSpeed,
+            rebufferCount = rebufferCount
+        )
+        if (nextStrategy == latestPlaybackStrategy) return
+        latestPlaybackStrategy = nextStrategy
+        trackSelector.setParameters(
+            trackSelector.buildUponParameters().apply {
+                setMinVideoSize(MinVideoWidth, MinVideoHeight)
+                setExceedVideoConstraintsIfNecessary(false)
+                setAllowVideoNonSeamlessAdaptiveness(true)
+                if (nextStrategy.lockToMobileFast720p) {
+                    setMaxVideoSize(MobileFastVideoWidth, MobileFastVideoHeight)
+                    setForceHighestSupportedBitrate(false)
+                    setForceLowestBitrate(false)
+                } else {
+                    clearVideoSizeConstraints()
+                    setMinVideoSize(MinVideoWidth, MinVideoHeight)
+                }
+            }
+        )
+        Log.d(
+            ABR_LOG_TAG,
+            "playback strategy=${nextStrategy.logLabel} speed=${playbackSpeed}x rebufferCount=$rebufferCount"
+        )
+    }
+
     override fun release() {
         detach()
         exoPlayer.removeAnalyticsListener(analyticsListener)
@@ -223,9 +252,32 @@ class AndroidExoPlayerAdapter(
         const val ABR_LOG_TAG = "WatchTogetherABR"
         const val MinVideoWidth = 1_280
         const val MinVideoHeight = 720
+        const val MobileFastVideoWidth = 1_280
+        const val MobileFastVideoHeight = 720
         const val MinBufferMs = 30_000
         const val MaxBufferMs = 90_000
-        const val BufferForPlaybackMs = 2_500
-        const val BufferForPlaybackAfterRebufferMs = 5_000
+        const val BufferForPlaybackMs = 3_500
+        const val BufferForPlaybackAfterRebufferMs = 10_000
+    }
+}
+
+private enum class PlayerPlaybackStrategy(
+    val lockToMobileFast720p: Boolean,
+    val logLabel: String
+) {
+    Auto(lockToMobileFast720p = false, logLabel = "auto"),
+    MobileFast720p(lockToMobileFast720p = true, logLabel = "mobile_fast_720p");
+
+    companion object {
+        private const val HighSpeedThreshold = 2.0f
+        private const val RebufferLockThreshold = 2
+
+        fun forPlayback(playbackSpeed: Float, rebufferCount: Int): PlayerPlaybackStrategy {
+            return if (playbackSpeed >= HighSpeedThreshold || rebufferCount >= RebufferLockThreshold) {
+                MobileFast720p
+            } else {
+                Auto
+            }
+        }
     }
 }

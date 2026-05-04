@@ -99,7 +99,7 @@ go run ./cmd/mediactl ingest \
 
 ### 生成本地 HLS
 
-传入 `--dry-run=false` 后，CLI 会调用 `ffmpeg` 生成多码率 HLS。默认生成 `720p`，源视频高度足够时同时生成 `1080p`。
+传入 `--dry-run=false` 后，CLI 会调用 `ffmpeg` 生成多码率 HLS。默认生成 `720p-fast / 720p-high`，源视频高度足够时同时生成 `1080p`。
 
 ```bash
 cd server
@@ -129,9 +129,12 @@ go run ./cmd/mediactl ingest \
 
 ```text
 master.m3u8
-720p/index.m3u8
-720p/segment_00000.ts
-720p/segment_00001.ts
+720p-fast/index.m3u8
+720p-fast/segment_00000.ts
+720p-fast/segment_00001.ts
+720p-high/index.m3u8
+720p-high/segment_00000.ts
+720p-high/segment_00001.ts
 1080p/index.m3u8
 1080p/segment_00000.ts
 1080p/segment_00001.ts
@@ -215,7 +218,7 @@ go run ./cmd/mediactl ingest \
 | `--cover` | 否 | 封面文件路径，当前只校验存在，后续由 `INT-141` 上传。 |
 | `--output-dir` | 否 | 覆盖 HLS 输出目录，适合临时测试。 |
 | `--hls-segment-seconds` | 否 | HLS 分片时长，允许 4 到 6 秒，默认 6。 |
-| `--renditions` | 否 | 逗号分隔输出清晰度，默认 `720p,1080p`。当前支持 `720p / 1080p`，且必须包含 `720p`。 |
+| `--renditions` | 否 | 逗号分隔输出清晰度，默认 `720p-fast,720p-high,1080p`。当前支持 `720p-fast / 720p-high / 720p / 1080p`，其中 `720p` 是兼容别名，会映射到 `720p-fast`，且必须包含至少一个 720p baseline。 |
 | `--upload` | 否 | 当前只记录上传意图，后续由 `INT-141` 实现。 |
 | `--write-db` | 否 | HLS 成功生成后写入 PostgreSQL。 |
 | `--database-url` | 否 | 覆盖 `DATABASE_URL`。 |
@@ -227,7 +230,7 @@ go run ./cmd/mediactl ingest \
 
 - 多码率 VOD HLS。
 - 输出 `master.m3u8` 作为播放入口。
-- 默认生成 `720p/index.m3u8` 和 `1080p/index.m3u8`。
+- 默认生成 `720p-fast/index.m3u8`、`720p-high/index.m3u8` 和 `1080p/index.m3u8`。
 - 如果源视频高度不足 1080p，会自动跳过 1080p。
 - 如果源视频高度低于 720p，会直接失败，因为 720p 是当前同步播放器的最低清晰度基线。
 - 各 variant 输出 `.ts` 分片。
@@ -235,11 +238,13 @@ go run ./cmd/mediactl ingest \
 - 默认分片时长：6 秒。
 - 允许分片时长：4 到 6 秒。
 - 使用 `libx264 + aac` 重新编码。
-- 720p 使用 `fastdecode + no B-frames` 的偏稳配置，优先降低 Android 模拟器和中低端设备的 1.5x/2.0x 解码压力。
+- `720p-fast` 使用 `fastdecode + no B-frames` 的偏稳配置，优先降低 Android 模拟器和中低端设备的 1.5x/2.0x 解码压力。
+- `720p-high` 保持 720p 分辨率但使用更偏画质的编码参数，供 buffer 健康时 ABR 升档。
 - 通过 `-force_key_frames` 让 HLS 分片边界尽量对齐关键帧。
 - 使用 `-hls_flags independent_segments` 标记独立分片，降低 Android/ExoPlayer 在 seek、倍速和 rebuffer 场景下的解码压力。
 - 使用 `ffprobe` 读取 `durationMs`。
 - 生成后使用 `ffprobe` 校验每个 variant 的实际分辨率，确保 `720p / 1080p` 输出符合目标清晰度。
+- 生成后解析 HLS playlist 的 `EXTINF`，记录 `segment_count / average_segment_ms`，并拦截明显异常的 segment 结构。
 
 当前不做：
 
@@ -306,6 +311,8 @@ http://10.0.2.2:9000/media/tmp/media/sample-show/season-01/episode-01/hls/master
 - `media_episode_variants.height`
 - `media_episode_variants.bandwidth_bps`
 - `media_episode_variants.codecs`
+- `media_episode_variants.segment_count`
+- `media_episode_variants.average_segment_ms`
 - `media_tags`
 - `media_season_tags`
 
