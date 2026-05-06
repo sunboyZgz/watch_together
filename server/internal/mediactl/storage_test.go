@@ -69,7 +69,7 @@ func TestUploadIngestAssetsLocalCopiesHLSAndCoverToStablePaths(t *testing.T) {
 func TestLoadStorageConfigIncludesRemoteCredentials(t *testing.T) {
 	config := LoadStorageConfig(envLookup(map[string]string{
 		"MEDIA_STORAGE_DRIVER":            "minio",
-		"MEDIA_STORAGE_ENDPOINT":          "http://127.0.0.1:9001",
+		"MEDIA_STORAGE_ENDPOINT":          "http://127.0.0.1:9100",
 		"MEDIA_STORAGE_BUCKET":            "watch-together-media",
 		"MEDIA_STORAGE_REGION":            "auto",
 		"MEDIA_STORAGE_ACCESS_KEY_ID":     "minioadmin",

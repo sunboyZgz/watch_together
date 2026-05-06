@@ -33,13 +33,16 @@ func UploadIngestAssets(ctx context.Context, options IngestOptions, result HLSRe
 	if err != nil {
 		return HLSResult{}, err
 	}
+	return ApplyIngestPublicURLs(options, stored), nil
+}
 
-	stored.MediaURL = publicMediaURL(options)
-	stored.CoverURL = plannedCoverURL(options)
-	for index := range stored.Variants {
-		stored.Variants[index].PlaylistURL = publicVariantURL(options, stored.Variants[index].Key)
+func ApplyIngestPublicURLs(options IngestOptions, result HLSResult) HLSResult {
+	result.MediaURL = publicMediaURL(options)
+	result.CoverURL = plannedCoverURL(options)
+	for index := range result.Variants {
+		result.Variants[index].PlaylistURL = publicVariantURL(options, result.Variants[index].Key)
 	}
-	return stored, nil
+	return result
 }
 
 func isSupportedStorageDriver(driver string) bool {

@@ -84,6 +84,13 @@
 - Android 只消费 API 返回的 `mediaUrl / coverUrl`，不直接感知存储供应商。
 - MinIO / S3-compatible 配置只作为后续 uploader 抽象预留。
 
+当前 `roomserver` 和 `mediactl` 已统一接入配置加载层：
+
+- 启动时会自动尝试读取 `server/.env`
+- 如果存在 `server/.env.local`，会覆盖 `.env`
+- 当前 shell 的环境变量仍然优先于本地文件
+- `.env.example` 继续只作为模板，不直接参与运行时加载
+
 关键环境变量：
 
 ```text
@@ -101,6 +108,32 @@ FFPROBE_BIN=ffprobe
 media/{sourceKeyWithoutExt}/hls/master.m3u8
 media/{sourceKeyWithoutExt}/cover/cover.jpg
 ```
+
+## Local Config Files
+
+当前推荐的本地配置方式：
+
+1. 复制 `server/.env.example`
+2. 生成你自己的 `server/.env.local`
+3. 在 `server/` 目录运行 `mediactl` 或 `roomserver`
+
+示例：
+
+```bash
+cd server
+cp .env.example .env.local
+```
+
+然后按你当前机器环境修改：
+
+- `DATABASE_URL`
+- `MEDIA_STORAGE_DRIVER`
+- `MEDIA_STORAGE_ENDPOINT`
+- `MEDIA_STORAGE_BUCKET`
+- `FFMPEG_BIN`
+- `FFPROBE_BIN`
+
+如果临时想覆盖某个值，直接在当前 shell `export` 即可，环境变量优先级高于 `.env.local`。
 
 ## Current Structure
 

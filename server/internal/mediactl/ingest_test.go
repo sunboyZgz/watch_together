@@ -33,7 +33,6 @@ func TestParseIngestOptionsBuildsDryRunContract(t *testing.T) {
 		"--cover", cover,
 		"--output-dir", "/tmp/watch-media/media_uuid/hls",
 		"--hls-segment-seconds", "4",
-		"--upload",
 	}, envLookup(env), &bytes.Buffer{})
 	if err != nil {
 		t.Fatalf("parse ingest options: %v", err)
@@ -62,9 +61,6 @@ func TestParseIngestOptionsBuildsDryRunContract(t *testing.T) {
 	}
 	if got := strings.Join(options.Tags, ","); got != "healing,anime" {
 		t.Fatalf("expected deduped tags, got %q", got)
-	}
-	if !options.Upload {
-		t.Fatalf("expected upload request to be captured")
 	}
 	if options.MediaID != "media_uuid" {
 		t.Fatalf("expected media id media_uuid, got %q", options.MediaID)
@@ -172,6 +168,149 @@ func TestRunIngestPrintsDryRunSummary(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), `"ffprobeBin": "ffprobe"`) {
 		t.Fatalf("expected default ffprobe in summary, got %s", stdout.String())
+	}
+}
+
+func TestRunPlanPrintsDryRunSummary(t *testing.T) {
+	libraryRoot := t.TempDir()
+	input := writeLibraryFile(t, libraryRoot, "frieren/season-01/episode-01.mp4")
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	exitCode := Run([]string{
+		"plan",
+		"--input", input,
+		"--library-root", libraryRoot,
+		"--title", "葬送的芙莉莲",
+	}, envLookup(nil), &stdout, &stderr)
+
+	if exitCode != 0 {
+		t.Fatalf("expected exit code 0, got %d, stderr=%s", exitCode, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "mediactl plan summary") {
+		t.Fatalf("expected plan summary, got %s", stdout.String())
+	}
+}
+
+func TestRunUploadSupportsExistingHLSWithoutTitle(t *testing.T) {
+	libraryRoot := t.TempDir()
+	localRoot := t.TempDir()
+	stagingDir := filepath.Join(t.TempDir(), "staging")
+	input := writeLibraryFile(t, libraryRoot, "sample-show/season-01/episode-01.mp4")
+	ffprobeStub := writeFFprobeStub(t)
+	writeExistingHLSOutput(t, stagingDir, []string{"720p-fast", "1080p"})
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := Run([]string{
+		"upload",
+		"--input", input,
+		"--library-root", libraryRoot,
+		"--output-dir", stagingDir,
+		"--dry-run=false",
+	}, envLookup(map[string]string{
+		"MEDIA_STORAGE_DRIVER":    "local",
+		"MEDIA_LOCAL_ROOT":        localRoot,
+		"MEDIA_PUBLIC_BASE_URL":   "http://127.0.0.1:9000/media/tmp",
+		"MEDIA_OBJECT_KEY_PREFIX": "media",
+		"FFPROBE_BIN":             ffprobeStub,
+	}), &stdout, &stderr)
+
+	if exitCode != 0 {
+		t.Fatalf("expected exit code 0, got %d, stderr=%s", exitCode, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "mediactl upload completed") {
+		t.Fatalf("expected upload summary, got %s", stdout.String())
+	}
+	finalMaster := filepath.Join(localRoot, "media", "sample-show", "season-01", "episode-01", "hls", "master.m3u8")
+	if _, err := os.Stat(finalMaster); err != nil {
+		t.Fatalf("expected uploaded master playlist at %q: %v", finalMaster, err)
+	}
+	if !strings.Contains(stdout.String(), `"mediaUrl": "http://127.0.0.1:9000/media/tmp/media/sample-show/season-01/episode-01/hls/master.m3u8"`) {
+		t.Fatalf("expected media url in upload summary, got %s", stdout.String())
+	}
+}
+
+func TestRunWriteDBRequiresDatabaseURL(t *testing.T) {
+	libraryRoot := t.TempDir()
+	input := writeLibraryFile(t, libraryRoot, "sample-show/season-01/episode-01.mp4")
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	exitCode := Run([]string{
+		"write-db",
+		"--input", input,
+		"--library-root", libraryRoot,
+		"--title", "测试视频",
+		"--dry-run=false",
+	}, envLookup(nil), &stdout, &stderr)
+
+	if exitCode != 1 {
+		t.Fatalf("expected exit code 1, got %d", exitCode)
+	}
+	if !strings.Contains(stderr.String(), "--write-db requires DATABASE_URL") {
+		t.Fatalf("expected database url validation error, got %s", stderr.String())
+	}
+}
+
+func TestRunIngestSupportsCustomStageSequence(t *testing.T) {
+	libraryRoot := t.TempDir()
+	localRoot := t.TempDir()
+	stagingDir := filepath.Join(t.TempDir(), "staging")
+	input := writeLibraryFile(t, libraryRoot, "sample-show/season-01/episode-01.mp4")
+	ffprobeStub := writeFFprobeStub(t)
+	writeExistingHLSOutput(t, stagingDir, []string{"720p-fast"})
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := Run([]string{
+		"ingest",
+		"--stages=upload,write-db",
+		"--input", input,
+		"--library-root", libraryRoot,
+		"--title", "测试视频",
+		"--output-dir", stagingDir,
+		"--database-url", "postgres://app:app@127.0.0.1:1/anime_watch_dev?sslmode=disable",
+		"--dry-run=false",
+	}, envLookup(map[string]string{
+		"MEDIA_STORAGE_DRIVER":    "local",
+		"MEDIA_LOCAL_ROOT":        localRoot,
+		"MEDIA_PUBLIC_BASE_URL":   "http://127.0.0.1:9000/media/tmp",
+		"MEDIA_OBJECT_KEY_PREFIX": "media",
+		"FFPROBE_BIN":             ffprobeStub,
+	}), &stdout, &stderr)
+
+	if exitCode == 0 {
+		t.Fatalf("expected write-db to fail without a real database")
+	}
+	if !strings.Contains(stderr.String(), "connect database") {
+		t.Fatalf("expected database connection failure after staged upload, got %s", stderr.String())
+	}
+	finalMaster := filepath.Join(localRoot, "media", "sample-show", "season-01", "episode-01", "hls", "master.m3u8")
+	if _, err := os.Stat(finalMaster); err != nil {
+		t.Fatalf("expected staged upload to happen before write-db failure: %v", err)
+	}
+}
+
+func TestRunIngestRejectsPlanMixedWithMutations(t *testing.T) {
+	libraryRoot := t.TempDir()
+	input := writeLibraryFile(t, libraryRoot, "sample-show/season-01/episode-01.mp4")
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	exitCode := Run([]string{
+		"ingest",
+		"--stages=plan,upload",
+		"--input", input,
+		"--library-root", libraryRoot,
+		"--title", "测试视频",
+	}, envLookup(nil), &stdout, &stderr)
+
+	if exitCode != 1 {
+		t.Fatalf("expected exit code 1, got %d", exitCode)
+	}
+	if !strings.Contains(stderr.String(), "cannot mix plan with mutating stages") {
+		t.Fatalf("expected stage validation error, got %s", stderr.String())
 	}
 }
 
@@ -402,6 +541,58 @@ func TestRunUnknownCommandReturnsUsageError(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), `unknown command "nope"`) {
 		t.Fatalf("expected unknown command error, got %s", stderr.String())
+	}
+}
+
+func writeExistingHLSOutput(t *testing.T, outputDir string, variants []string) {
+	t.Helper()
+	master := "#EXTM3U\n#EXT-X-VERSION:6\n"
+	for _, variant := range variants {
+		master += "#EXT-X-STREAM-INF:BANDWIDTH=2000000,RESOLUTION=1280x720,CODECS=\"avc1.4d401f,mp4a.40.2\"\n"
+		master += variant + "/index.m3u8\n"
+
+		playlistPath := filepath.Join(outputDir, variant, "index.m3u8")
+		mustWriteMediactlPlaylist(t, playlistPath, "#EXTM3U\n#EXT-X-VERSION:6\n#EXTINF:6.000000,\nsegment_00000.ts\n#EXTINF:6.000000,\nsegment_00001.ts\n#EXT-X-ENDLIST\n")
+		mustWriteMediactlPlaylist(t, filepath.Join(outputDir, variant, "segment_00000.ts"), "segment-a")
+		mustWriteMediactlPlaylist(t, filepath.Join(outputDir, variant, "segment_00001.ts"), "segment-b")
+	}
+	mustWriteMediactlPlaylist(t, filepath.Join(outputDir, "master.m3u8"), master)
+}
+
+func writeFFprobeStub(t *testing.T) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "ffprobe-stub.sh")
+	script := `#!/bin/sh
+args="$*"
+case "$args" in
+  *stream=width,height*)
+    case "$args" in
+      *1080p*)
+        printf "1920x1080\n"
+        ;;
+      *)
+        printf "1280x720\n"
+        ;;
+    esac
+    ;;
+  *)
+    printf "12.0\n"
+    ;;
+esac
+`
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		t.Fatalf("write ffprobe stub: %v", err)
+	}
+	return path
+}
+
+func mustWriteMediactlPlaylist(t *testing.T, path string, content string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("mkdir %q: %v", path, err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write %q: %v", path, err)
 	}
 }
 

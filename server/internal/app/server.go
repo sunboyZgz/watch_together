@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"os"
 	"strings"
 
 	"watch_together/server/internal/auth"
@@ -25,27 +24,6 @@ type Config struct {
 	LogLevel    string
 	DatabaseURL string
 	DebugSync   bool
-}
-
-// LoadConfigFromEnv reads the minimum runtime config needed by the room server.
-func LoadConfigFromEnv() Config {
-	return Config{
-		AppEnv:      envOrDefault("APP_ENV", "local"),
-		Host:        envOrDefault("SERVER_HOST", "0.0.0.0"),
-		Port:        envOrDefault("SERVER_PORT", "8080"),
-		LogLevel:    envOrDefault("LOG_LEVEL", "debug"),
-		DatabaseURL: strings.TrimSpace(os.Getenv("DATABASE_URL")),
-		DebugSync:   strings.EqualFold(envOrDefault("DEBUG_SYNC", "true"), "true"),
-	}
-}
-
-// envOrDefault keeps startup simple by falling back to stable local defaults.
-func envOrDefault(name string, fallback string) string {
-	value := strings.TrimSpace(os.Getenv(name))
-	if value == "" {
-		return fallback
-	}
-	return value
 }
 
 type Server struct {

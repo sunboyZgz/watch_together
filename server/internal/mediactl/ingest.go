@@ -75,7 +75,6 @@ type IngestOptions struct {
 	OutputDir      string        `json:"outputDir,omitempty"`
 	HLSSegment     int           `json:"hlsSegmentSeconds"`
 	Renditions     []string      `json:"renditions"`
-	Upload         bool          `json:"upload"`
 	WriteDB        bool          `json:"writeDb"`
 	DryRun         bool          `json:"dryRun"`
 	DatabaseURL    string        `json:"-"`
@@ -93,6 +92,16 @@ type IngestSummary struct {
 	DatabaseUpsert  bool         `json:"databaseUpsert"`
 }
 
+type mediactlStage string
+
+const (
+	stagePlan    mediactlStage = "plan"
+	stageBuild   mediactlStage = "build-hls"
+	stageUpload  mediactlStage = "upload"
+	stageWriteDB mediactlStage = "write-db"
+	stageIngest  mediactlStage = "ingest"
+)
+
 // Run executes the mediactl command and returns a process-style exit code.
 func Run(args []string, getenv EnvLookup, stdout io.Writer, stderr io.Writer) int {
 	if len(args) == 0 {
@@ -101,6 +110,30 @@ func Run(args []string, getenv EnvLookup, stdout io.Writer, stderr io.Writer) in
 	}
 
 	switch args[0] {
+	case "plan":
+		if err := runPlan(args[1:], getenv, stdout, stderr); err != nil {
+			fmt.Fprintf(stderr, "mediactl plan: %v\n", err)
+			return 1
+		}
+		return 0
+	case "build-hls":
+		if err := runBuildHLS(args[1:], getenv, stdout, stderr); err != nil {
+			fmt.Fprintf(stderr, "mediactl build-hls: %v\n", err)
+			return 1
+		}
+		return 0
+	case "upload":
+		if err := runUpload(args[1:], getenv, stdout, stderr); err != nil {
+			fmt.Fprintf(stderr, "mediactl upload: %v\n", err)
+			return 1
+		}
+		return 0
+	case "write-db":
+		if err := runWriteDB(args[1:], getenv, stdout, stderr); err != nil {
+			fmt.Fprintf(stderr, "mediactl write-db: %v\n", err)
+			return 1
+		}
+		return 0
 	case "ingest":
 		if err := runIngest(args[1:], getenv, stdout, stderr); err != nil {
 			fmt.Fprintf(stderr, "mediactl ingest: %v\n", err)
@@ -117,15 +150,86 @@ func Run(args []string, getenv EnvLookup, stdout io.Writer, stderr io.Writer) in
 	}
 }
 
-// runIngest validates ingest inputs and optionally creates local HLS output.
-func runIngest(args []string, getenv EnvLookup, stdout io.Writer, stderr io.Writer) error {
-	options, err := ParseIngestOptions(args, getenv, stderr)
+func runPlan(args []string, getenv EnvLookup, stdout io.Writer, stderr io.Writer) error {
+	options, err := parseIngestOptionsForStage(stagePlan, args, getenv, stderr)
 	if err != nil {
 		return err
 	}
 
 	summary := IngestSummary{IngestOptions: options}
+	summary.HLSPlaylistPath = plannedPlaylistPath(options)
+	summary.MediaURL = plannedMediaURL(options)
+	summary.CoverURL = plannedCoverURL(options)
+	return printIngestSummary(stdout, "mediactl plan summary:", summary, "plan only validates inputs and prints the expected HLS / storage layout")
+}
+
+func runBuildHLS(args []string, getenv EnvLookup, stdout io.Writer, stderr io.Writer) error {
+	options, err := parseIngestOptionsForStage(stageBuild, args, getenv, stderr)
+	if err != nil {
+		return err
+	}
+
+	result, err := GenerateHLS(options)
+	if err != nil {
+		return err
+	}
+	summary := buildSummary(options, result)
+	return printIngestSummary(stdout, "mediactl build-hls completed:", summary, "HLS assets were generated locally; upload and database upsert were skipped")
+}
+
+func runUpload(args []string, getenv EnvLookup, stdout io.Writer, stderr io.Writer) error {
+	options, err := parseIngestOptionsForStage(stageUpload, args, getenv, stderr)
+	if err != nil {
+		return err
+	}
+
+	result, err := LoadExistingHLSResult(options)
+	if err != nil {
+		return err
+	}
+	result, err = UploadIngestAssets(context.Background(), options, result)
+	if err != nil {
+		return err
+	}
+	summary := buildSummary(options, result)
+	return printIngestSummary(stdout, "mediactl upload completed:", summary, "existing HLS assets were stored using stable object keys; rerunning upload overwrites the same paths instead of creating duplicates")
+}
+
+func runWriteDB(args []string, getenv EnvLookup, stdout io.Writer, stderr io.Writer) error {
+	options, err := parseIngestOptionsForStage(stageWriteDB, args, getenv, stderr)
+	if err != nil {
+		return err
+	}
+
+	result, err := LoadExistingHLSResult(options)
+	if err != nil {
+		return err
+	}
+	if err := UpsertMediaMetadata(context.Background(), options, result); err != nil {
+		return err
+	}
+	summary := buildSummary(options, result)
+	summary.DatabaseUpsert = true
+	return printIngestSummary(stdout, "mediactl write-db completed:", summary, "episode-backed media metadata was upserted; rerunning write-db updates the same season and source_key rows")
+}
+
+// runIngest validates ingest inputs and optionally creates local HLS output.
+func runIngest(args []string, getenv EnvLookup, stdout io.Writer, stderr io.Writer) error {
+	requestedStages, hasRequestedStages, err := parseRequestedStageSequence(args)
+	if err != nil {
+		return err
+	}
+	if hasRequestedStages {
+		return runComposedIngest(args, requestedStages, getenv, stdout, stderr)
+	}
+
+	options, err := ParseIngestOptions(args, getenv, stderr)
+	if err != nil {
+		return err
+	}
+
 	if options.DryRun {
+		summary := IngestSummary{IngestOptions: options}
 		summary.HLSPlaylistPath = plannedPlaylistPath(options)
 		summary.MediaURL = plannedMediaURL(options)
 		summary.CoverURL = plannedCoverURL(options)
@@ -140,11 +244,7 @@ func runIngest(args []string, getenv EnvLookup, stdout io.Writer, stderr io.Writ
 	if err != nil {
 		return err
 	}
-	summary.HLSPlaylistPath = result.PlaylistPath
-	summary.DurationMs = result.DurationMs
-	summary.MediaURL = result.MediaURL
-	summary.CoverURL = result.CoverURL
-	summary.Variants = result.Variants
+	summary := buildSummary(options, result)
 
 	if options.WriteDB {
 		if err := UpsertMediaMetadata(context.Background(), options, result); err != nil {
@@ -154,6 +254,210 @@ func runIngest(args []string, getenv EnvLookup, stdout io.Writer, stderr io.Writ
 	}
 
 	return printIngestSummary(stdout, "mediactl ingest completed:", summary, "ingest assets were generated, stored, and are ready for playback")
+}
+
+func runComposedIngest(args []string, stages []mediactlStage, getenv EnvLookup, stdout io.Writer, stderr io.Writer) error {
+	parseStage := dominantValidationStage(stages)
+	filteredArgs := stripStagesArgs(args)
+	options, err := parseIngestOptionsForStage(parseStage, filteredArgs, getenv, stderr)
+	if err != nil {
+		return err
+	}
+	return executeStageSequence("mediactl ingest staged pipeline completed:", stages, options, stdout)
+}
+
+func executeStageSequence(title string, stages []mediactlStage, options IngestOptions, stdout io.Writer) error {
+	if len(stages) == 1 && stages[0] == stagePlan {
+		summary := IngestSummary{IngestOptions: options}
+		summary.HLSPlaylistPath = plannedPlaylistPath(options)
+		summary.MediaURL = plannedMediaURL(options)
+		summary.CoverURL = plannedCoverURL(options)
+		return printIngestSummary(stdout, title, summary, "plan only validates inputs and prints the expected HLS / storage layout")
+	}
+
+	var (
+		result HLSResult
+		err    error
+		loaded bool
+	)
+
+	for _, stage := range stages {
+		switch stage {
+		case stageBuild:
+			result, err = GenerateHLS(options)
+			if err != nil {
+				return err
+			}
+			result = ApplyIngestPublicURLs(options, result)
+			loaded = true
+		case stageUpload:
+			if !loaded {
+				result, err = LoadExistingHLSResult(options)
+				if err != nil {
+					return err
+				}
+				loaded = true
+			}
+			result, err = UploadIngestAssets(context.Background(), options, result)
+			if err != nil {
+				return err
+			}
+		case stageWriteDB:
+			if !loaded {
+				result, err = LoadExistingHLSResult(options)
+				if err != nil {
+					return err
+				}
+				loaded = true
+			}
+			result = ApplyIngestPublicURLs(options, result)
+			if err := UpsertMediaMetadata(context.Background(), options, result); err != nil {
+				return err
+			}
+		}
+	}
+
+	summary := buildSummary(options, result)
+	if containsStage(stages, stageWriteDB) {
+		summary.DatabaseUpsert = true
+	}
+	footer := fmt.Sprintf("stages executed in dependency order: %s", joinStageNames(stages))
+	return printIngestSummary(stdout, title, summary, footer)
+}
+
+func buildSummary(options IngestOptions, result HLSResult) IngestSummary {
+	return IngestSummary{
+		IngestOptions:   options,
+		HLSPlaylistPath: result.PlaylistPath,
+		MediaURL:        result.MediaURL,
+		CoverURL:        result.CoverURL,
+		DurationMs:      result.DurationMs,
+		Variants:        result.Variants,
+	}
+}
+
+func parseRequestedStageSequence(args []string) ([]mediactlStage, bool, error) {
+	raw := ""
+	for index := 0; index < len(args); index++ {
+		arg := strings.TrimSpace(args[index])
+		if arg == "--stages" {
+			if index+1 >= len(args) {
+				return nil, true, errors.New("--stages requires a comma-separated value")
+			}
+			raw = args[index+1]
+			break
+		}
+		if strings.HasPrefix(arg, "--stages=") {
+			raw = strings.TrimPrefix(arg, "--stages=")
+			break
+		}
+	}
+	if raw == "" {
+		return nil, false, nil
+	}
+	stages, err := parseStageSequence(raw)
+	if err != nil {
+		return nil, true, err
+	}
+	return stages, true, nil
+}
+
+func stripStagesArgs(args []string) []string {
+	filtered := make([]string, 0, len(args))
+	for index := 0; index < len(args); index++ {
+		arg := strings.TrimSpace(args[index])
+		if arg == "--stages" {
+			index++
+			continue
+		}
+		if strings.HasPrefix(arg, "--stages=") {
+			continue
+		}
+		filtered = append(filtered, args[index])
+	}
+	return filtered
+}
+
+func parseStageSequence(raw string) ([]mediactlStage, error) {
+	parts := splitTags(raw)
+	if len(parts) == 0 {
+		return nil, errors.New("--stages must include at least one stage")
+	}
+
+	seen := map[mediactlStage]struct{}{}
+	containsPlan := false
+	containsMutation := false
+	for _, part := range parts {
+		stage, err := normalizeStageName(part)
+		if err != nil {
+			return nil, err
+		}
+		if _, exists := seen[stage]; exists {
+			continue
+		}
+		seen[stage] = struct{}{}
+		if stage == stagePlan {
+			containsPlan = true
+		} else {
+			containsMutation = true
+		}
+	}
+	if containsPlan && containsMutation {
+		return nil, errors.New("--stages cannot mix plan with mutating stages")
+	}
+
+	ordered := make([]mediactlStage, 0, len(seen))
+	for _, candidate := range []mediactlStage{stagePlan, stageBuild, stageUpload, stageWriteDB} {
+		if _, ok := seen[candidate]; ok {
+			ordered = append(ordered, candidate)
+		}
+	}
+	return ordered, nil
+}
+
+func normalizeStageName(raw string) (mediactlStage, error) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case string(stagePlan):
+		return stagePlan, nil
+	case string(stageBuild), "build", "transcode":
+		return stageBuild, nil
+	case string(stageUpload):
+		return stageUpload, nil
+	case string(stageWriteDB), "db", "write":
+		return stageWriteDB, nil
+	default:
+		return "", fmt.Errorf("unsupported stage %q; supported values are plan, build-hls, upload, write-db", raw)
+	}
+}
+
+func dominantValidationStage(stages []mediactlStage) mediactlStage {
+	if containsStage(stages, stageBuild) {
+		return stageBuild
+	}
+	if containsStage(stages, stageWriteDB) {
+		return stageWriteDB
+	}
+	if containsStage(stages, stageUpload) {
+		return stageUpload
+	}
+	return stagePlan
+}
+
+func containsStage(stages []mediactlStage, want mediactlStage) bool {
+	for _, stage := range stages {
+		if stage == want {
+			return true
+		}
+	}
+	return false
+}
+
+func joinStageNames(stages []mediactlStage) string {
+	names := make([]string, 0, len(stages))
+	for _, stage := range stages {
+		names = append(names, string(stage))
+	}
+	return strings.Join(names, " -> ")
 }
 
 func printIngestSummary(stdout io.Writer, title string, summary IngestSummary, footer string) error {
@@ -170,13 +474,17 @@ func printIngestSummary(stdout io.Writer, title string, summary IngestSummary, f
 
 // ParseIngestOptions parses flags and validates local inputs without side effects.
 func ParseIngestOptions(args []string, getenv EnvLookup, stderr io.Writer) (IngestOptions, error) {
+	return parseIngestOptionsForStage(stageIngest, args, getenv, stderr)
+}
+
+func parseIngestOptionsForStage(stage mediactlStage, args []string, getenv EnvLookup, stderr io.Writer) (IngestOptions, error) {
 	flags := flag.NewFlagSet("ingest", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 
 	var tags string
 	var searchAliases string
 	var renditions string
-	options := IngestOptions{DryRun: true, HLSSegment: defaultHLSSegmentTime}
+	options := IngestOptions{DryRun: stage == stageIngest || stage == stagePlan, HLSSegment: defaultHLSSegmentTime}
 	flags.StringVar(&options.MediaID, "media-id", "", "legacy media id override; normal ingest should use --library-root")
 	flags.StringVar(&options.Input, "input", "", "source video file path")
 	flags.StringVar(&options.LibraryRoot, "library-root", "", "media library root used to derive source_key from --input")
@@ -194,7 +502,6 @@ func ParseIngestOptions(args []string, getenv EnvLookup, stderr io.Writer) (Inge
 	flags.StringVar(&options.OutputDir, "output-dir", "", "optional HLS output directory")
 	flags.IntVar(&options.HLSSegment, "hls-segment-seconds", defaultHLSSegmentTime, "HLS segment duration in seconds")
 	flags.StringVar(&renditions, "renditions", defaultRenditions, "comma-separated HLS renditions; supported values: 720p-fast,720p-high,720p,1080p")
-	flags.BoolVar(&options.Upload, "upload", false, "compatibility flag; uploader now runs automatically for the configured storage driver")
 	flags.BoolVar(&options.WriteDB, "write-db", false, "upsert media metadata into PostgreSQL after local HLS generation")
 	flags.StringVar(&options.DatabaseURL, "database-url", "", "PostgreSQL connection string; falls back to DATABASE_URL")
 	flags.BoolVar(&options.DryRun, "dry-run", true, "print planned ingest work without mutating files or database")
@@ -233,7 +540,7 @@ func ParseIngestOptions(args []string, getenv EnvLookup, stderr io.Writer) (Inge
 	if options.LibraryRoot == "" {
 		return IngestOptions{}, errors.New("--library-root is required")
 	}
-	if options.Title == "" {
+	if stage != stageUpload && options.Title == "" {
 		return IngestOptions{}, errors.New("--title is required")
 	}
 	if options.HLSSegment < 4 || options.HLSSegment > 6 {
@@ -248,10 +555,21 @@ func ParseIngestOptions(args []string, getenv EnvLookup, stderr io.Writer) (Inge
 	if _, err := ResolveRenditionSpecs(options.Renditions); err != nil {
 		return IngestOptions{}, err
 	}
-	if options.WriteDB && options.DryRun {
-		return IngestOptions{}, errors.New("--write-db requires --dry-run=false")
+	switch stage {
+	case stagePlan:
+		if !options.DryRun {
+			return IngestOptions{}, errors.New("plan only supports dry-run validation")
+		}
+	case stageBuild, stageUpload, stageWriteDB:
+		if options.DryRun {
+			return IngestOptions{}, fmt.Errorf("%s requires --dry-run=false", stage)
+		}
+	case stageIngest:
+		if options.WriteDB && options.DryRun {
+			return IngestOptions{}, errors.New("--write-db requires --dry-run=false")
+		}
 	}
-	if options.WriteDB && options.DatabaseURL == "" {
+	if (stage == stageWriteDB || options.WriteDB) && options.DatabaseURL == "" {
 		return IngestOptions{}, errors.New("--write-db requires DATABASE_URL or --database-url")
 	}
 	if err := requireExistingFile(options.Input, "--input"); err != nil {
@@ -596,6 +914,84 @@ type HLSHealth struct {
 	MinSegmentMs     int64
 }
 
+// LoadExistingHLSResult rebuilds a typed result from an already generated local HLS directory.
+func LoadExistingHLSResult(options IngestOptions) (HLSResult, error) {
+	outputDir := resolveOutputDir(options)
+	playlistPath := filepath.Join(outputDir, "master.m3u8")
+	if err := requireExistingFile(playlistPath, "generated HLS master playlist"); err != nil {
+		return HLSResult{}, err
+	}
+
+	durationMs, err := ProbeDurationMs(options.Storage.FFprobeBin, options.Input)
+	if err != nil {
+		return HLSResult{}, err
+	}
+	variants, err := discoverGeneratedVariants(options, outputDir)
+	if err != nil {
+		return HLSResult{}, err
+	}
+
+	return HLSResult{
+		OutputDir:    outputDir,
+		PlaylistPath: playlistPath,
+		MediaURL:     publicMediaURL(options),
+		CoverURL:     plannedCoverURL(options),
+		DurationMs:   durationMs,
+		Variants:     variants,
+	}, nil
+}
+
+func discoverGeneratedVariants(options IngestOptions, outputDir string) ([]HLSVariant, error) {
+	supported := supportedRenditionSpecs()
+	variants := make([]HLSVariant, 0, len(supported))
+	for _, key := range orderedSupportedRenditionKeys() {
+		spec := supported[key]
+		playlistPath := filepath.Join(outputDir, spec.Key, "index.m3u8")
+		if _, err := os.Stat(playlistPath); err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				continue
+			}
+			return nil, fmt.Errorf("inspect generated %s playlist: %w", spec.Key, err)
+		}
+		metadata, err := ProbeVideoMetadata(options.Storage.FFprobeBin, playlistPath)
+		if err != nil {
+			return nil, fmt.Errorf("probe generated %s playlist: %w", spec.Key, err)
+		}
+		health, err := AnalyzeHLSPlaylist(playlistPath)
+		if err != nil {
+			return nil, fmt.Errorf("analyze generated %s playlist: %w", spec.Key, err)
+		}
+		variants = append(variants, HLSVariant{
+			Key:              spec.Key,
+			Label:            spec.Label,
+			PlaylistPath:     playlistPath,
+			PlaylistURL:      publicVariantURL(options, spec.Key),
+			Width:            metadata.Width,
+			Height:           metadata.Height,
+			BandwidthBps:     spec.BandwidthBps,
+			Codecs:           spec.Codecs,
+			Segments:         health.Segments,
+			AverageSegmentMs: health.AverageSegmentMs,
+			IsDefault:        spec.IsDefault,
+			SortOrder:        spec.SortOrder,
+		})
+	}
+	if len(variants) == 0 {
+		return nil, errors.New("generated HLS output has no recognized variant playlists")
+	}
+	hasDefault := false
+	for _, variant := range variants {
+		if variant.IsDefault {
+			hasDefault = true
+			break
+		}
+	}
+	if !hasDefault {
+		variants[0].IsDefault = true
+	}
+	return variants, nil
+}
+
 // GenerateHLS creates a multi-rendition VOD HLS output with a master playlist.
 func GenerateHLS(options IngestOptions) (HLSResult, error) {
 	outputDir := resolveOutputDir(options)
@@ -678,9 +1074,8 @@ func GenerateHLS(options IngestOptions) (HLSResult, error) {
 	}, nil
 }
 
-// ResolveRenditionSpecs validates user-facing rendition keys and maps them to encoding settings.
-func ResolveRenditionSpecs(keys []string) ([]RenditionSpec, error) {
-	supported := map[string]RenditionSpec{
+func supportedRenditionSpecs() map[string]RenditionSpec {
+	return map[string]RenditionSpec{
 		"720p-fast": {
 			Key:            "720p-fast",
 			Label:          "720p Fast",
@@ -724,6 +1119,15 @@ func ResolveRenditionSpecs(keys []string) ([]RenditionSpec, error) {
 			SortOrder:    2,
 		},
 	}
+}
+
+func orderedSupportedRenditionKeys() []string {
+	return []string{"720p-fast", "720p-high", "1080p"}
+}
+
+// ResolveRenditionSpecs validates user-facing rendition keys and maps them to encoding settings.
+func ResolveRenditionSpecs(keys []string) ([]RenditionSpec, error) {
+	supported := supportedRenditionSpecs()
 
 	specs := make([]RenditionSpec, 0, len(keys))
 	seen := make(map[string]struct{}, len(keys))
@@ -1256,5 +1660,9 @@ func printRootUsage(w io.Writer) {
 	fmt.Fprintln(w, "usage: mediactl <command>")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "commands:")
-	fmt.Fprintln(w, "  ingest    validate a media ingest request and print a dry-run summary")
+	fmt.Fprintln(w, "  plan       validate a media ingest request and print the expected pipeline summary")
+	fmt.Fprintln(w, "  build-hls  generate local multi-rendition HLS assets without uploading or writing database rows")
+	fmt.Fprintln(w, "  upload     upload or store an existing local HLS output using stable object keys")
+	fmt.Fprintln(w, "  write-db   upsert episode-backed media metadata from an existing HLS output")
+	fmt.Fprintln(w, "  ingest     composite command: legacy dry-run / full ingest, or custom staged pipeline via --stages")
 }

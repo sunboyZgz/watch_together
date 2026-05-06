@@ -10,7 +10,7 @@ server/cmd/mediactl
 
 当前已实现：
 
-- `mediactl ingest` dry-run。
+- `mediactl plan / build-hls / upload / write-db / ingest` 阶段化命令。
 - 本地多码率 HLS 生成，默认 `720p,1080p`，不默认生成 4K。
 - 基于 storage uploader abstraction 的资产落盘/上传。
 - `local` driver：把 HLS 与封面稳定写入 `MEDIA_LOCAL_ROOT`。
@@ -52,6 +52,28 @@ ffprobe -version
 - `docs/environment-config.md`
 - `docs/media-storage-and-delivery.md`
 
+当前 `mediactl` 已支持自动读取：
+
+- `server/.env`
+- `server/.env.local`
+
+优先级规则：
+
+1. CLI 显式参数
+2. 当前 shell 环境变量
+3. `server/.env.local`
+4. `server/.env`
+5. 代码默认值
+
+推荐做法：
+
+```bash
+cd server
+cp .env.example .env.local
+```
+
+然后在 `.env.local` 中填入你自己的本地值。
+
 当前本地推荐：
 
 ```bash
@@ -73,7 +95,86 @@ export FFPROBE_BIN=/opt/homebrew/bin/ffprobe
 
 ## 当前命令
 
-### Dry-run
+当前推荐把 `mediactl` 看作一条可组合流水线：
+
+```text
+plan -> build-hls -> upload -> write-db
+```
+
+其中：
+
+- `plan` 只做校验和结果预览。
+- `build-hls` 只在本地生成 HLS，不上传、不写库。
+- `upload` 读取已存在的本地 HLS 目录，上传或落盘到目标存储。
+- `write-db` 读取已存在的本地 HLS 目录，把 URL 和变体信息写入 PostgreSQL。
+- `ingest` 是组合命令：
+  - `--dry-run=true` 时等价于 `plan`
+  - `--dry-run=false` 时执行 `build-hls + upload`
+  - 如果同时传 `--write-db`，再执行 `write-db`
+  - 如果显式传 `--stages=...`，则按依赖顺序组合执行指定阶段
+
+`ingest --stages=...` 支持的阶段值：
+
+- `plan`
+- `build-hls`
+- `upload`
+- `write-db`
+
+依赖规则：
+
+- `plan` 只能单独运行，不能和其它会产生副作用的阶段混用
+- `build-hls,upload,write-db` 可以任意声明，但实际会按 `build-hls -> upload -> write-db` 的依赖顺序执行
+- 只传 `upload` 或 `write-db` 时，CLI 会读取已经存在的本地 HLS 目录
+- 重复执行 `upload` 会覆盖同一 object key，不会生成新的随机资源路径
+- 重复执行 `write-db` 会更新同一 `source_key` 对应的 season / episode / variant 记录，不会额外插入一份业务主数据
+
+### ingest 组合阶段
+
+如果你想在一次运行里同时组合几个阶段，可以直接使用：
+
+```bash
+cd server
+go run ./cmd/mediactl ingest \
+  --stages=build-hls,upload,write-db \
+  --library-root ../media/raw \
+  --input ../media/raw/sample-show/season-01/episode-01.mp4 \
+  --title "测试视频" \
+  --season-label "第 1 季" \
+  --episode-label "第 01 集" \
+  --tags test,anime \
+  --database-url 'postgres://app:app@127.0.0.1:5432/anime_watch_dev?sslmode=disable' \
+  --dry-run=false
+```
+
+如果你已经本地生成好了 HLS，也可以只组合后两段：
+
+```bash
+cd server
+go run ./cmd/mediactl ingest \
+  --stages=upload,write-db \
+  --library-root ../media/raw \
+  --input ../media/raw/sample-show/season-01/episode-01.mp4 \
+  --title "测试视频" \
+  --database-url 'postgres://app:app@127.0.0.1:5432/anime_watch_dev?sslmode=disable' \
+  --dry-run=false
+```
+
+### plan
+
+`plan` 不会写文件、不会上传、不会写数据库，适合先检查参数和配置。
+
+```bash
+cd server
+go run ./cmd/mediactl plan \
+  --library-root ../media/raw \
+  --input ../media/raw/sample-show/season-01/episode-01.mp4 \
+  --title "测试视频" \
+  --season-label "第 1 季" \
+  --episode-label "第 01 集" \
+  --tags test,anime
+```
+
+### ingest dry-run
 
 dry-run 不会写文件、不会上传、不会写数据库，适合先检查参数和配置。
 
@@ -100,13 +201,13 @@ go run ./cmd/mediactl ingest \
 - 计划输出的 `hlsPlaylistPath`
 - 计划写入的 `mediaUrl / coverUrl`
 
-### 生成本地 HLS
+### build-hls
 
-传入 `--dry-run=false` 后，CLI 会调用 `ffmpeg` 生成多码率 HLS。默认生成 `720p-fast / 720p-high`，源视频高度足够时同时生成 `1080p`。
+`build-hls` 只负责本地生成多码率 HLS。默认生成 `720p-fast / 720p-high`，源视频高度足够时同时生成 `1080p`。
 
 ```bash
 cd server
-go run ./cmd/mediactl ingest \
+go run ./cmd/mediactl build-hls \
   --library-root ../media/raw \
   --input ../media/raw/sample-show/season-01/episode-01.mp4 \
   --title "测试视频" \
@@ -143,20 +244,39 @@ master.m3u8
 1080p/segment_00001.ts
 ```
 
-如果 `MEDIA_STORAGE_DRIVER=local`，生成完成后会进入 local uploader 阶段：
-
-- 把 HLS 目录稳定放到 `{MEDIA_LOCAL_ROOT}/{MEDIA_OBJECT_KEY_PREFIX}/{sourceKeyWithoutExt}/hls/`
-- 如果传了 `--cover`，会复制到 `cover/cover.<ext>`
-- summary 中的 `mediaUrl / coverUrl` 会直接对应本地静态服务可访问地址
-
 输出 summary 中会包含：
 
 - `hlsPlaylistPath`
-- `mediaUrl`
-- `coverUrl`
 - `durationMs`
 
-### 上传到 MinIO / S3-compatible
+### upload
+
+如果你希望先本地确认 HLS 无误，再单独上传，就使用 `upload`。
+
+```bash
+cd server
+go run ./cmd/mediactl upload \
+  --library-root ../media/raw \
+  --input ../media/raw/sample-show/season-01/episode-01.mp4 \
+  --dry-run=false
+```
+
+说明：
+
+- `upload` 不会重新转码。
+- 它会直接读取 `{outputDir}/master.m3u8` 和各 variant playlist。
+- object key 仍然由 `source_key` 稳定推导，所以重复执行会覆盖同一路径，不会新增随机副本。
+
+如果 `MEDIA_STORAGE_DRIVER=local`：
+
+- 会把 HLS 目录稳定放到 `{MEDIA_LOCAL_ROOT}/{MEDIA_OBJECT_KEY_PREFIX}/{sourceKeyWithoutExt}/hls/`
+- 如果传了 `--cover`，会复制到 `cover/cover.<ext>`
+
+如果 `MEDIA_STORAGE_DRIVER=minio` 或 `MEDIA_STORAGE_DRIVER=s3`：
+
+- 会把 HLS 与封面上传到对象存储
+
+### ingest 上传到 MinIO / S3-compatible
 
 如果 `MEDIA_STORAGE_DRIVER=minio` 或 `MEDIA_STORAGE_DRIVER=s3`，`--dry-run=false` 时会在本地转码完成后自动上传 HLS 与封面。
 
@@ -286,7 +406,36 @@ go run ./cmd/mediactl ingest \
 
 `--output-dir` 适合本地试跑。正式入库流程建议不要使用它，让 CLI 根据 `source_key` 生成稳定目录。
 
-### 写入 PostgreSQL
+### write-db
+
+如果 HLS 已经存在，并且你只想补写数据库，使用 `write-db`：
+
+```bash
+cd server
+go run ./cmd/mediactl write-db \
+  --library-root ../media/raw \
+  --input ../media/raw/sample-show/season-01/episode-01.mp4 \
+  --title "测试视频" \
+  --subtitle "本地 2 倍速播放测试" \
+  --description "本地 HLS 与播放器联调用测试视频。" \
+  --category anime \
+  --original-title "Sample Show" \
+  --production-team "Test Studio" \
+  --search-aliases "测试视频,sample-show" \
+  --season-label "第 1 季" \
+  --episode-label "第 01 集" \
+  --tags test,anime \
+  --dry-run=false \
+  --write-db
+```
+
+说明：
+
+- `write-db` 不会重新转码，也不会重新上传。
+- 它会读取本地已有 HLS 结果，并按 `source_key` 做幂等 upsert。
+- 重复执行时，会更新同一 season / episode / variant 记录，而不是重复插入新业务行。
+
+### ingest + 写入 PostgreSQL
 
 传入 `--write-db` 后，CLI 会在 HLS 生成成功后写入 PostgreSQL。
 
@@ -344,7 +493,6 @@ go run ./cmd/mediactl ingest \
 | `--output-dir` | 否 | 覆盖 HLS 输出目录，适合临时测试。 |
 | `--hls-segment-seconds` | 否 | HLS 分片时长，允许 4 到 6 秒，默认 6。 |
 | `--renditions` | 否 | 逗号分隔输出清晰度，默认 `720p-fast,720p-high,1080p`。当前支持 `720p-fast / 720p-high / 720p / 1080p`，其中 `720p` 是兼容别名，会映射到 `720p-fast`，且必须包含至少一个 720p baseline。 |
-| `--upload` | 否 | 兼容保留参数。当前真正的上传阶段由 `MEDIA_STORAGE_DRIVER` 在 `--dry-run=false` 时自动执行。 |
 | `--write-db` | 否 | HLS 成功生成后写入 PostgreSQL。 |
 | `--database-url` | 否 | 覆盖 `DATABASE_URL`。 |
 | `--dry-run` | 否 | 默认 `true`。设为 `false` 时执行本地 HLS 生成。 |
@@ -441,20 +589,15 @@ http://10.0.2.2:9000/media/tmp/media/sample-show/season-01/episode-01/hls/master
 - `media_tags`
 - `media_season_tags`
 
-当前 `cover_url` 仍等待 `INT-141` 上传阶段补齐。
-
 ## 与上传的关系
 
-当前 `mediactl` 不上传文件。
+当前 `mediactl` 已支持上传阶段：
 
-后续 `INT-141` 会补：
-
-- local uploader
-- MinIO / S3-compatible uploader
-- public URL 生成
-- cover 文件复制或上传
-
-当前 `--upload` 只表达“后续希望走上传链路”，不会产生副作用。
+- `upload` 命令可单独对现有 HLS 目录执行上传或本地落盘
+- `ingest --dry-run=false` 默认执行 `build-hls + upload`
+- `ingest --stages=...` 可把上传和其它阶段组合运行
+- `local` driver 会把资源稳定落到 `MEDIA_LOCAL_ROOT`
+- `minio / s3` driver 会把资源写入 S3-compatible 对象存储
 
 ## 常见问题
 

@@ -113,6 +113,173 @@
 
 ---
 
+## INT-170 Design
+
+### Goal
+
+`INT-170` 的目标不是“让程序直接读取 `.env.example`”，而是为 `server` 和 `mediactl` 引入一层统一、可测试、可扩展的配置加载器。
+
+`.env.example` 继续只承担模板和说明职责，真实运行值来自：
+
+- `server/.env.local` 或 `server/.env`
+- 当前 shell 的环境变量
+- 后续可选的 `config.local.yaml / config.prod.yaml`
+
+### Why Not Read `.env.example` Directly
+
+`.env.example` 的职责是：
+
+- 告诉开发者需要哪些字段
+- 给出安全的示例值
+- 作为团队共享模板提交到仓库
+
+它不应该承担：
+
+- 真实本地运行配置
+- 密钥存储
+- 当前机器上真正的 endpoint / bucket / database URL
+
+如果程序直接把 `.env.example` 当真实配置源，会让“模板”和“运行状态”混在一起，后续很难判断到底哪些值只是示例，哪些值正在生效。
+
+### Scope
+
+`INT-170` 第一阶段只整理配置加载层，不改业务逻辑。
+
+优先覆盖：
+
+- `server/cmd/mediactl`
+- `server/internal/mediactl`
+- `server/internal/app`
+
+第一阶段不处理：
+
+- Android 配置注入
+- Windows 端配置系统统一
+- 生产密钥管理
+- CI/CD 注入
+
+### Proposed Loader Shape
+
+建议新增一个轻量配置模块，例如：
+
+```text
+server/internal/config/
+  loader.go
+  mediactl.go
+  server.go
+```
+
+建议分成两层：
+
+1. 原始加载层
+
+- 负责用 `viper` 读取文件和环境变量
+- 负责字段默认值
+- 负责把配置反序列化到结构体
+
+2. 领域配置层
+
+- `MediactlConfig`
+- `ServerRuntimeConfig`
+- `StorageConfig`
+
+业务代码只依赖结构体，不直接依赖 `viper` 全局状态。
+
+### Recommended Load Order
+
+`mediactl` 和 `roomserver` 建议统一采用以下优先级：
+
+1. 命令行显式参数
+2. 运行时环境变量
+3. `server/.env.local`
+4. `server/.env`
+5. 可选 `config.local.yaml / config.prod.yaml`
+6. 代码默认值
+
+说明：
+
+- CLI flag 仍然优先级最高，例如 `--database-url`
+- 环境变量始终可以覆盖本地文件
+- `.env.example` 不参与运行时加载
+
+### Mediactl First-phase Config Contract
+
+`mediactl` 第一阶段建议只抽出这些配置：
+
+- `DATABASE_URL`
+- `MEDIA_STORAGE_DRIVER`
+- `MEDIA_LOCAL_ROOT`
+- `MEDIA_PUBLIC_BASE_URL`
+- `MEDIA_OBJECT_KEY_PREFIX`
+- `MEDIA_STORAGE_ENDPOINT`
+- `MEDIA_STORAGE_BUCKET`
+- `MEDIA_STORAGE_REGION`
+- `MEDIA_STORAGE_ACCESS_KEY_ID`
+- `MEDIA_STORAGE_SECRET_ACCESS_KEY`
+- `MEDIA_STORAGE_FORCE_PATH_STYLE`
+- `FFMPEG_BIN`
+- `FFPROBE_BIN`
+
+建议对应结构：
+
+```text
+MediactlConfig
+  DatabaseURL
+  Storage StorageConfig
+  Tools MediaToolConfig
+```
+
+其中：
+
+- `StorageConfig` 继续承载 local / minio / s3 配置
+- `MediaToolConfig` 只承载 `ffmpeg / ffprobe`
+
+### Implementation Strategy
+
+建议按三步落地：
+
+1. 先新增配置加载层，但保留旧接口
+
+- 保留 `LoadStorageConfig(...)`
+- 内部逐步改成读取 `MediactlConfig`
+- 让现有测试先继续通过
+
+2. 再把 `mediactl.Run(...)` 从 `os.Getenv` 迁移到配置对象
+
+- `main.go` 负责创建 loader
+- `Run(...)` 改成接收配置或配置 provider
+
+3. 最后再整理 `server/internal/app`
+
+- 把 `DATABASE_URL`、`SERVER_PORT` 等 server 运行时配置统一接入
+
+### Testing Strategy
+
+为了不破坏当前测试友好性，`INT-170` 不建议让测试直接依赖真实 `viper` 全局状态。
+
+建议：
+
+- 保留可注入的 config provider
+- 单测优先喂结构体或 map-backed provider
+- 只给 loader 本身补少量读取 `.env.local` / 环境变量优先级测试
+
+换句话说：
+
+- 业务测试不依赖 `viper`
+- 只有配置加载测试依赖 `viper`
+
+### Success Criteria
+
+`INT-170` 完成后，应满足：
+
+- 本地运行 `mediactl` 时不需要每次手动 `export`
+- `.env.example` 继续只是模板，不直接参与运行时
+- `mediactl` 和 `roomserver` 使用统一配置加载方式
+- 业务逻辑不直接依赖 `viper` 全局对象
+- 现有 `mediactl` 单测不因配置系统而变脆弱
+
+---
+
 ## Environment Parameters
 
 ### 1. Server Runtime

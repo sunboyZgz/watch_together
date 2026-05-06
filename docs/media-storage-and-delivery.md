@@ -44,7 +44,7 @@
 
 - MinIO 是“云存储兼容层预演”，不是必须依赖。
 - 如果只是播放本地 HLS，静态服务更简单。
-- 如果开始做 `mediactl ingest --upload`，MinIO 就很有价值。
+- 如果开始做 `mediactl upload` 或 `mediactl ingest --stages=build-hls,upload`，MinIO 就很有价值。
 
 ### 公网测试 / 生产阶段
 
@@ -311,8 +311,7 @@ mediactl ingest \
   --season-label "第 1 季" \
   --episode-label "第 01 集" \
   --tags test,anime \
-  --dry-run=false \
-  --upload
+  --dry-run=false
 ```
 
 第一版职责：
