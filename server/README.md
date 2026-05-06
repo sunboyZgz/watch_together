@@ -87,7 +87,9 @@
 当前 `roomserver` 和 `mediactl` 已统一接入配置加载层：
 
 - 启动时会自动尝试读取 `server/.env`
+- 然后按 `APP_ENV` 读取对应环境文件，例如 `APP_ENV=prod` 时读取 `server/.env.prod`
 - 如果存在 `server/.env.local`，会覆盖 `.env`
+- 如果存在 `server/.env.<APP_ENV>.local`，会覆盖对应环境文件
 - 当前 shell 的环境变量仍然优先于本地文件
 - `.env.example` 继续只作为模板，不直接参与运行时加载
 
@@ -134,6 +136,29 @@ cp .env.example .env.local
 - `FFPROBE_BIN`
 
 如果临时想覆盖某个值，直接在当前 shell `export` 即可，环境变量优先级高于 `.env.local`。
+
+## Production Config Files
+
+当前推荐的生产环境配置方式：
+
+1. 参考 `server/.env.prod.example`
+2. 在目标机器上创建 `server/.env.prod` 或 `server/.env.prod.local`
+3. 启动前显式设置 `APP_ENV=prod`
+
+示例：
+
+```bash
+cd server
+cp .env.prod.example .env.prod
+APP_ENV=prod go run ./cmd/roomserver
+```
+
+如果是本地 `mediactl` 上传到云上 MinIO，也可以显式指定：
+
+```bash
+cd server
+APP_ENV=prod go run ./cmd/mediactl upload --library-root ../media/raw --input ../media/raw/sample-show/season-01/episode-01.mp4 --dry-run=false
+```
 
 ## Current Structure
 

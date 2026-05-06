@@ -63,7 +63,8 @@ cp .env.example .env.local
 
 ```bash
 cd server
-go run ./cmd/roomserver
+APP_ENV=local go run ./cmd/roomserver
+APP_ENV=prod go run ./cmd/roomserver
 ```
 
 ### 4. 生成并上传媒体资源

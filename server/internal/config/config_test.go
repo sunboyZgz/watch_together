@@ -50,6 +50,29 @@ func TestLoadServerRuntimeConfigFallsBackToDefaults(t *testing.T) {
 	}
 }
 
+func TestLoadMediactlConfigSupportsAppEnvSpecificFiles(t *testing.T) {
+	configDir := t.TempDir()
+	mustWriteConfigFile(t, filepath.Join(configDir, ".env"), "APP_ENV=prod\nMEDIA_STORAGE_DRIVER=local\nDATABASE_URL=postgres://base\n")
+	mustWriteConfigFile(t, filepath.Join(configDir, ".env.prod"), "MEDIA_STORAGE_DRIVER=minio\nMEDIA_PUBLIC_BASE_URL=http://prod.example.com/media\n")
+	mustWriteConfigFile(t, filepath.Join(configDir, ".env.local"), "MEDIA_STORAGE_BUCKET=generic-local-bucket\n")
+	mustWriteConfigFile(t, filepath.Join(configDir, ".env.prod.local"), "MEDIA_STORAGE_BUCKET=prod-local-bucket\n")
+
+	cfg, err := LoadMediactlConfig(configDir)
+	if err != nil {
+		t.Fatalf("load mediactl config: %v", err)
+	}
+
+	if cfg.Storage.Driver != "minio" {
+		t.Fatalf("expected .env.prod override for storage driver, got %q", cfg.Storage.Driver)
+	}
+	if cfg.Storage.PublicBaseURL != "http://prod.example.com/media" {
+		t.Fatalf("expected .env.prod override for public base url, got %q", cfg.Storage.PublicBaseURL)
+	}
+	if cfg.Storage.Bucket != "prod-local-bucket" {
+		t.Fatalf("expected .env.prod.local override for bucket, got %q", cfg.Storage.Bucket)
+	}
+}
+
 func mustWriteConfigFile(t *testing.T, path string, content string) {
 	t.Helper()
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {

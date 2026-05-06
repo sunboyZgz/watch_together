@@ -56,12 +56,14 @@
 
 ### Server
 
-`server/` 使用 `.env.example` + `.env.local` + 运行时环境变量。
+`server/` 使用 `.env.example` / `.env.prod.example` + `.env` / `.env.local` / `.env.prod` / `.env.prod.local` + 运行时环境变量。
 
 策略说明：
 
-- `.env.example` 用于提交默认模板和字段说明。
+- `.env.example` 与 `.env.prod.example` 用于提交模板和字段说明。
 - `.env.local` 用于本地开发机的实际值，不提交到仓库。
+- `.env.prod` 用于生产环境基础值，不提交到仓库。
+- `.env.prod.local` 用于生产机上的本地覆盖值，不提交到仓库。
 - 运行时环境变量可用于覆盖本地文件或后续部署环境中的配置。
 
 ### Windows
@@ -76,13 +78,13 @@
 
 ### Android
 
-`android/` 不单独引入 `.env` 文件，使用 Gradle / BuildConfig / `local.properties` 注入配置。
+`android/` 不单独引入 `.env` 文件，使用 Gradle flavor + BuildConfig + `local.properties` 注入配置。
 
 策略说明：
 
 - 面向版本化的默认配置，应通过 Gradle 或 BuildConfig 注入。
 - 本地开发机相关的私有配置，优先放在 `local.properties`。
-- 当前阶段先定义接入方式，不强行对齐到 `.env` 体系。
+- 当前阶段通过 `local` / `prod` 两个 product flavor 区分环境。
 
 ---
 
@@ -90,8 +92,9 @@
 
 以下规则适用于当前仓库：
 
-- `.env.example` 可以提交。
+- `.env.example` 和 `.env.*.example` 可以提交。
 - `.env.local` 不可以提交。
+- `.env.prod` 和 `.env.prod.local` 不可以提交。
 - 其他本地环境文件，例如实际 `.env`，默认不提交。
 - Android 的 `local.properties` 不提交。
 - 模板文件应只包含示例值，不包含生产 secret 或个人私有地址。
@@ -106,7 +109,8 @@
 
 - `docs/environment-config.md`: 环境参数与配置策略统一说明
 - `media/README.md`: 样例媒体资源目录与本地访问约定
-- `server/.env.example`: Server 配置模板
+- `server/.env.example`: Server 本地配置模板
+- `server/.env.prod.example`: Server 生产配置模板
 - `windows/.env.example`: Windows 配置模板
 
 后续如增加更多配置模板，应继续沿用“模块内模板 + 仓库级文档说明”的方式维护。

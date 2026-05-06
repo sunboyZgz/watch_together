@@ -18,6 +18,13 @@ fun configValue(name: String, defaultValue: String): String {
         ?: defaultValue
 }
 
+fun flavorConfigValue(flavor: String, name: String, defaultValue: String): String {
+    val flavorPrefix = flavor.uppercase()
+    return localProperties.getProperty("${flavorPrefix}_${name}")
+        ?: providers.gradleProperty("${flavorPrefix}_${name}").orNull
+        ?: configValue(name, defaultValue)
+}
+
 android {
     namespace = "com.example.watch_together"
     compileSdk {
@@ -34,34 +41,75 @@ android {
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-
-        buildConfigField("String", "APP_ENV", "\"${configValue("APP_ENV", "local")}\"")
-        buildConfigField(
-            "String",
-            "API_BASE_URL",
-            "\"${configValue("API_BASE_URL", "http://10.0.2.2:8080")}\""
-        )
-        buildConfigField(
-            "String",
-            "WS_BASE_URL",
-            "\"${configValue("WS_BASE_URL", "ws://10.0.2.2:8080/ws")}\""
-        )
-        buildConfigField(
-            "String",
-            "MEDIA_BASE_URL",
-            "\"${configValue("MEDIA_BASE_URL", "http://10.0.2.2:9000/media/tmp")}\""
-        )
         buildConfigField(
             "String",
             "MEDIA_DEFAULT_ID",
             "\"${configValue("MEDIA_DEFAULT_ID", "")}\""
         )
-        buildConfigField(
-            "boolean",
-            "REWRITE_LOOPBACK_MEDIA_URLS",
-            configValue("REWRITE_LOOPBACK_MEDIA_URLS", "true")
-        )
-        buildConfigField("boolean", "DEBUG_SYNC", configValue("DEBUG_SYNC", "true"))
+    }
+
+    flavorDimensions += "env"
+
+    productFlavors {
+        create("local") {
+            dimension = "env"
+            buildConfigField("String", "APP_ENV", "\"local\"")
+            buildConfigField(
+                "String",
+                "API_BASE_URL",
+                "\"${flavorConfigValue("local", "API_BASE_URL", "http://10.0.2.2:8080")}\""
+            )
+            buildConfigField(
+                "String",
+                "WS_BASE_URL",
+                "\"${flavorConfigValue("local", "WS_BASE_URL", "ws://10.0.2.2:8080/ws")}\""
+            )
+            buildConfigField(
+                "String",
+                "MEDIA_BASE_URL",
+                "\"${flavorConfigValue("local", "MEDIA_BASE_URL", "http://10.0.2.2:9000/media/tmp")}\""
+            )
+            buildConfigField(
+                "boolean",
+                "REWRITE_LOOPBACK_MEDIA_URLS",
+                flavorConfigValue("local", "REWRITE_LOOPBACK_MEDIA_URLS", "true")
+            )
+            buildConfigField(
+                "boolean",
+                "DEBUG_SYNC",
+                flavorConfigValue("local", "DEBUG_SYNC", "true")
+            )
+        }
+
+        create("prod") {
+            dimension = "env"
+            buildConfigField("String", "APP_ENV", "\"prod\"")
+            buildConfigField(
+                "String",
+                "API_BASE_URL",
+                "\"${flavorConfigValue("prod", "API_BASE_URL", "http://106.12.35.52:8080")}\""
+            )
+            buildConfigField(
+                "String",
+                "WS_BASE_URL",
+                "\"${flavorConfigValue("prod", "WS_BASE_URL", "ws://106.12.35.52:8080/ws")}\""
+            )
+            buildConfigField(
+                "String",
+                "MEDIA_BASE_URL",
+                "\"${flavorConfigValue("prod", "MEDIA_BASE_URL", "http://106.12.35.52:9100/watch-together-media")}\""
+            )
+            buildConfigField(
+                "boolean",
+                "REWRITE_LOOPBACK_MEDIA_URLS",
+                flavorConfigValue("prod", "REWRITE_LOOPBACK_MEDIA_URLS", "false")
+            )
+            buildConfigField(
+                "boolean",
+                "DEBUG_SYNC",
+                flavorConfigValue("prod", "DEBUG_SYNC", "false")
+            )
+        }
     }
 
     buildTypes {

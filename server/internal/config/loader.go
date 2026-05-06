@@ -24,7 +24,20 @@ func newLoader(configDir string, defaults map[string]any, keys []string) (*viper
 	}
 	loader.AutomaticEnv()
 
-	for _, name := range []string{".env", ".env.local"} {
+	if err := mergeOptionalEnvFile(loader, filepath.Join(configDir, ".env")); err != nil {
+		return nil, err
+	}
+
+	appEnv := strings.TrimSpace(loader.GetString("APP_ENV"))
+	if appEnv == "" {
+		appEnv = "local"
+	}
+
+	for _, name := range []string{
+		".env." + appEnv,
+		".env.local",
+		".env." + appEnv + ".local",
+	} {
 		if err := mergeOptionalEnvFile(loader, filepath.Join(configDir, name)); err != nil {
 			return nil, err
 		}

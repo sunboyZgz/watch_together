@@ -76,6 +76,41 @@ android/
 - Player: AndroidX Media3 ExoPlayer
 - Network: OkHttp
 
+## Build Environment
+
+Android 当前通过 `productFlavors` 区分环境：
+
+- `local`: 本地模拟器 / 本地联调，默认使用 `10.0.2.2`
+- `prod`: 面向云服务器联调或正式打包，默认使用公网地址
+
+默认打包地址：
+
+- `local`:
+  - `API_BASE_URL=http://10.0.2.2:8080`
+  - `WS_BASE_URL=ws://10.0.2.2:8080/ws`
+  - `MEDIA_BASE_URL=http://10.0.2.2:9000/media/tmp`
+- `prod`:
+  - `API_BASE_URL=http://106.12.35.52:8080`
+  - `WS_BASE_URL=ws://106.12.35.52:8080/ws`
+  - `MEDIA_BASE_URL=http://106.12.35.52:9100/watch-together-media`
+
+推荐命令：
+
+```bash
+cd android
+./gradlew installLocalDebug
+./gradlew assembleProdRelease
+```
+
+如果你想覆盖 flavor 默认值，可以在 `android/local.properties` 里设置：
+
+```properties
+LOCAL_API_BASE_URL=http://10.0.2.2:8080
+PROD_API_BASE_URL=http://106.12.35.52:8080
+PROD_WS_BASE_URL=ws://106.12.35.52:8080/ws
+PROD_MEDIA_BASE_URL=http://106.12.35.52:9100/watch-together-media
+```
+
 在 Phase 1 中，这里会继续承载 Android ↔ Android 同步观影 MVP 的主要客户端实现。
 
 ## Current App Entry
