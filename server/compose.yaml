@@ -6,11 +6,39 @@ services:
     environment:
       POSTGRES_USER: app
       POSTGRES_PASSWORD: app
-      POSTGRES_DB: 5
+      POSTGRES_DB: anime_watch_dev
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+  minio:
+    image: quay.io/minio/minio:latest
+    container_name: anime-watch-minio
+    restart: unless-stopped
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    command: server /data --console-address ":9001"
+    ports:
+      - "9100:9000"
+      - "9101:9001"
+    volumes:
+      - minio_data:/data
+  minio-init:
+    image: quay.io/minio/mc:latest
+    container_name: anime-watch-minio-init
+    depends_on:
+      - minio
+    restart: "no"
+    entrypoint: >
+      /bin/sh -c "
+      until mc alias set local http://minio:9000 minioadmin minioadmin; do
+        sleep 1;
+      done;
+      mc mb -p local/watch-together-media || true;
+      mc anonymous set download local/watch-together-media;
+      "
 
 volumes:
   postgres_data:
+  minio_data:

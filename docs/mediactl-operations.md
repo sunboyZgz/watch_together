@@ -165,6 +165,22 @@ master.m3u8
 - MinIO API: `9100`
 - MinIO Console: `9101`
 
+如果使用项目内的 Docker Compose，本地可以直接启动：
+
+```bash
+cd server
+docker compose up -d postgres minio minio-init
+```
+
+当前 compose 约定：
+
+- MinIO API: `http://127.0.0.1:9100`
+- MinIO Console: `http://127.0.0.1:9101`
+- Root user: `minioadmin`
+- Root password: `minioadmin`
+- 自动初始化 bucket: `watch-together-media`
+- bucket 默认设置为匿名可下载，方便 Android / HLS 本地联调
+
 最小环境变量：
 
 ```bash
@@ -198,6 +214,62 @@ go run ./cmd/mediactl ingest \
 - HLS 仍会先在本地 staging 目录生成。
 - 随后 uploader 会把 `hls/master.m3u8`、各 variant playlist、`.ts` segment 和封面上传到对象存储。
 - PostgreSQL 若同时开启 `--write-db`，会写入上传后的公开 URL。
+
+### 如何确认已经上传到 MinIO
+
+推荐两种方式：
+
+#### 1. 通过 MinIO Console 查看
+
+启动 compose 后，浏览器打开：
+
+```text
+http://127.0.0.1:9101
+```
+
+登录：
+
+- username: `minioadmin`
+- password: `minioadmin`
+
+然后进入 bucket `watch-together-media`，查看是否出现类似路径：
+
+```text
+media/sample-show/season-01/episode-01/hls/master.m3u8
+media/sample-show/season-01/episode-01/hls/720p-fast/index.m3u8
+media/sample-show/season-01/episode-01/hls/720p-fast/segment_00000.ts
+media/sample-show/season-01/episode-01/cover/cover.jpg
+```
+
+#### 2. 用 Docker 里的 `mc` 命令查看
+
+列出整个 bucket：
+
+```bash
+cd server
+docker compose run --rm minio-init \
+  sh -c 'mc alias set local http://minio:9000 minioadmin minioadmin >/dev/null && mc ls --recursive local/watch-together-media'
+```
+
+只看某一集：
+
+```bash
+cd server
+docker compose run --rm minio-init \
+  sh -c 'mc alias set local http://minio:9000 minioadmin minioadmin >/dev/null && mc ls --recursive local/watch-together-media/media/sample-show/season-01/episode-01'
+```
+
+如果想进一步确认 HLS URL 是否真的可读，可以直接访问：
+
+```text
+http://127.0.0.1:9100/watch-together-media/media/sample-show/season-01/episode-01/hls/master.m3u8
+```
+
+或在命令行里检查：
+
+```bash
+curl http://127.0.0.1:9100/watch-together-media/media/sample-show/season-01/episode-01/hls/master.m3u8
+```
 
 ### 指定输出目录
 

@@ -323,9 +323,9 @@ make migration-create name=create_users_table
 
 ### Run Migration
 
-当前本地 PostgreSQL 通过 `docker compose` 启动。
+当前本地 PostgreSQL 和 MinIO 都通过 `docker compose` 启动。
 
-#### Start Local PostgreSQL
+#### Start Local PostgreSQL And MinIO
 
 ```bash
 cd server
@@ -340,6 +340,11 @@ docker compose up -d
 - user: `app`
 - password: `app`
 - database: `anime_watch_dev`
+- MinIO API: `http://127.0.0.1:9100`
+- MinIO Console: `http://127.0.0.1:9101`
+- MinIO root user: `minioadmin`
+- MinIO root password: `minioadmin`
+- 自动初始化 bucket: `watch-together-media`
 
 #### Set Database URL
 
