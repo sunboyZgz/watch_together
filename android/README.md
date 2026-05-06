@@ -136,7 +136,8 @@ android/
 - 创建成功后使用响应中的 `room.roomCode` 建立 WebSocket `join_room`
 - 创建成功后使用响应中的 `media.title / media.episodeLabel / media.mediaUrl` 更新 `03 放映室`
 - 播放器会优先使用 `media.mediaUrl` 载入选中的影片
-- 如果后端返回的本地媒体 URL 使用 `127.0.0.1`、`localhost` 或 `0.0.0.0`，Android 会在本地环境中改写为 `MEDIA_BASE_URL` 的 host，例如默认的 `10.0.2.2`
+- 如果后端返回的本地媒体 URL 使用 `127.0.0.1`、`localhost` 或 `0.0.0.0`，且 `REWRITE_LOOPBACK_MEDIA_URLS=true`，Android 会在本地环境中改写为 `MEDIA_BASE_URL` 的 host，例如默认的 `10.0.2.2`
+- 该开关只建议用于本地模拟器开发；生产或真实公网测试时应关闭，让播放器直接使用数据库返回的原始 URL
 
 当前放映室详情接入状态：
 

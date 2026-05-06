@@ -9,6 +9,7 @@ object AppConfig {
     val wsBaseUrl: String = BuildConfig.WS_BASE_URL
     val mediaBaseUrl: String = BuildConfig.MEDIA_BASE_URL
     val mediaDefaultId: String = BuildConfig.MEDIA_DEFAULT_ID
+    val rewriteLoopbackMediaUrls: Boolean = BuildConfig.REWRITE_LOOPBACK_MEDIA_URLS
     val debugSync: Boolean = BuildConfig.DEBUG_SYNC
 
     fun authLoginUrl(): String = "${apiBaseUrl.trimEnd('/')}/auth/login"
@@ -39,24 +40,31 @@ object AppConfig {
     }
 
     fun playableMediaUrl(rawUrl: String): String =
-        rewriteLoopbackMediaUrl(rawUrl = rawUrl, androidMediaBaseUrl = mediaBaseUrl)
+        rewriteLoopbackMediaUrl(
+            rawUrl = rawUrl,
+            androidMediaBaseUrl = mediaBaseUrl,
+            enabled = rewriteLoopbackMediaUrls
+        )
 
     fun sampleHlsUrl(): String = mediaUrlFor(defaultMediaIdForRoom())
 }
 
-fun rewriteLoopbackMediaUrl(rawUrl: String, androidMediaBaseUrl: String): String {
+fun rewriteLoopbackMediaUrl(rawUrl: String, androidMediaBaseUrl: String, enabled: Boolean = true): String {
+    if (!enabled) return rawUrl
+
     val sourceUri = runCatching { URI(rawUrl) }.getOrNull() ?: return rawUrl
     val sourceHost = sourceUri.host ?: return rawUrl
     if (!sourceHost.isLoopbackHost()) return rawUrl
 
     val androidBaseUri = runCatching { URI(androidMediaBaseUrl) }.getOrNull() ?: return rawUrl
     val androidHost = androidBaseUri.host ?: return rawUrl
+    val rewrittenPort = if (sourceUri.port >= 0) sourceUri.port else androidBaseUri.port
 
     return URI(
         androidBaseUri.scheme ?: sourceUri.scheme,
         sourceUri.userInfo,
         androidHost,
-        androidBaseUri.port,
+        rewrittenPort,
         sourceUri.path,
         sourceUri.query,
         sourceUri.fragment

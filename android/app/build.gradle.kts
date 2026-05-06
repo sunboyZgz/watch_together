@@ -56,6 +56,11 @@ android {
             "MEDIA_DEFAULT_ID",
             "\"${configValue("MEDIA_DEFAULT_ID", "")}\""
         )
+        buildConfigField(
+            "boolean",
+            "REWRITE_LOOPBACK_MEDIA_URLS",
+            configValue("REWRITE_LOOPBACK_MEDIA_URLS", "true")
+        )
         buildConfigField("boolean", "DEBUG_SYNC", configValue("DEBUG_SYNC", "true"))
     }
 

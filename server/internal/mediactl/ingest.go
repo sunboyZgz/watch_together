@@ -192,7 +192,7 @@ func runUpload(args []string, getenv EnvLookup, stdout io.Writer, stderr io.Writ
 		return err
 	}
 	summary := buildSummary(options, result)
-	return printIngestSummary(stdout, "mediactl upload completed:", summary, "existing HLS assets were stored using stable object keys; rerunning upload overwrites the same paths instead of creating duplicates")
+	return printIngestSummary(stdout, "mediactl upload completed:", summary, uploadCompletionFooter(options))
 }
 
 func runWriteDB(args []string, getenv EnvLookup, stdout io.Writer, stderr io.Writer) error {
@@ -253,7 +253,7 @@ func runIngest(args []string, getenv EnvLookup, stdout io.Writer, stderr io.Writ
 		summary.DatabaseUpsert = true
 	}
 
-	return printIngestSummary(stdout, "mediactl ingest completed:", summary, "ingest assets were generated, stored, and are ready for playback")
+	return printIngestSummary(stdout, "mediactl ingest completed:", summary, ingestCompletionFooter(options))
 }
 
 func runComposedIngest(args []string, stages []mediactlStage, getenv EnvLookup, stdout io.Writer, stderr io.Writer) error {
@@ -321,7 +321,7 @@ func executeStageSequence(title string, stages []mediactlStage, options IngestOp
 	if containsStage(stages, stageWriteDB) {
 		summary.DatabaseUpsert = true
 	}
-	footer := fmt.Sprintf("stages executed in dependency order: %s", joinStageNames(stages))
+	footer := fmt.Sprintf("%s Stages executed in dependency order: %s.", stageSequenceFooterPrefix(options, stages), joinStageNames(stages))
 	return printIngestSummary(stdout, title, summary, footer)
 }
 
@@ -458,6 +458,53 @@ func joinStageNames(stages []mediactlStage) string {
 		names = append(names, string(stage))
 	}
 	return strings.Join(names, " -> ")
+}
+
+func uploadCompletionFooter(options IngestOptions) string {
+	switch normalizedStorageDriver(options.Storage.Driver) {
+	case "minio", "s3":
+		return fmt.Sprintf(
+			"HLS assets were uploaded to %s bucket %q under %q. Re-running upload will overwrite the same object keys instead of creating duplicates.",
+			normalizedStorageDriver(options.Storage.Driver),
+			options.Storage.Bucket,
+			sourceObjectKey(options),
+		)
+	default:
+		return fmt.Sprintf(
+			"HLS assets were stored locally at %s. Re-running upload will overwrite the same stable paths instead of creating duplicates.",
+			filepath.Join(options.Storage.LocalRoot, sourceObjectKey(options), "hls"),
+		)
+	}
+}
+
+func ingestCompletionFooter(options IngestOptions) string {
+	switch normalizedStorageDriver(options.Storage.Driver) {
+	case "minio", "s3":
+		return fmt.Sprintf(
+			"HLS assets were generated locally and uploaded to %s bucket %q under %q.",
+			normalizedStorageDriver(options.Storage.Driver),
+			options.Storage.Bucket,
+			sourceObjectKey(options),
+		)
+	default:
+		return fmt.Sprintf(
+			"HLS assets were generated and stored locally at %s, and are ready for playback.",
+			resolveOutputDir(options),
+		)
+	}
+}
+
+func stageSequenceFooterPrefix(options IngestOptions, stages []mediactlStage) string {
+	if containsStage(stages, stageUpload) {
+		return uploadCompletionFooter(options)
+	}
+	if containsStage(stages, stageBuild) {
+		return ingestCompletionFooter(options)
+	}
+	if containsStage(stages, stageWriteDB) {
+		return "Media metadata was upserted successfully."
+	}
+	return "Staged pipeline completed successfully."
 }
 
 func printIngestSummary(stdout io.Writer, title string, summary IngestSummary, footer string) error {
