@@ -81,6 +81,9 @@ data class RoomPlayerUiState(
     val isJoinedToRoom: Boolean
         get() = latestSyncState != null
 
+    val displayPlaybackSpeed: Float
+        get() = latestSyncState?.playbackRate?.toFloat() ?: player.playbackSpeed
+
     val hasPlayableMedia: Boolean
         get() = player.playbackState != Player.STATE_IDLE
 

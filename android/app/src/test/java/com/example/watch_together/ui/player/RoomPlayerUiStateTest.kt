@@ -1,7 +1,9 @@
 package com.example.watch_together.ui.player
 
 import androidx.media3.common.Player
+import com.example.watch_together.sync.RoomSyncState
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -55,5 +57,27 @@ class RoomPlayerUiStateTest {
         )
 
         assertFalse(state.bufferedAheadMs < 0L)
+    }
+
+    @Test
+    fun `display playback speed prefers authoritative sync rate over temporary local nudge`() {
+        val state = RoomPlayerUiState(
+            latestSyncState = RoomSyncState(
+                roomId = "A7K2M9",
+                mediaId = "episode-01",
+                hostUserId = "host-01",
+                positionMs = 12_000L,
+                paused = false,
+                playbackRate = 2.0,
+                ended = false,
+                seq = 8L
+            ),
+            player = PlayerRuntimeUiState(
+                playbackState = Player.STATE_READY,
+                playbackSpeed = 2.06f
+            )
+        )
+
+        assertEquals(2.0f, state.displayPlaybackSpeed)
     }
 }
