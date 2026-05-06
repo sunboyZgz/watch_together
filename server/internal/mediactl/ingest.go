@@ -44,6 +44,8 @@ type StorageConfig struct {
 	Endpoint        string `json:"endpoint,omitempty"`
 	Bucket          string `json:"bucket,omitempty"`
 	Region          string `json:"region,omitempty"`
+	AccessKeyID     string `json:"accessKeyId,omitempty"`
+	SecretAccessKey string `json:"-"`
 	ForcePathStyle  string `json:"forcePathStyle"`
 	FFmpegBin       string `json:"ffmpegBin"`
 	FFprobeBin      string `json:"ffprobeBin"`
@@ -85,6 +87,7 @@ type IngestSummary struct {
 	IngestOptions
 	HLSPlaylistPath string       `json:"hlsPlaylistPath,omitempty"`
 	MediaURL        string       `json:"mediaUrl,omitempty"`
+	CoverURL        string       `json:"coverUrl,omitempty"`
 	DurationMs      int64        `json:"durationMs,omitempty"`
 	Variants        []HLSVariant `json:"variants,omitempty"`
 	DatabaseUpsert  bool         `json:"databaseUpsert"`
@@ -125,16 +128,22 @@ func runIngest(args []string, getenv EnvLookup, stdout io.Writer, stderr io.Writ
 	if options.DryRun {
 		summary.HLSPlaylistPath = plannedPlaylistPath(options)
 		summary.MediaURL = plannedMediaURL(options)
-		return printIngestSummary(stdout, "mediactl ingest dry-run summary:", summary, "next stages are not implemented yet: upload, database upsert")
+		summary.CoverURL = plannedCoverURL(options)
+		return printIngestSummary(stdout, "mediactl ingest dry-run summary:", summary, "dry-run does not generate files, upload assets, or write database rows")
 	}
 
 	result, err := GenerateHLS(options)
 	if err != nil {
 		return err
 	}
+	result, err = UploadIngestAssets(context.Background(), options, result)
+	if err != nil {
+		return err
+	}
 	summary.HLSPlaylistPath = result.PlaylistPath
 	summary.DurationMs = result.DurationMs
-	summary.MediaURL = publicMediaURL(options)
+	summary.MediaURL = result.MediaURL
+	summary.CoverURL = result.CoverURL
 	summary.Variants = result.Variants
 
 	if options.WriteDB {
@@ -144,7 +153,7 @@ func runIngest(args []string, getenv EnvLookup, stdout io.Writer, stderr io.Writ
 		summary.DatabaseUpsert = true
 	}
 
-	return printIngestSummary(stdout, "mediactl ingest completed:", summary, "next stage is not implemented yet: upload")
+	return printIngestSummary(stdout, "mediactl ingest completed:", summary, "ingest assets were generated, stored, and are ready for playback")
 }
 
 func printIngestSummary(stdout io.Writer, title string, summary IngestSummary, footer string) error {
@@ -185,7 +194,7 @@ func ParseIngestOptions(args []string, getenv EnvLookup, stderr io.Writer) (Inge
 	flags.StringVar(&options.OutputDir, "output-dir", "", "optional HLS output directory")
 	flags.IntVar(&options.HLSSegment, "hls-segment-seconds", defaultHLSSegmentTime, "HLS segment duration in seconds")
 	flags.StringVar(&renditions, "renditions", defaultRenditions, "comma-separated HLS renditions; supported values: 720p-fast,720p-high,720p,1080p")
-	flags.BoolVar(&options.Upload, "upload", false, "request upload in later ingest stages")
+	flags.BoolVar(&options.Upload, "upload", false, "compatibility flag; uploader now runs automatically for the configured storage driver")
 	flags.BoolVar(&options.WriteDB, "write-db", false, "upsert media metadata into PostgreSQL after local HLS generation")
 	flags.StringVar(&options.DatabaseURL, "database-url", "", "PostgreSQL connection string; falls back to DATABASE_URL")
 	flags.BoolVar(&options.DryRun, "dry-run", true, "print planned ingest work without mutating files or database")
@@ -232,6 +241,9 @@ func ParseIngestOptions(args []string, getenv EnvLookup, stderr io.Writer) (Inge
 	}
 	if len(options.Renditions) == 0 {
 		return IngestOptions{}, errors.New("--renditions must include at least one rendition")
+	}
+	if !isSupportedStorageDriver(options.Storage.Driver) {
+		return IngestOptions{}, fmt.Errorf("unsupported MEDIA_STORAGE_DRIVER %q; supported values are local, minio, s3", options.Storage.Driver)
 	}
 	if _, err := ResolveRenditionSpecs(options.Renditions); err != nil {
 		return IngestOptions{}, err
@@ -290,7 +302,7 @@ func UpsertMediaMetadata(ctx context.Context, options IngestOptions, result HLSR
 		_ = tx.Rollback()
 	}()
 
-	seasonID, err := upsertMediaSeason(ctx, tx, options)
+	seasonID, err := upsertMediaSeason(ctx, tx, options, result)
 	if err != nil {
 		return err
 	}
@@ -311,7 +323,7 @@ func UpsertMediaMetadata(ctx context.Context, options IngestOptions, result HLSR
 	return nil
 }
 
-func upsertMediaSeason(ctx context.Context, tx *sql.Tx, options IngestOptions) (string, error) {
+func upsertMediaSeason(ctx context.Context, tx *sql.Tx, options IngestOptions, result HLSResult) (string, error) {
 	const query = `
 		INSERT INTO media_seasons (
 			slug,
@@ -357,7 +369,7 @@ func upsertMediaSeason(ctx context.Context, tx *sql.Tx, options IngestOptions) (
 		options.SeasonSlug,
 		options.Title,
 		options.Description,
-		"", // cover URL is added by uploader stage.
+		result.CoverURL,
 		options.Category,
 		options.OriginalTitle,
 		options.ProductionTeam,
@@ -413,8 +425,8 @@ func upsertMediaEpisode(ctx context.Context, tx *sql.Tx, seasonID string, option
 		options.Title,
 		options.Subtitle,
 		options.Description,
-		"", // cover URL is added by uploader stage.
-		publicMediaURL(options),
+		result.CoverURL,
+		result.MediaURL,
 		result.DurationMs,
 		nullableInt64(options.EpisodeNumber),
 		options.EpisodeLabel,
@@ -518,6 +530,8 @@ func LoadStorageConfig(getenv EnvLookup) StorageConfig {
 		Endpoint:        strings.TrimSpace(getenv("MEDIA_STORAGE_ENDPOINT")),
 		Bucket:          strings.TrimSpace(getenv("MEDIA_STORAGE_BUCKET")),
 		Region:          strings.TrimSpace(getenv("MEDIA_STORAGE_REGION")),
+		AccessKeyID:     strings.TrimSpace(getenv("MEDIA_STORAGE_ACCESS_KEY_ID")),
+		SecretAccessKey: strings.TrimSpace(getenv("MEDIA_STORAGE_SECRET_ACCESS_KEY")),
 		ForcePathStyle:  envOrDefault(getenv, "MEDIA_STORAGE_FORCE_PATH_STYLE", defaultStoragePathStyle),
 		FFmpegBin:       envOrDefault(getenv, "FFMPEG_BIN", defaultFFmpegExecutable),
 		FFprobeBin:      envOrDefault(getenv, "FFPROBE_BIN", defaultFFprobeExecutable),
@@ -528,6 +542,8 @@ func LoadStorageConfig(getenv EnvLookup) StorageConfig {
 type HLSResult struct {
 	OutputDir    string
 	PlaylistPath string
+	MediaURL     string
+	CoverURL     string
 	DurationMs   int64
 	Variants     []HLSVariant
 }
@@ -633,7 +649,6 @@ func GenerateHLS(options IngestOptions) (HLSResult, error) {
 			Key:              spec.Key,
 			Label:            spec.Label,
 			PlaylistPath:     playlistPath,
-			PlaylistURL:      publicVariantURL(options, spec.Key),
 			Width:            variantMetadata.Width,
 			Height:           variantMetadata.Height,
 			BandwidthBps:     spec.BandwidthBps,

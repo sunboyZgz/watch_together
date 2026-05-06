@@ -12,6 +12,9 @@ server/cmd/mediactl
 
 - `mediactl ingest` dry-run。
 - 本地多码率 HLS 生成，默认 `720p,1080p`，不默认生成 4K。
+- 基于 storage uploader abstraction 的资产落盘/上传。
+- `local` driver：把 HLS 与封面稳定写入 `MEDIA_LOCAL_ROOT`。
+- `minio` / `s3` driver：把 HLS 与封面上传到 S3-compatible 对象存储。
 - 源视频时长探测。
 - 生成后清晰度校验。
 - 基于媒体库目录自动推导 `source_key`。
@@ -20,7 +23,6 @@ server/cmd/mediactl
 
 当前未实现：
 
-- 上传到 MinIO / S3 / OSS / COS / BOS / R2。
 - 字幕、音轨、封面自动截图。
 
 ## 前置条件
@@ -96,6 +98,7 @@ go run ./cmd/mediactl ingest \
 - tags
 - 当前 storage config
 - 计划输出的 `hlsPlaylistPath`
+- 计划写入的 `mediaUrl / coverUrl`
 
 ### 生成本地 HLS
 
@@ -140,11 +143,61 @@ master.m3u8
 1080p/segment_00001.ts
 ```
 
+如果 `MEDIA_STORAGE_DRIVER=local`，生成完成后会进入 local uploader 阶段：
+
+- 把 HLS 目录稳定放到 `{MEDIA_LOCAL_ROOT}/{MEDIA_OBJECT_KEY_PREFIX}/{sourceKeyWithoutExt}/hls/`
+- 如果传了 `--cover`，会复制到 `cover/cover.<ext>`
+- summary 中的 `mediaUrl / coverUrl` 会直接对应本地静态服务可访问地址
+
 输出 summary 中会包含：
 
 - `hlsPlaylistPath`
 - `mediaUrl`
+- `coverUrl`
 - `durationMs`
+
+### 上传到 MinIO / S3-compatible
+
+如果 `MEDIA_STORAGE_DRIVER=minio` 或 `MEDIA_STORAGE_DRIVER=s3`，`--dry-run=false` 时会在本地转码完成后自动上传 HLS 与封面。
+
+为避免和本地 `python3 -m http.server 9000` 这类静态资源服务冲突，当前推荐把 MinIO 端口固定为：
+
+- MinIO API: `9100`
+- MinIO Console: `9101`
+
+最小环境变量：
+
+```bash
+export MEDIA_STORAGE_DRIVER=minio
+export MEDIA_STORAGE_ENDPOINT=http://127.0.0.1:9100
+export MEDIA_STORAGE_BUCKET=watch-together-media
+export MEDIA_STORAGE_REGION=auto
+export MEDIA_STORAGE_ACCESS_KEY_ID=minioadmin
+export MEDIA_STORAGE_SECRET_ACCESS_KEY=minioadmin
+export MEDIA_STORAGE_FORCE_PATH_STYLE=true
+export MEDIA_PUBLIC_BASE_URL=http://127.0.0.1:9100/watch-together-media
+```
+
+执行方式：
+
+```bash
+cd server
+go run ./cmd/mediactl ingest \
+  --library-root ../media/raw \
+  --input ../media/raw/sample-show/season-01/episode-01.mp4 \
+  --title "测试视频" \
+  --season-label "第 1 季" \
+  --episode-label "第 01 集" \
+  --tags test,anime \
+  --cover ../media/raw/sample-show/season-01/cover.jpg \
+  --dry-run=false
+```
+
+说明：
+
+- HLS 仍会先在本地 staging 目录生成。
+- 随后 uploader 会把 `hls/master.m3u8`、各 variant playlist、`.ts` segment 和封面上传到对象存储。
+- PostgreSQL 若同时开启 `--write-db`，会写入上传后的公开 URL。
 
 ### 指定输出目录
 
@@ -196,7 +249,7 @@ go run ./cmd/mediactl ingest \
 - `--dry-run=false`
 - `DATABASE_URL` 或 `--database-url`
 
-当前 `cover_url` 仍由后续上传阶段补齐；如果重复导入同一个 `source_key`，已有 `cover_url` 不会被空值覆盖。
+如果重复导入同一个 `source_key` 且这次没有传 `--cover`，已有 `cover_url` 不会被空值覆盖。
 
 ## 参数说明
 
@@ -215,11 +268,11 @@ go run ./cmd/mediactl ingest \
 | `--season-label` | 否 | 季度展示文本。 |
 | `--episode-label` | 否 | 集数展示文本。 |
 | `--tags` | 否 | 逗号分隔标签；写库时会进入 `media_tags / media_season_tags`。 |
-| `--cover` | 否 | 封面文件路径，当前只校验存在，后续由 `INT-141` 上传。 |
+| `--cover` | 否 | 封面文件路径。`local` driver 会复制到稳定目录，`minio / s3` driver 会一并上传。 |
 | `--output-dir` | 否 | 覆盖 HLS 输出目录，适合临时测试。 |
 | `--hls-segment-seconds` | 否 | HLS 分片时长，允许 4 到 6 秒，默认 6。 |
 | `--renditions` | 否 | 逗号分隔输出清晰度，默认 `720p-fast,720p-high,1080p`。当前支持 `720p-fast / 720p-high / 720p / 1080p`，其中 `720p` 是兼容别名，会映射到 `720p-fast`，且必须包含至少一个 720p baseline。 |
-| `--upload` | 否 | 当前只记录上传意图，后续由 `INT-141` 实现。 |
+| `--upload` | 否 | 兼容保留参数。当前真正的上传阶段由 `MEDIA_STORAGE_DRIVER` 在 `--dry-run=false` 时自动执行。 |
 | `--write-db` | 否 | HLS 成功生成后写入 PostgreSQL。 |
 | `--database-url` | 否 | 覆盖 `DATABASE_URL`。 |
 | `--dry-run` | 否 | 默认 `true`。设为 `false` 时执行本地 HLS 生成。 |

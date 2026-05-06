@@ -172,7 +172,7 @@ server/
 ## Directory Responsibilities
 
 - `cmd/roomserver/`: 服务端启动入口
-- `cmd/mediactl/`: 媒体维护 CLI 入口，当前支持 `ingest` dry-run 与本地 HLS 生成
+- `cmd/mediactl/`: 媒体维护 CLI 入口，当前支持 `ingest` dry-run、本地 HLS 生成、local / minio / s3-compatible uploader 和 PostgreSQL 写库
 - `compose.yaml`: 本地 PostgreSQL 容器初始化入口
 - `migrations/`: SQL-first migration 文件目录
 - `scripts/`: migration 辅助脚本
@@ -180,7 +180,7 @@ server/
 - `internal/auth/`: 最小账号注册、登录、密码校验与 token 占位逻辑
 - `internal/home/`: 首页 summary 业务聚合逻辑
 - `internal/media/`: 媒体标签、媒体搜索与分页参数处理逻辑
-- `internal/mediactl/`: 媒体入库 CLI 的参数解析、配置读取、dry-run 校验和本地 HLS 生成逻辑
+- `internal/mediactl/`: 媒体入库 CLI 的参数解析、配置读取、dry-run 校验、HLS 生成、storage uploader 和写库逻辑
 - `internal/protocol/`: 与 `INT-19` 对齐的最小协议结构，包含 create room 请求 / 响应和 WebSocket 事件模型
 - `internal/progress/`: 用户媒体观看进度的低频写入业务逻辑
 - `internal/room/`: 房间、连接、房间管理器，以及房间创建与控制状态更新的内存模型
@@ -201,7 +201,7 @@ server/
 - `internal/auth/service.go`: 注册、登录、bcrypt 密码哈希与 dev token 生成
 - `internal/home/service.go`: 首页用户信息、上次观看和继续追番聚合逻辑
 - `internal/media/service.go`: 媒体标签列表、搜索参数、分页 cursor 和结果裁剪逻辑
-- `internal/mediactl/ingest.go`: `mediactl ingest` 参数解析、输入文件校验、dry-run summary 和 ffmpeg HLS 输出
+- `internal/mediactl/ingest.go`: `mediactl ingest` 参数解析、输入文件校验、dry-run summary、ffmpeg HLS 输出和写库主流程
 - `internal/progress/service.go`: 用户媒体观看进度校验与低频写入逻辑
 - `internal/roomapi/service.go`: 6 位房间码生成、DB-backed create room 和 join room by code 业务逻辑
 - `internal/store/postgres.go`: PostgreSQL 连接与 `users` 读写
@@ -225,7 +225,7 @@ server/
 
 - `go test ./...`
 - `go run ./cmd/mediactl ingest --library-root <root> --input <root>/<season>/season-01/episode-01.mp4 --title <title>` 输出 dry-run summary
-- `go run ./cmd/mediactl ingest --library-root <root> --input <root>/<season>/season-01/episode-01.mp4 --title <title> --dry-run=false` 生成本地 HLS
+- `go run ./cmd/mediactl ingest --library-root <root> --input <root>/<season>/season-01/episode-01.mp4 --title <title> --dry-run=false` 生成 HLS 并执行配置好的 storage uploader
 - `POST /auth/register` 返回 `201 Created`、用户资料和 `dev_<userId>` access token
 - `POST /auth/login` 校验 bcrypt 密码并返回统一 envelope
 - 重复注册同一账号返回 `409 CONFLICT`

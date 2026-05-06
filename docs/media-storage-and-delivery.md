@@ -91,15 +91,20 @@ FFMPEG_BIN=ffmpeg
 FFPROBE_BIN=ffprobe
 ```
 
-第一版只要求 `local` driver 能跑通。`minio` / `s3` driver 作为后续上传抽象预留。
+当前已经实现：
+
+- `local` driver：本地稳定目录落盘
+- `minio` / `s3` driver：S3-compatible 上传抽象
+
+真实 OSS 厂商选型仍放在后续评估任务中，不在这里提前绑定。
 
 ### Driver 语义
 
 | Driver | 用途 | 是否当前默认 | 说明 |
 | -- | -- | -- | -- |
 | `local` | 本地静态目录 | 是 | 适合 Android 模拟器和本机 server 联调。 |
-| `minio` | 本地 S3-compatible 预演 | 否 | 适合验证 bucket、object key、上传和 public URL。 |
-| `s3` | 云对象存储兼容层 | 否 | 后续可承接 OSS / COS / BOS / R2 的兼容接入。 |
+| `minio` | 本地 S3-compatible 预演 | 否 | 已支持上传，可验证 bucket、object key、上传和 public URL。 |
+| `s3` | 云对象存储兼容层 | 否 | 已支持 S3-compatible 上传抽象，后续承接 OSS / COS / BOS / R2 评估。 |
 
 ## 推荐资源结构
 
