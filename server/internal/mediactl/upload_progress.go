@@ -3,11 +3,13 @@ package mediactl
 import (
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 
 	"github.com/schollz/progressbar/v3"
+	"golang.org/x/term"
 )
 
 type UploadProgressStage string
@@ -54,8 +56,8 @@ type uploadProgressTracker struct {
 	targetRoot     string
 	totalFiles     int
 	totalBytes     int64
+	completedBytes int64
 	completedFiles int
-	transferred    int64
 	currentFile    uploadAsset
 	currentSent    int64
 	mu             sync.Mutex
@@ -110,7 +112,23 @@ func (t *uploadProgressTracker) addBytes(delta int64) {
 	}
 	t.mu.Lock()
 	t.currentSent += delta
-	t.transferred += delta
+	event := t.snapshotLocked(UploadStageProgress)
+	t.mu.Unlock()
+	t.sink.OnUploadProgress(event)
+}
+
+func (t *uploadProgressTracker) setCurrentFileProgress(current int64) {
+	if t == nil {
+		return
+	}
+	if current < 0 {
+		current = 0
+	}
+	t.mu.Lock()
+	if current > t.currentFile.SizeBytes && t.currentFile.SizeBytes > 0 {
+		current = t.currentFile.SizeBytes
+	}
+	t.currentSent = current
 	event := t.snapshotLocked(UploadStageProgress)
 	t.mu.Unlock()
 	t.sink.OnUploadProgress(event)
@@ -121,6 +139,8 @@ func (t *uploadProgressTracker) finishFile() {
 		return
 	}
 	t.mu.Lock()
+	t.currentSent = t.currentFile.SizeBytes
+	t.completedBytes += t.currentFile.SizeBytes
 	t.completedFiles++
 	event := t.snapshotLocked(UploadStageFileDone)
 	t.mu.Unlock()
@@ -154,7 +174,7 @@ func (t *uploadProgressTracker) snapshotLocked(stage UploadProgressStage) Upload
 		CurrentObjectKey: t.currentFile.ObjectKey,
 		CompletedFiles:   t.completedFiles,
 		TotalFiles:       t.totalFiles,
-		TransferredBytes: t.transferred,
+		TransferredBytes: t.completedBytes + t.currentSent,
 		TotalBytes:       t.totalBytes,
 		CurrentFileBytes: t.currentSent,
 		CurrentFileSize:  t.currentFile.SizeBytes,
@@ -174,21 +194,63 @@ func (r progressReader) Read(p []byte) (int, error) {
 	return n, err
 }
 
+type progressReadSeeker struct {
+	reader io.ReadSeeker
+	onRead func(int64)
+	onSeek func(int64)
+}
+
+func (r progressReadSeeker) Read(p []byte) (int, error) {
+	n, err := r.reader.Read(p)
+	if n > 0 && r.onRead != nil {
+		currentOffset, seekErr := r.reader.Seek(0, io.SeekCurrent)
+		if seekErr == nil {
+			r.onRead(currentOffset)
+		}
+	}
+	return n, err
+}
+
+func (r progressReadSeeker) Seek(offset int64, whence int) (int64, error) {
+	next, err := r.reader.Seek(offset, whence)
+	if err == nil && r.onSeek != nil {
+		r.onSeek(next)
+	}
+	return next, err
+}
+
 type cliUploadProgressRenderer struct {
-	writer io.Writer
-	bar    *progressbar.ProgressBar
+	writer             io.Writer
+	bar                *progressbar.ProgressBar
+	dynamic            bool
+	lastPrintedPercent int64
 }
 
 func newCLIUploadProgressRenderer(writer io.Writer) UploadProgressSink {
 	if writer == nil {
 		return nil
 	}
-	return &cliUploadProgressRenderer{writer: writer}
+	return &cliUploadProgressRenderer{
+		writer:             writer,
+		dynamic:            isInteractiveTerminal(writer),
+		lastPrintedPercent: -1,
+	}
 }
 
 func (r *cliUploadProgressRenderer) OnUploadProgress(event UploadProgressEvent) {
 	switch event.Stage {
 	case UploadStageStarted:
+		if !r.dynamic {
+			fmt.Fprintf(
+				r.writer,
+				"upload started driver=%s files=%d totalBytes=%d target=%s\n",
+				event.Driver,
+				event.TotalFiles,
+				event.TotalBytes,
+				event.TargetRoot,
+			)
+			return
+		}
 		totalBytes := event.TotalBytes
 		if totalBytes <= 0 {
 			totalBytes = 1
@@ -200,11 +262,12 @@ func (r *cliUploadProgressRenderer) OnUploadProgress(event UploadProgressEvent) 
 			progressbar.OptionShowBytes(true),
 			progressbar.OptionShowTotalBytes(true),
 			progressbar.OptionUseIECUnits(true),
+			progressbar.OptionUseANSICodes(true),
 			progressbar.OptionThrottle(120000000),
+			progressbar.OptionClearOnFinish(),
 			progressbar.OptionSetDescription(
-				fmt.Sprintf("upload %s (%d files)", event.Driver, event.TotalFiles),
+				fmt.Sprintf("upload %d files", event.TotalFiles),
 			),
-			progressbar.OptionShowDescriptionAtLineEnd(),
 			progressbar.OptionSetTheme(progressbar.Theme{
 				Saucer:        "=",
 				SaucerHead:    ">",
@@ -217,14 +280,17 @@ func (r *cliUploadProgressRenderer) OnUploadProgress(event UploadProgressEvent) 
 			_ = r.bar.RenderBlank()
 		}
 	case UploadStageFileStart, UploadStageProgress, UploadStageFileDone:
+		if !r.dynamic {
+			r.renderFallbackProgress(event)
+			return
+		}
 		if r.bar == nil {
 			return
 		}
 		r.bar.Describe(fmt.Sprintf(
-			"upload %d/%d %s",
+			"upload %d/%d",
 			event.CompletedFiles,
 			event.TotalFiles,
-			event.CurrentFileName,
 		))
 		maxBytes := event.TotalBytes
 		if maxBytes <= 0 {
@@ -233,6 +299,17 @@ func (r *cliUploadProgressRenderer) OnUploadProgress(event UploadProgressEvent) 
 		r.bar.ChangeMax64(maxBytes)
 		_ = r.bar.Set64(clampProgressValue(event.TransferredBytes, maxBytes))
 	case UploadStageCompleted:
+		if !r.dynamic {
+			fmt.Fprintf(
+				r.writer,
+				"upload completed files=%d/%d bytes=%d/%d\n",
+				event.CompletedFiles,
+				event.TotalFiles,
+				event.TransferredBytes,
+				event.TotalBytes,
+			)
+			return
+		}
 		if r.bar == nil {
 			return
 		}
@@ -255,6 +332,44 @@ func clampProgressValue(value int64, max int64) int64 {
 		return max
 	}
 	return value
+}
+
+func isInteractiveTerminal(writer io.Writer) bool {
+	file, ok := writer.(*os.File)
+	if !ok {
+		return false
+	}
+	return term.IsTerminal(int(file.Fd()))
+}
+
+func (r *cliUploadProgressRenderer) renderFallbackProgress(event UploadProgressEvent) {
+	percent := int64(0)
+	if event.TotalBytes > 0 {
+		percent = (event.TransferredBytes * 100) / event.TotalBytes
+	}
+	if percent > 100 {
+		percent = 100
+	}
+	shouldPrint := event.Stage == UploadStageFileDone || event.Stage == UploadStageCompleted
+	if !shouldPrint {
+		if percent >= r.lastPrintedPercent+5 || r.lastPrintedPercent < 0 {
+			shouldPrint = true
+		}
+	}
+	if !shouldPrint {
+		return
+	}
+	r.lastPrintedPercent = percent
+	fmt.Fprintf(
+		r.writer,
+		"upload progress %d%% files=%d/%d current=%s bytes=%d/%d\n",
+		percent,
+		event.CompletedFiles,
+		event.TotalFiles,
+		event.CurrentFileName,
+		event.TransferredBytes,
+		event.TotalBytes,
+	)
 }
 
 func uploadTargetRoot(options IngestOptions) string {

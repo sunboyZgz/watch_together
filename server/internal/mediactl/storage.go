@@ -258,9 +258,10 @@ func uploadFile(ctx context.Context, client *s3.Client, bucket string, localPath
 	_, err = client.PutObject(ctx, &s3.PutObjectInput{
 		Bucket: aws.String(bucket),
 		Key:    aws.String(objectKey),
-		Body: progressReader{
-			reader:  file,
-			onBytes: tracker.addBytes,
+		Body: progressReadSeeker{
+			reader: file,
+			onRead: tracker.setCurrentFileProgress,
+			onSeek: tracker.setCurrentFileProgress,
 		},
 		ContentType: aws.String(contentType),
 	})
