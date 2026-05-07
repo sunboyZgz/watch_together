@@ -11,6 +11,7 @@ server/cmd/mediactl
 当前已实现：
 
 - `mediactl plan / build-hls / upload / write-db / ingest` 阶段化命令。
+- `upload` / `ingest` 的结构化上传进度事件与终端进度条展示。
 - 本地多码率 HLS 生成，默认 `720p,1080p`，不默认生成 4K。
 - 基于 storage uploader abstraction 的资产落盘/上传。
 - `local` driver：把 HLS 与封面稳定写入 `MEDIA_LOCAL_ROOT`。
@@ -137,6 +138,7 @@ APP_ENV=prod go run ./cmd/mediactl ingest ...
 - 只传 `upload` 或 `write-db` 时，CLI 会读取已经存在的本地 HLS 目录
 - 重复执行 `upload` 会覆盖同一 object key，不会生成新的随机资源路径
 - 重复执行 `write-db` 会更新同一 `source_key` 对应的 season / episode / variant 记录，不会额外插入一份业务主数据
+- 上传过程会输出实时进度条；底层进度数据已和终端展示解耦，后续可复用于 admin UI
 
 ### ingest 组合阶段
 

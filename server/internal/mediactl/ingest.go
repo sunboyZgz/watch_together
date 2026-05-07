@@ -187,7 +187,7 @@ func runUpload(args []string, getenv EnvLookup, stdout io.Writer, stderr io.Writ
 	if err != nil {
 		return err
 	}
-	result, err = UploadIngestAssets(context.Background(), options, result)
+	result, err = UploadIngestAssetsWithProgress(context.Background(), options, result, newCLIUploadProgressRenderer(stdout))
 	if err != nil {
 		return err
 	}
@@ -240,7 +240,7 @@ func runIngest(args []string, getenv EnvLookup, stdout io.Writer, stderr io.Writ
 	if err != nil {
 		return err
 	}
-	result, err = UploadIngestAssets(context.Background(), options, result)
+	result, err = UploadIngestAssetsWithProgress(context.Background(), options, result, newCLIUploadProgressRenderer(stdout))
 	if err != nil {
 		return err
 	}
@@ -299,7 +299,7 @@ func executeStageSequence(title string, stages []mediactlStage, options IngestOp
 				}
 				loaded = true
 			}
-			result, err = UploadIngestAssets(context.Background(), options, result)
+			result, err = UploadIngestAssetsWithProgress(context.Background(), options, result, newCLIUploadProgressRenderer(stdout))
 			if err != nil {
 				return err
 			}

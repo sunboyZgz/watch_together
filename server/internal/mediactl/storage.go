@@ -21,15 +21,24 @@ import (
 
 // StorageUploader persists generated HLS assets to the configured backend.
 type StorageUploader interface {
-	Store(ctx context.Context, options IngestOptions, result HLSResult) (HLSResult, error)
+	Store(ctx context.Context, options IngestOptions, result HLSResult, sink UploadProgressSink) (HLSResult, error)
 }
 
 func UploadIngestAssets(ctx context.Context, options IngestOptions, result HLSResult) (HLSResult, error) {
+	return UploadIngestAssetsWithProgress(ctx, options, result, nil)
+}
+
+func UploadIngestAssetsWithProgress(
+	ctx context.Context,
+	options IngestOptions,
+	result HLSResult,
+	sink UploadProgressSink,
+) (HLSResult, error) {
 	uploader, err := newStorageUploader(options.Storage)
 	if err != nil {
 		return HLSResult{}, err
 	}
-	stored, err := uploader.Store(ctx, options, result)
+	stored, err := uploader.Store(ctx, options, result, sink)
 	if err != nil {
 		return HLSResult{}, err
 	}
@@ -76,30 +85,47 @@ type localStorageUploader struct {
 	localRoot string
 }
 
-func (u localStorageUploader) Store(_ context.Context, options IngestOptions, result HLSResult) (HLSResult, error) {
+func (u localStorageUploader) Store(_ context.Context, options IngestOptions, result HLSResult, sink UploadProgressSink) (HLSResult, error) {
 	finalHLSDir := filepath.Join(u.localRoot, sourceObjectKey(options), "hls")
-	if err := ensureLocalHLSFiles(result.OutputDir, finalHLSDir); err != nil {
+	hlsAssets, err := collectUploadAssets(result.OutputDir, path.Join(sourceObjectKey(options), "hls"))
+	if err != nil {
+		return HLSResult{}, err
+	}
+	allAssets := append([]uploadAsset{}, hlsAssets...)
+	if options.Cover != "" {
+		coverKey := path.Join(sourceObjectKey(options), "cover", plannedCoverFilename(options.Cover))
+		coverAsset, err := buildSingleUploadAsset(options.Cover, coverKey)
+		if err != nil {
+			return HLSResult{}, err
+		}
+		allAssets = append(allAssets, coverAsset)
+	}
+	tracker := newUploadProgressTracker(sink, normalizedStorageDriver(options.Storage.Driver), options.SourceKey, uploadTargetRoot(options), allAssets)
+	tracker.emitStarted()
+	if err := ensureLocalHLSFiles(result.OutputDir, finalHLSDir, tracker, path.Join(sourceObjectKey(options), "hls")); err != nil {
 		return HLSResult{}, err
 	}
 
 	result.OutputDir = finalHLSDir
 	result.PlaylistPath = filepath.Join(finalHLSDir, "master.m3u8")
 	if options.Cover == "" {
+		tracker.emitCompleted()
 		return result, nil
 	}
 
 	finalCoverPath := filepath.Join(u.localRoot, sourceObjectKey(options), "cover", plannedCoverFilename(options.Cover))
-	if err := copyFile(options.Cover, finalCoverPath); err != nil {
+	if err := copyFile(options.Cover, finalCoverPath, tracker, path.Join(sourceObjectKey(options), "cover", plannedCoverFilename(options.Cover))); err != nil {
 		return HLSResult{}, fmt.Errorf("store local cover: %w", err)
 	}
+	tracker.emitCompleted()
 	return result, nil
 }
 
-func ensureLocalHLSFiles(sourceDir string, targetDir string) error {
+func ensureLocalHLSFiles(sourceDir string, targetDir string, tracker *uploadProgressTracker, keyRoot string) error {
 	if filepath.Clean(sourceDir) == filepath.Clean(targetDir) {
 		return nil
 	}
-	if err := copyTree(sourceDir, targetDir); err != nil {
+	if err := copyTree(sourceDir, targetDir, tracker, keyRoot); err != nil {
 		return fmt.Errorf("store local hls tree: %w", err)
 	}
 	return nil
@@ -159,20 +185,36 @@ func newS3StorageUploader(config StorageConfig) (StorageUploader, error) {
 	}, nil
 }
 
-func (u s3StorageUploader) Store(ctx context.Context, options IngestOptions, result HLSResult) (HLSResult, error) {
-	if err := uploadDirectoryTree(ctx, u.client, u.bucket, result.OutputDir, path.Join(sourceObjectKey(options), "hls")); err != nil {
+func (u s3StorageUploader) Store(ctx context.Context, options IngestOptions, result HLSResult, sink UploadProgressSink) (HLSResult, error) {
+	hlsAssets, err := collectUploadAssets(result.OutputDir, path.Join(sourceObjectKey(options), "hls"))
+	if err != nil {
+		return HLSResult{}, err
+	}
+	allAssets := append([]uploadAsset{}, hlsAssets...)
+	if options.Cover != "" {
+		coverKey := path.Join(sourceObjectKey(options), "cover", plannedCoverFilename(options.Cover))
+		coverAsset, err := buildSingleUploadAsset(options.Cover, coverKey)
+		if err != nil {
+			return HLSResult{}, err
+		}
+		allAssets = append(allAssets, coverAsset)
+	}
+	tracker := newUploadProgressTracker(sink, normalizedStorageDriver(options.Storage.Driver), options.SourceKey, u.bucket, allAssets)
+	tracker.emitStarted()
+	if err := uploadDirectoryTree(ctx, u.client, u.bucket, result.OutputDir, path.Join(sourceObjectKey(options), "hls"), tracker); err != nil {
 		return HLSResult{}, err
 	}
 	if options.Cover != "" {
 		coverKey := path.Join(sourceObjectKey(options), "cover", plannedCoverFilename(options.Cover))
-		if err := uploadFile(ctx, u.client, u.bucket, options.Cover, coverKey); err != nil {
+		if err := uploadFile(ctx, u.client, u.bucket, options.Cover, coverKey, tracker); err != nil {
 			return HLSResult{}, fmt.Errorf("upload remote cover: %w", err)
 		}
 	}
+	tracker.emitCompleted()
 	return result, nil
 }
 
-func uploadDirectoryTree(ctx context.Context, client *s3.Client, bucket string, localRoot string, keyRoot string) error {
+func uploadDirectoryTree(ctx context.Context, client *s3.Client, bucket string, localRoot string, keyRoot string, tracker *uploadProgressTracker) error {
 	return filepath.WalkDir(localRoot, func(current string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
@@ -185,34 +227,53 @@ func uploadDirectoryTree(ctx context.Context, client *s3.Client, bucket string, 
 			return fmt.Errorf("derive upload relative path: %w", err)
 		}
 		objectKey := path.Join(keyRoot, filepath.ToSlash(relativePath))
-		if err := uploadFile(ctx, client, bucket, current, objectKey); err != nil {
+		if err := uploadFile(ctx, client, bucket, current, objectKey, tracker); err != nil {
 			return fmt.Errorf("upload %s: %w", objectKey, err)
 		}
 		return nil
 	})
 }
 
-func uploadFile(ctx context.Context, client *s3.Client, bucket string, localPath string, objectKey string) error {
+func uploadFile(ctx context.Context, client *s3.Client, bucket string, localPath string, objectKey string, tracker *uploadProgressTracker) error {
 	file, err := os.Open(localPath)
 	if err != nil {
 		return fmt.Errorf("open upload file %q: %w", localPath, err)
 	}
 	defer file.Close()
 
+	fileInfo, err := file.Stat()
+	if err != nil {
+		return fmt.Errorf("stat upload file %q: %w", localPath, err)
+	}
+	if tracker != nil {
+		tracker.startFile(uploadAsset{
+			LocalPath:   localPath,
+			ObjectKey:   objectKey,
+			DisplayName: filepath.Base(localPath),
+			SizeBytes:   fileInfo.Size(),
+		})
+	}
+
 	contentType := detectContentType(localPath)
 	_, err = client.PutObject(ctx, &s3.PutObjectInput{
-		Bucket:      aws.String(bucket),
-		Key:         aws.String(objectKey),
-		Body:        file,
+		Bucket: aws.String(bucket),
+		Key:    aws.String(objectKey),
+		Body: progressReader{
+			reader:  file,
+			onBytes: tracker.addBytes,
+		},
 		ContentType: aws.String(contentType),
 	})
 	if err != nil {
 		return fmt.Errorf("put object %q: %w", objectKey, err)
 	}
+	if tracker != nil {
+		tracker.finishFile()
+	}
 	return nil
 }
 
-func copyTree(sourceDir string, targetDir string) error {
+func copyTree(sourceDir string, targetDir string, tracker *uploadProgressTracker, keyRoot string) error {
 	return filepath.WalkDir(sourceDir, func(current string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
@@ -225,11 +286,11 @@ func copyTree(sourceDir string, targetDir string) error {
 		if entry.IsDir() {
 			return os.MkdirAll(destination, 0o755)
 		}
-		return copyFile(current, destination)
+		return copyFile(current, destination, tracker, path.Join(keyRoot, filepath.ToSlash(relativePath)))
 	})
 }
 
-func copyFile(source string, target string) error {
+func copyFile(source string, target string, tracker *uploadProgressTracker, objectKey string) error {
 	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 		return fmt.Errorf("create target directory: %w", err)
 	}
@@ -239,6 +300,19 @@ func copyFile(source string, target string) error {
 	}
 	defer in.Close()
 
+	info, err := in.Stat()
+	if err != nil {
+		return fmt.Errorf("stat source file: %w", err)
+	}
+	if tracker != nil {
+		tracker.startFile(uploadAsset{
+			LocalPath:   source,
+			ObjectKey:   objectKey,
+			DisplayName: filepath.Base(source),
+			SizeBytes:   info.Size(),
+		})
+	}
+
 	out, err := os.Create(target)
 	if err != nil {
 		return fmt.Errorf("create target file: %w", err)
@@ -247,13 +321,63 @@ func copyFile(source string, target string) error {
 		_ = out.Close()
 	}()
 
-	if _, err := io.Copy(out, in); err != nil {
+	if _, err := io.Copy(out, progressReader{
+		reader:  in,
+		onBytes: tracker.addBytes,
+	}); err != nil {
 		return fmt.Errorf("copy file contents: %w", err)
 	}
 	if err := out.Chmod(0o644); err != nil {
 		return fmt.Errorf("chmod target file: %w", err)
 	}
+	if tracker != nil {
+		tracker.finishFile()
+	}
 	return nil
+}
+
+func collectUploadAssets(localRoot string, keyRoot string) ([]uploadAsset, error) {
+	assets := make([]uploadAsset, 0)
+	err := filepath.WalkDir(localRoot, func(current string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		relativePath, err := filepath.Rel(localRoot, current)
+		if err != nil {
+			return fmt.Errorf("derive upload relative path: %w", err)
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return fmt.Errorf("stat upload asset: %w", err)
+		}
+		assets = append(assets, uploadAsset{
+			LocalPath:   current,
+			ObjectKey:   path.Join(keyRoot, filepath.ToSlash(relativePath)),
+			DisplayName: filepath.Base(current),
+			SizeBytes:   info.Size(),
+		})
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return assets, nil
+}
+
+func buildSingleUploadAsset(localPath string, objectKey string) (uploadAsset, error) {
+	info, err := os.Stat(localPath)
+	if err != nil {
+		return uploadAsset{}, fmt.Errorf("stat upload asset %q: %w", localPath, err)
+	}
+	return uploadAsset{
+		LocalPath:   localPath,
+		ObjectKey:   objectKey,
+		DisplayName: filepath.Base(localPath),
+		SizeBytes:   info.Size(),
+	}, nil
 }
 
 func plannedCoverURL(options IngestOptions) string {
