@@ -43,6 +43,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.media3.common.Player
 import androidx.media3.ui.PlayerView
+import com.example.watch_together.sync.RoomMember
 import com.example.watch_together.ui.player.PlayerAdapter
 import com.example.watch_together.ui.player.PlayerCoreShell
 import com.example.watch_together.ui.player.PlayerEvent
@@ -76,7 +77,6 @@ internal fun RoomTheaterPage(
     uiState: RoomPlayerUiState,
     adapter: PlayerAdapter,
     hostUserId: String,
-    viewerUserId: String,
     mediaTitle: String,
     mediaEpisodeLabel: String?,
     isHostController: Boolean,
@@ -158,7 +158,7 @@ internal fun RoomTheaterPage(
 
             TheaterStatusPanel(
                 hostUserId = hostUserId,
-                viewerUserId = viewerUserId,
+                roomMembers = uiState.roomMembers,
                 activeUserId = uiState.activeUserId,
                 isHostController = isHostController,
                 playbackSpeed = uiState.displayPlaybackSpeed,
@@ -266,7 +266,7 @@ private fun RoomHeader(
 @Composable
 private fun TheaterStatusPanel(
     hostUserId: String,
-    viewerUserId: String,
+    roomMembers: List<RoomMember>,
     activeUserId: String?,
     isHostController: Boolean,
     playbackSpeed: Float,
@@ -275,6 +275,15 @@ private fun TheaterStatusPanel(
     syncStatus: SyncStatus,
     latestSeq: Long?
 ) {
+    val hostMember = roomMembers.firstOrNull { it.role.equals("host", ignoreCase = true) }
+    val viewerMember = roomMembers.firstOrNull { !it.role.equals("host", ignoreCase = true) }
+    val hostDisplayName = memberDisplayName(
+        member = hostMember,
+        activeUserId = activeUserId,
+        fallbackUserId = hostUserId
+    )
+    val viewerDisplayName = viewerSlotDisplayName(viewerMember, activeUserId)
+
     Surface(
         modifier = Modifier.fillMaxWidth(),
         color = RoomPanel,
@@ -318,12 +327,12 @@ private fun TheaterStatusPanel(
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 CompactMetric(
                     label = "房主",
-                    value = if (isHostController) "你" else shortUser(hostUserId),
+                    value = if (isHostController) "你" else hostDisplayName,
                     modifier = Modifier.weight(1f)
                 )
                 CompactMetric(
                     label = "成员",
-                    value = if (activeUserId == null) "等待" else shortUser(viewerUserId),
+                    value = viewerDisplayName,
                     modifier = Modifier.weight(1f)
                 )
                 CompactMetric(
@@ -560,6 +569,29 @@ private fun shortUser(userId: String): String {
     return userId.substringAfter("android_").replace('_', ' ').take(10)
 }
 
+internal fun memberDisplayName(
+    member: RoomMember?,
+    activeUserId: String?,
+    fallbackUserId: String
+): String {
+    if (member == null) return shortUser(fallbackUserId)
+    if (activeUserId != null && member.userId == activeUserId) return "你"
+    return member.nickname.ifBlank { shortUser(member.userId) }
+}
+
+internal fun viewerSlotDisplayName(
+    viewerMember: RoomMember?,
+    activeUserId: String?
+): String {
+    return viewerMember?.let {
+        memberDisplayName(
+            member = it,
+            activeUserId = activeUserId,
+            fallbackUserId = it.userId
+        )
+    } ?: "待加入"
+}
+
 @Preview(showBackground = true, widthDp = 390, heightDp = 844)
 @Composable
 private fun RoomTheaterPagePreview() {
@@ -569,6 +601,15 @@ private fun RoomTheaterPagePreview() {
                 joinRoomInput = "A7K2M9",
                 activeUserId = "android_host_xi",
                 currentRoomId = "A7K2M9",
+                roomMembers = listOf(
+                    RoomMember(
+                        userId = "host_user",
+                        nickname = "凛冬透骨",
+                        avatarSeed = "host",
+                        avatarUrl = null,
+                        role = "host"
+                    )
+                ),
                 syncStatus = SyncStatus.Connected,
                 player = PlayerRuntimeUiState(
                     currentPosition = 9 * 60 * 1000L + 24 * 1000L,
@@ -580,7 +621,6 @@ private fun RoomTheaterPagePreview() {
             ),
             adapter = PreviewPlayerAdapter,
             hostUserId = "android_host_xi",
-            viewerUserId = "android_viewer_yuki",
             mediaTitle = "紫罗兰永恒花园",
             mediaEpisodeLabel = "第 09 集",
             isHostController = true,

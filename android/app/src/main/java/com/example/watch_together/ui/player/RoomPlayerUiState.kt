@@ -1,6 +1,7 @@
 package com.example.watch_together.ui.player
 
 import androidx.media3.common.Player
+import com.example.watch_together.sync.RoomMember
 import com.example.watch_together.sync.RoomSyncState
 
 enum class SyncStatus(val label: String) {
@@ -71,6 +72,7 @@ data class RoomPlayerUiState(
     val joinRoomInput: String = "",
     val activeUserId: String? = null,
     val currentRoomId: String? = null,
+    val roomMembers: List<RoomMember> = emptyList(),
     val latestSyncState: RoomSyncState? = null,
     val syncStatus: SyncStatus = SyncStatus.Idle,
     val player: PlayerRuntimeUiState = PlayerRuntimeUiState(),

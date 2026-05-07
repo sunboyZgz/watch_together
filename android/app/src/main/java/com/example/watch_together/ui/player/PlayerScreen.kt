@@ -105,6 +105,9 @@ fun PlayerScreen(
         }.onSuccess { detail ->
             loadedRoomDetailCode = roomCode
             currentRoomMedia = detail.media
+            updateUiState { current ->
+                current.copy(roomMembers = detail.members)
+            }
             appendLog(
                 syncLogs,
                 "room detail loaded roomCode=${detail.roomCode} media=${detail.media.title}"
@@ -781,7 +784,6 @@ fun PlayerScreen(
     RoomTheaterPage(
         modifier = modifier,
         hostUserId = hostUserId,
-        viewerUserId = viewerUserId,
         mediaTitle = currentRoomMedia?.title ?: "等待选择影片",
         mediaEpisodeLabel = currentRoomMedia?.episodeLabel,
         uiState = uiState,
