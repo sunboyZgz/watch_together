@@ -33,16 +33,33 @@ func newLoader(configDir string, defaults map[string]any, keys []string) (*viper
 		appEnv = "local"
 	}
 
-	for _, name := range []string{
-		".env." + appEnv,
+	for _, name := range uniqueEnvFileOrder(
 		".env.local",
-		".env." + appEnv + ".local",
-	} {
+		".env."+appEnv,
+		".env."+appEnv+".local",
+	) {
 		if err := mergeOptionalEnvFile(loader, filepath.Join(configDir, name)); err != nil {
 			return nil, err
 		}
 	}
 	return loader, nil
+}
+
+func uniqueEnvFileOrder(names ...string) []string {
+	ordered := make([]string, 0, len(names))
+	seen := make(map[string]struct{}, len(names))
+	for _, name := range names {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		if _, exists := seen[name]; exists {
+			continue
+		}
+		seen[name] = struct{}{}
+		ordered = append(ordered, name)
+	}
+	return ordered
 }
 
 func mergeOptionalEnvFile(loader *viper.Viper, path string) error {

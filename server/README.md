@@ -89,9 +89,17 @@
 - 启动时会自动尝试读取 `server/.env`
 - 然后按 `APP_ENV` 读取对应环境文件，例如 `APP_ENV=prod` 时读取 `server/.env.prod`
 - 如果存在 `server/.env.local`，会覆盖 `.env`
-- 如果存在 `server/.env.<APP_ENV>.local`，会覆盖对应环境文件
+- 如果存在 `server/.env.<APP_ENV>.local`，会覆盖 `server/.env.<APP_ENV>` 和 `server/.env.local`
 - 当前 shell 的环境变量仍然优先于本地文件
 - `.env.example` 继续只作为模板，不直接参与运行时加载
+
+当前实际优先级：
+
+1. 当前 shell 环境变量
+2. `server/.env.<APP_ENV>.local`
+3. `server/.env.<APP_ENV>`
+4. `server/.env.local`
+5. `server/.env`
 
 关键环境变量：
 

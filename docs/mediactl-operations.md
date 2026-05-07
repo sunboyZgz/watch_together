@@ -19,7 +19,7 @@ server/cmd/mediactl
 - 生成后清晰度校验。
 - 基于媒体库目录自动推导 `source_key`。
 - 基于源文件内容自动计算 `source_hash`。
-- PostgreSQL season/episode 元数据 upsert，需要显式传 `--write-db`。
+- PostgreSQL season/episode 元数据 upsert 可通过 `write-db` 阶段或 `ingest --write-db` 触发。
 
 当前未实现：
 
@@ -56,13 +56,17 @@ ffprobe -version
 
 - `server/.env`
 - `server/.env.local`
+- `server/.env.prod`
+- `server/.env.prod.local`
 
 优先级规则：
 
 1. CLI 显式参数
 2. 当前 shell 环境变量
-3. `server/.env.local`
-4. `server/.env`
+3. `server/.env.<APP_ENV>.local`
+4. `server/.env.<APP_ENV>`
+5. `server/.env.local`
+6. `server/.env`
 5. 代码默认值
 
 推荐做法：
@@ -113,6 +117,12 @@ plan -> build-hls -> upload -> write-db
   - 如果同时传 `--write-db`，再执行 `write-db`
   - 如果显式传 `--stages=...`，则按依赖顺序组合执行指定阶段
 
+如果目标是云端 MinIO / 云数据库，请显式带上环境，例如：
+
+```bash
+APP_ENV=prod go run ./cmd/mediactl ingest ...
+```
+
 `ingest --stages=...` 支持的阶段值：
 
 - `plan`
@@ -146,6 +156,8 @@ go run ./cmd/mediactl ingest \
   --dry-run=false
 ```
 
+这里不需要额外再传 `--write-db`，因为 `write-db` 已经在 `--stages` 里声明。
+
 如果你已经本地生成好了 HLS，也可以只组合后两段：
 
 ```bash
@@ -158,6 +170,8 @@ go run ./cmd/mediactl ingest \
   --database-url 'postgres://app:app@127.0.0.1:5432/anime_watch_dev?sslmode=disable' \
   --dry-run=false
 ```
+
+这里同样不需要再传 `--write-db`。
 
 ### plan
 

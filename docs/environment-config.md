@@ -191,14 +191,15 @@ server/internal/config/
 
 ### Recommended Load Order
 
-`mediactl` 和 `roomserver` 建议统一采用以下优先级：
+`mediactl` 和 `roomserver` 当前统一采用以下优先级：
 
 1. 命令行显式参数
 2. 运行时环境变量
-3. `server/.env.local`
-4. `server/.env`
-5. 可选 `config.local.yaml / config.prod.yaml`
-6. 代码默认值
+3. `server/.env.<APP_ENV>.local`
+4. `server/.env.<APP_ENV>`
+5. `server/.env.local`
+6. `server/.env`
+7. 代码默认值
 
 说明：
 

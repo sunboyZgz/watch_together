@@ -263,6 +263,7 @@ func runComposedIngest(args []string, stages []mediactlStage, getenv EnvLookup, 
 	if err != nil {
 		return err
 	}
+	options.WriteDB = containsStage(stages, stageWriteDB)
 	return executeStageSequence("mediactl ingest staged pipeline completed:", stages, options, stdout)
 }
 

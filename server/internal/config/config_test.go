@@ -73,6 +73,22 @@ func TestLoadMediactlConfigSupportsAppEnvSpecificFiles(t *testing.T) {
 	}
 }
 
+func TestLoadMediactlConfigAppEnvSpecificOverridesGenericLocal(t *testing.T) {
+	configDir := t.TempDir()
+	mustWriteConfigFile(t, filepath.Join(configDir, ".env"), "APP_ENV=prod\nMEDIA_PUBLIC_BASE_URL=http://127.0.0.1:9000/media/tmp\n")
+	mustWriteConfigFile(t, filepath.Join(configDir, ".env.local"), "MEDIA_PUBLIC_BASE_URL=http://127.0.0.1:9100/watch-together-media\n")
+	mustWriteConfigFile(t, filepath.Join(configDir, ".env.prod"), "MEDIA_PUBLIC_BASE_URL=http://106.12.35.52:9100/watch-together-media\n")
+
+	cfg, err := LoadMediactlConfig(configDir)
+	if err != nil {
+		t.Fatalf("load mediactl config: %v", err)
+	}
+
+	if cfg.Storage.PublicBaseURL != "http://106.12.35.52:9100/watch-together-media" {
+		t.Fatalf("expected env-specific config to override generic local config, got %q", cfg.Storage.PublicBaseURL)
+	}
+}
+
 func mustWriteConfigFile(t *testing.T, path string, content string) {
 	t.Helper()
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
