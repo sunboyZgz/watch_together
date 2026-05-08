@@ -45,6 +45,7 @@ import java.util.UUID
 fun PlayerScreen(
     accessToken: String = "",
     currentUserId: String = "",
+    currentUserNickname: String = "",
     selectedEpisodeId: String = AppConfig.defaultMediaIdForRoom(),
     initialRoomCode: String = "",
     autoCreateAsHost: Boolean = false,
@@ -96,6 +97,7 @@ fun PlayerScreen(
     var bufferingCountsAsRebuffer by rememberSaveable { mutableStateOf(false) }
     var activeSpeedNudgeRestoreAtMs by rememberSaveable { mutableStateOf(0L) }
     var lastBackgroundPauseSeq by rememberSaveable { mutableStateOf(-1L) }
+    var lastRoomMembersRefreshAtMs by rememberSaveable { mutableStateOf(0L) }
     val currentUiState by rememberUpdatedState(uiState)
 
     val isHostController = remember(uiState.activeUserId, uiState.latestSyncState) {
@@ -109,8 +111,8 @@ fun PlayerScreen(
         uiState = transform(uiState)
     }
 
-    suspend fun loadRoomDetail(roomCode: String): Boolean {
-        if (loadedRoomDetailCode == roomCode && currentRoomMedia != null) return true
+    suspend fun loadRoomDetail(roomCode: String, forceRefresh: Boolean = false): Boolean {
+        if (!forceRefresh && loadedRoomDetailCode == roomCode && currentRoomMedia != null) return true
         return runCatching {
             withContext(Dispatchers.IO) {
                 roomSessionController.getRoomDetail(roomCode)
@@ -121,9 +123,10 @@ fun PlayerScreen(
             updateUiState { current ->
                 current.copy(roomMembers = detail.members)
             }
+            lastRoomMembersRefreshAtMs = System.currentTimeMillis()
             appendLog(
                 syncLogs,
-                "room detail loaded roomCode=${detail.roomCode} media=${detail.media.title}"
+                "room detail loaded roomCode=${detail.roomCode} media=${detail.media.title} members=${detail.members.size}"
             )
         }.onFailure { error ->
             appendLog(syncLogs, "room detail failed: ${error.message}")
@@ -527,6 +530,14 @@ fun PlayerScreen(
             override fun onRoomState(payload: RoomSyncState) {
                 coroutineScope.launch {
                     applySyncEventResult(syncEventHandler.onRoomState(currentUiState, payload))
+                    val currentRoomId = currentUiState.currentRoomId
+                    val nowMs = System.currentTimeMillis()
+                    if (currentRoomId == payload.roomId &&
+                        (currentUiState.roomMembers.isEmpty() ||
+                            nowMs - lastRoomMembersRefreshAtMs >= ROOM_MEMBERS_REFRESH_INTERVAL_MS)
+                    ) {
+                        loadRoomDetail(payload.roomId, forceRefresh = true)
+                    }
                 }
             }
 
@@ -629,7 +640,16 @@ fun PlayerScreen(
                     current.copy(
                         currentRoomId = createResult.roomId,
                         joinRoomInput = createResult.roomId,
-                        activeUserId = createResult.roomState.hostUserId
+                        activeUserId = createResult.roomState.hostUserId,
+                        roomMembers = listOf(
+                            com.example.watch_together.sync.RoomMember(
+                                userId = createResult.roomState.hostUserId,
+                                nickname = currentUserNickname.ifBlank { "你" },
+                                avatarSeed = createResult.roomState.hostUserId,
+                                avatarUrl = null,
+                                role = "host"
+                            )
+                        )
                     )
                 }
                 appendLog(
@@ -1114,6 +1134,7 @@ private fun appendLog(
 private const val BUFFER_DEBUG_LOG_INTERVAL_MS = 3_000L
 private const val BUFFER_DEBUG_LOG_TAG = "WatchTogetherBuffer"
 private const val TELEMETRY_LOG_TAG = "WatchTogetherTelemetry"
+private const val ROOM_MEMBERS_REFRESH_INTERVAL_MS = 1_500L
 private const val POST_SEEK_FIRST_FRAME_TIMEOUT_MS = 2_500L
 private const val POST_SEEK_RETRY_TIMEOUT_MS = 2_000L
 private const val MAX_POST_SEEK_RECOVERY_RETRIES = 1

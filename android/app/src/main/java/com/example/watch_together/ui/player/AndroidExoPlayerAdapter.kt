@@ -49,7 +49,26 @@ class AndroidExoPlayerAdapter(
         .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
         .setEventListener(cacheEventListener)
     private val hlsMediaSourceFactory = HlsMediaSource.Factory(cacheDataSourceFactory)
-    private val hlsAheadPrefetcher = HlsAheadPrefetcher(cacheDataSourceFactory, cache)
+    private val hlsAheadPrefetcher = HlsAheadPrefetcher(
+        dataSourceFactory = cacheDataSourceFactory,
+        cache = cache,
+    ) { metrics ->
+        if (metrics.bytesDownloaded > 0L && metrics.durationMs > 0L) {
+            val estimate = bandwidthEstimator.record(
+                ThroughputSample(
+                    bytesTransferred = metrics.bytesDownloaded,
+                    durationMs = metrics.durationMs,
+                    source = metrics.source
+                )
+            )
+            PlayerDebugLog.d(
+                ABR_LOG_TAG,
+                "prefetch metrics source=${metrics.source} target=${metrics.targetHeight}p " +
+                    "segments=${metrics.segmentCount} downloaded=${metrics.bytesDownloaded}B " +
+                    "duration=${metrics.durationMs}ms ewma=${estimate.throughputEwmaBps}bps"
+            )
+        }
+    }
     private val trackSelector = DefaultTrackSelector(context).apply {
         setParameters(
             buildUponParameters()
@@ -73,12 +92,16 @@ class AndroidExoPlayerAdapter(
     private var attachedPlayerView: PlayerView? = null
     private var eventListener: ((PlayerEvent) -> Unit)? = null
     private val mainHandler = Handler(Looper.getMainLooper())
+    private val bandwidthEstimator = BandwidthAwareThroughputEstimator()
     private var latestVideoVariant = PlayerVideoVariant()
+    private var latestAvailableVideoVariants: List<PlayerVideoVariant> = emptyList()
     private var latestPlaybackStrategy = PlayerPlaybackStrategy.Auto
     private var latestQualityPreference = PlayerVideoQualityPreference.Auto
+    private var latestRebufferCount = 0
     private var currentMediaUrl: String = ""
     private var qualitySwitchGeneration: Long = 0L
     private var pendingQualitySwitch: PendingQualitySwitch? = null
+    private var committedQualitySwitch: CommittedQualitySwitch? = null
     private val playerListener = object : Player.Listener {
         override fun onPlaybackStateChanged(playbackState: Int) {
             emit(PlayerEvent.PlaybackStateChanged(playbackState))
@@ -115,6 +138,7 @@ class AndroidExoPlayerAdapter(
 
         override fun onTracksChanged(tracks: Tracks) {
             val variants = videoVariantsFromTracks(tracks, selectedOnly = false)
+            latestAvailableVideoVariants = variants
             logAvailableVideoTracks(variants)
             emit(PlayerEvent.VideoQualitiesChanged(variants.toQualityOptions()))
             videoVariantsFromTracks(tracks, selectedOnly = true)
@@ -135,6 +159,7 @@ class AndroidExoPlayerAdapter(
         }
 
         override fun onRenderedFirstFrame() {
+            committedQualitySwitch = committedQualitySwitch?.copy(renderedFirstFrame = true)
             emit(PlayerEvent.RenderedFirstFrame)
         }
     }
@@ -174,8 +199,10 @@ class AndroidExoPlayerAdapter(
     override fun load(url: String) {
         currentMediaUrl = url
         pendingQualitySwitch = null
+        committedQualitySwitch = null
         qualitySwitchGeneration += 1L
         latestVideoVariant = PlayerVideoVariant()
+        latestAvailableVideoVariants = emptyList()
         emit(PlayerEvent.VideoVariantChanged(latestVideoVariant, reason = "load"))
         emit(PlayerEvent.VideoQualitiesChanged(listOf(PlayerVideoQualityOption.Auto)))
         emit(PlayerEvent.VideoQualitySwitchChanged(PlayerVideoQualitySwitchState()))
@@ -218,9 +245,11 @@ class AndroidExoPlayerAdapter(
 
     override fun setVideoQualityPreference(preference: PlayerVideoQualityPreference) {
         if (preference == latestQualityPreference && pendingQualitySwitch == null) return
+        val previousPreference = latestQualityPreference
         if (preference.isAuto) {
             qualitySwitchGeneration += 1L
             pendingQualitySwitch = null
+            committedQualitySwitch = null
             latestQualityPreference = preference
             applyTrackSelection()
             emit(
@@ -241,6 +270,7 @@ class AndroidExoPlayerAdapter(
         if (latestVideoVariant.height == preference.height) {
             qualitySwitchGeneration += 1L
             pendingQualitySwitch = null
+            committedQualitySwitch = null
             latestQualityPreference = preference
             applyTrackSelection()
             emit(
@@ -260,9 +290,58 @@ class AndroidExoPlayerAdapter(
 
         val generation = qualitySwitchGeneration + 1L
         qualitySwitchGeneration = generation
+        val targetVariant = latestAvailableVideoVariants
+            .filter { variant -> variant.height >= MinVideoHeight }
+            .minByOrNull { variant ->
+                kotlin.math.abs(variant.height - (preference.height ?: latestVideoVariant.height))
+            }
+            ?: latestVideoVariant.copy(height = preference.height ?: latestVideoVariant.height)
+        val plan = BandwidthAwareQualitySwitchAdvisor.plan(
+            QualitySwitchPlanningContext(
+                playbackSpeed = exoPlayer.playbackParameters.speed,
+                bufferedAheadMs = exoPlayer.bufferedPosition - exoPlayer.currentPosition,
+                effectiveBufferedAheadMs = ((exoPlayer.bufferedPosition - exoPlayer.currentPosition)
+                    .coerceAtLeast(0L) / exoPlayer.playbackParameters.speed.coerceAtLeast(0.25f)).toLong(),
+                estimatedSegmentsAhead = (((exoPlayer.bufferedPosition - exoPlayer.currentPosition)
+                    .coerceAtLeast(0L) / exoPlayer.playbackParameters.speed.coerceAtLeast(0.25f)).toLong() / 6_000L).toInt(),
+                rebufferCount = latestRebufferCount,
+                currentVariant = latestVideoVariant,
+                targetVariant = targetVariant,
+                targetBandwidthBps = targetVariant.bitrate,
+                bandwidthEstimate = bandwidthEstimator.currentEstimate(),
+                cachedTargetSegments = 0
+            )
+        )
+        if (!plan.shouldAttemptWarmup) {
+            pendingQualitySwitch = null
+            emit(
+                PlayerEvent.VideoQualitySwitchChanged(
+                    PlayerVideoQualitySwitchState(
+                        phase = PlayerVideoQualitySwitchPhase.Blocked,
+                        preference = preference,
+                        detail = plan.blockedReason
+                    )
+                )
+            )
+            PlayerDebugLog.d(
+                ABR_LOG_TAG,
+                "quality switch blocked target=${preference.label} reason=${plan.blockedReason}"
+            )
+            return
+        }
+        PlayerDebugLog.d(
+            ABR_LOG_TAG,
+            "quality switch plan target=${preference.label} strategy=${plan.strategy} " +
+                "skip=${plan.skipSegments} warm=${plan.warmSegments} " +
+                "windowMs=${plan.targetWarmupWindowMs} graceMs=${plan.graceWindowMs} " +
+                "estimate=${bandwidthEstimator.currentEstimate().throughputEwmaBps}bps " +
+                "bufferAhead=${exoPlayer.bufferedPosition - exoPlayer.currentPosition}ms"
+        )
         pendingQualitySwitch = PendingQualitySwitch(
             generation = generation,
-            preference = preference
+            preference = preference,
+            fallbackPreference = previousPreference,
+            plan = plan
         )
         emit(
             PlayerEvent.VideoQualitySwitchChanged(
@@ -306,12 +385,20 @@ class AndroidExoPlayerAdapter(
                 mediaUrl = mediaUrl,
                 currentPositionMs = exoPlayer.currentPosition.coerceAtLeast(0L),
                 targetHeight = preference.height ?: MinVideoHeight,
-                segmentWindow = QUALITY_SWITCH_WARMUP_SEGMENTS
+                skipSegments = plan.skipSegments,
+                segmentWindow = plan.warmSegments
             )
         ) { result ->
             mainHandler.post {
                 val pending = pendingQualitySwitch
                 if (pending == null || pending.generation != generation) return@post
+                val estimate = bandwidthEstimator.record(
+                    ThroughputSample(
+                        bytesTransferred = result.bytesDownloaded,
+                        durationMs = result.durationMs,
+                        source = "quality_warmup_${preference.label}"
+                    )
+                )
                 if (!result.success) {
                     pendingQualitySwitch = null
                     emit(
@@ -322,6 +409,35 @@ class AndroidExoPlayerAdapter(
                                 detail = "目标清晰度预热失败，继续保持当前播放。"
                             )
                         )
+                    )
+                    return@post
+                }
+                val commitDecision = BandwidthAwareQualitySwitchAdvisor.evaluateCommit(
+                    QualitySwitchCommitContext(
+                        targetBandwidthBps = result.targetBandwidthBps.coerceAtLeast(targetVariant.bitrate),
+                        effectiveBufferedAheadMs = ((exoPlayer.bufferedPosition - exoPlayer.currentPosition)
+                            .coerceAtLeast(0L) / exoPlayer.playbackParameters.speed.coerceAtLeast(0.25f)).toLong(),
+                        warmedSegments = result.warmedSegments + result.reusedSegments,
+                        bandwidthEstimate = estimate,
+                        playbackSpeed = exoPlayer.playbackParameters.speed,
+                        rebufferCount = latestRebufferCount,
+                        targetVariant = targetVariant
+                    )
+                )
+                if (!commitDecision.allowCommit) {
+                    pendingQualitySwitch = null
+                    emit(
+                        PlayerEvent.VideoQualitySwitchChanged(
+                            PlayerVideoQualitySwitchState(
+                                phase = PlayerVideoQualitySwitchPhase.Blocked,
+                                preference = preference,
+                                detail = commitDecision.reason
+                            )
+                        )
+                    )
+                    PlayerDebugLog.d(
+                        ABR_LOG_TAG,
+                        "quality switch commit blocked target=${preference.label} reason=${commitDecision.reason}"
                     )
                     return@post
                 }
@@ -336,13 +452,24 @@ class AndroidExoPlayerAdapter(
                     )
                 )
                 latestQualityPreference = preference
+                committedQualitySwitch = CommittedQualitySwitch(
+                    generation = generation,
+                    targetPreference = preference,
+                    fallbackPreference = pending.fallbackPreference,
+                    targetVariant = targetVariant,
+                    startedAtMs = System.currentTimeMillis(),
+                    startPositionMs = exoPlayer.currentPosition.coerceAtLeast(0L),
+                    graceWindowMs = pending.plan.graceWindowMs
+                )
                 applyTrackSelection()
+                scheduleCommittedQualitySwitchCheck(committedQualitySwitch!!)
             }
         }
         PlayerDebugLog.d(ABR_LOG_TAG, "quality preference=${preference.label} strategy=${latestPlaybackStrategy.logLabel}")
     }
 
     override fun updatePlaybackStrategy(playbackSpeed: Float, rebufferCount: Int) {
+        latestRebufferCount = rebufferCount
         val nextStrategy = PlayerPlaybackStrategy.forPlayback(
             playbackSpeed = playbackSpeed,
             rebufferCount = rebufferCount
@@ -366,6 +493,17 @@ class AndroidExoPlayerAdapter(
         rebufferCount: Int,
         videoVariant: PlayerVideoVariant
     ) {
+        val preparationPlan = BandwidthAwareQualitySwitchAdvisor.planPreparation(
+            VariantPreparationContext(
+                playbackSpeed = playbackSpeed,
+                effectiveBufferedAheadMs = effectiveBufferedAheadMs,
+                estimatedSegmentsAhead = estimatedSegmentsAhead,
+                rebufferCount = rebufferCount,
+                currentVariant = videoVariant,
+                availableVariants = latestAvailableVideoVariants,
+                bandwidthEstimate = bandwidthEstimator.currentEstimate()
+            )
+        )
         hlsAheadPrefetcher.update(
             HlsAheadPrefetchRequest(
                 mediaUrl = mediaUrl,
@@ -374,9 +512,18 @@ class AndroidExoPlayerAdapter(
                 effectiveBufferedAheadMs = effectiveBufferedAheadMs,
                 estimatedSegmentsAhead = estimatedSegmentsAhead,
                 rebufferCount = rebufferCount,
-                videoVariant = videoVariant
+                videoVariant = videoVariant,
+                preparationPlan = preparationPlan.takeIf { it.shouldPrepare }
             )
         )
+        if (preparationPlan.shouldPrepare) {
+            PlayerDebugLog.d(
+                ABR_LOG_TAG,
+                "prepare plan target=${preparationPlan.targetVariant?.qualityLabel} " +
+                    "skip=${preparationPlan.skipSegments} warm=${preparationPlan.warmSegments} " +
+                    "keepWindowMs=${preparationPlan.keepAheadWindowMs} reason=${preparationPlan.reason}"
+            )
+        }
     }
 
     override fun release() {
@@ -408,7 +555,56 @@ class AndroidExoPlayerAdapter(
                     )
                 )
             )
+            committedQualitySwitch = committedQualitySwitch?.copy(
+                renderedFirstFrame = false,
+                startPositionMs = exoPlayer.currentPosition.coerceAtLeast(0L),
+                startedAtMs = System.currentTimeMillis()
+            )
         }
+    }
+
+    private fun scheduleCommittedQualitySwitchCheck(state: CommittedQualitySwitch) {
+        mainHandler.postDelayed({
+            val active = committedQualitySwitch ?: return@postDelayed
+            if (active.generation != state.generation) return@postDelayed
+            if (latestVideoVariant.height != active.targetVariant.height) return@postDelayed
+            val advancedPositionMs = (exoPlayer.currentPosition - active.startPositionMs).coerceAtLeast(0L)
+            val observation = QualitySwitchFallbackObservation(
+                advancedPositionMs = advancedPositionMs,
+                renderedFirstFrame = active.renderedFirstFrame,
+                effectiveBufferedAheadMs = ((exoPlayer.bufferedPosition - exoPlayer.currentPosition)
+                    .coerceAtLeast(0L) / exoPlayer.playbackParameters.speed.coerceAtLeast(0.25f)).toLong(),
+                playbackState = exoPlayer.playbackState,
+                targetVariant = active.targetVariant
+            )
+            if (!BandwidthAwareQualitySwitchAdvisor.shouldFallback(observation)) {
+                committedQualitySwitch = null
+                return@postDelayed
+            }
+            fallbackQualitySwitch(active, "切到 ${active.targetPreference.label} 后恢复不稳定，已自动回退。")
+        }, state.graceWindowMs)
+    }
+
+    private fun fallbackQualitySwitch(state: CommittedQualitySwitch, detail: String) {
+        committedQualitySwitch = null
+        pendingQualitySwitch = null
+        latestQualityPreference = state.fallbackPreference
+        applyTrackSelection()
+        val resume = exoPlayer.playWhenReady
+        val currentPosition = exoPlayer.currentPosition.coerceAtLeast(0L)
+        exoPlayer.seekTo(currentPosition)
+        if (resume) {
+            exoPlayer.play()
+        }
+        emit(
+            PlayerEvent.VideoQualitySwitchChanged(
+                PlayerVideoQualitySwitchState(
+                    phase = PlayerVideoQualitySwitchPhase.Fallback,
+                    preference = state.targetPreference,
+                    detail = detail
+                )
+            )
+        )
     }
 
     private fun applyTrackSelection() {
@@ -493,13 +689,25 @@ class AndroidExoPlayerAdapter(
         const val MaxBufferMs = 90_000
         const val BufferForPlaybackMs = 3_500
         const val BufferForPlaybackAfterRebufferMs = 10_000
-        const val QUALITY_SWITCH_WARMUP_SEGMENTS = 3
     }
 }
 
 private data class PendingQualitySwitch(
     val generation: Long,
     val preference: PlayerVideoQualityPreference,
+    val fallbackPreference: PlayerVideoQualityPreference,
+    val plan: QualitySwitchPlan,
+)
+
+private data class CommittedQualitySwitch(
+    val generation: Long,
+    val targetPreference: PlayerVideoQualityPreference,
+    val fallbackPreference: PlayerVideoQualityPreference,
+    val targetVariant: PlayerVideoVariant,
+    val startedAtMs: Long,
+    val startPositionMs: Long,
+    val graceWindowMs: Long,
+    val renderedFirstFrame: Boolean = false,
 )
 
 @OptIn(UnstableApi::class)

@@ -111,6 +111,7 @@ enum class PlayerVideoQualitySwitchPhase {
     WarmingTargetVariant,
     ReadyToCommit,
     Committed,
+    Blocked,
     Fallback
 }
 
@@ -141,6 +142,8 @@ data class PlayerVideoQualitySwitchState(
                 } else {
                     "已切到 ${preference.label}，卡顿时会优先保障流畅。"
                 }
+            PlayerVideoQualitySwitchPhase.Blocked ->
+                detail.ifBlank { "当前网络或缓冲条件不足，暂不切换。" }
             PlayerVideoQualitySwitchPhase.Fallback ->
                 detail.ifBlank { "目标清晰度预热失败，继续保持当前播放。" }
         }

@@ -67,6 +67,7 @@ fun WatchTogetherApp() {
         AppScreen.Player -> PlayerScreen(
             accessToken = sessionAccessToken,
             currentUserId = sessionUserId,
+            currentUserNickname = sessionNickname,
             selectedEpisodeId = selectedEpisodeId,
             initialRoomCode = pendingJoinRoomCode,
             autoCreateAsHost = shouldAutoCreateRoom,

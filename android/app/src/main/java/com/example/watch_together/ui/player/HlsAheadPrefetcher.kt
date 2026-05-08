@@ -20,6 +20,7 @@ internal class HlsAheadPrefetcher(
     private val dataSourceFactory: CacheDataSource.Factory,
     private val cache: SimpleCache,
     private val logTag: String = "WatchTogetherPrefetch",
+    private val onPrefetchMetrics: (PrefetchExecutionMetrics) -> Unit = {},
 ) {
     private val executor: ExecutorService = Executors.newSingleThreadExecutor { runnable ->
         Thread(runnable, "watch-together-hls-prefetch").apply {
@@ -45,7 +46,10 @@ internal class HlsAheadPrefetcher(
             window,
             request.playbackSpeed,
             request.rebufferCount,
-            request.videoVariant.height
+            request.videoVariant.height,
+            request.preparationPlan?.targetVariant?.height ?: 0,
+            request.preparationPlan?.skipSegments ?: 0,
+            request.preparationPlan?.warmSegments ?: 0
         ).joinToString("|")
 
         if (requestKey == lastRequestKey) return
@@ -119,6 +123,8 @@ internal class HlsAheadPrefetcher(
         )
 
         var completed = 0
+        var bytesDownloaded = 0L
+        val startedAtMs = System.currentTimeMillis()
         segmentUrls.forEach { segmentUrl ->
             runCatching {
                 val cacheBeforeBytes = cache.cacheSpace
@@ -132,6 +138,7 @@ internal class HlsAheadPrefetcher(
                     null,
                     null
                 ).cache()
+                bytesDownloaded += (cache.cacheSpace - cacheBeforeBytes).coerceAtLeast(0L)
                 completed += 1
                 PlayerDebugLog.d(
                     logTag,
@@ -148,6 +155,21 @@ internal class HlsAheadPrefetcher(
             "prefetch done completed=$completed requested=${segmentUrls.size} " +
                 "fromSegment=$startSegmentIndex window=$window"
         )
+        if (completed > 0) {
+            onPrefetchMetrics(
+                PrefetchExecutionMetrics(
+                    source = "ahead_prefetch_current",
+                    bytesDownloaded = bytesDownloaded,
+                    durationMs = (System.currentTimeMillis() - startedAtMs).coerceAtLeast(1L),
+                    segmentCount = completed,
+                    targetHeight = request.videoVariant.height
+                )
+            )
+        }
+        val preparationPlan = request.preparationPlan
+        if (preparationPlan?.shouldPrepare == true) {
+            prefetchPreparedVariant(request, preparationPlan)
+        }
     }
 
     private fun getPlaylist(request: HlsAheadPrefetchRequest): HlsMediaPlaylist? {
@@ -233,7 +255,7 @@ internal class HlsAheadPrefetcher(
             .toInt()
             .coerceAtLeast(0)
         val segmentUrls = mediaPlaylist.segments
-            .drop(currentSegmentIndex)
+            .drop(currentSegmentIndex + request.skipSegments.coerceAtLeast(0))
             .take(request.segmentWindow.coerceAtLeast(1))
             .map { segment -> segment.url }
 
@@ -247,25 +269,100 @@ internal class HlsAheadPrefetcher(
         }
 
         var warmedSegments = 0
+        var reusedSegments = 0
+        var bytesDownloaded = 0L
+        val startedAtMs = System.currentTimeMillis()
         segmentUrls.forEach { segmentUrl ->
             runCatching {
+                val cacheBeforeBytes = cache.cacheSpace
                 CacheWriter(
                     dataSourceFactory.createDataSource(),
                     DataSpec(Uri.parse(segmentUrl)),
                     null,
                     null
                 ).cache()
+                val cacheAfterBytes = cache.cacheSpace
+                val deltaBytes = (cacheAfterBytes - cacheBeforeBytes).coerceAtLeast(0L)
+                if (deltaBytes == 0L) {
+                    reusedSegments += 1
+                } else {
+                    bytesDownloaded += deltaBytes
+                }
                 warmedSegments += 1
             }.onFailure { error ->
                 PlayerDebugLog.d(logTag, "quality warmup failed url=$segmentUrl error=${error.message}")
             }
         }
+        val durationMs = (System.currentTimeMillis() - startedAtMs).coerceAtLeast(1L)
 
         return HlsQualitySwitchWarmupResult(
             targetHeight = request.targetHeight,
             warmedSegments = warmedSegments,
             success = warmedSegments > 0,
-            detail = "variant=$targetVariantUrl"
+            detail = "variant=$targetVariantUrl",
+            reusedSegments = reusedSegments,
+            bytesDownloaded = bytesDownloaded,
+            durationMs = durationMs,
+            targetBandwidthBps = masterPlaylist.variantBandwidth(targetVariantUrl)
+        )
+    }
+
+    private fun prefetchPreparedVariant(
+        request: HlsAheadPrefetchRequest,
+        plan: VariantPreparationPlan
+    ) {
+        val targetVariant = plan.targetVariant ?: return
+        val rootText = readText(request.mediaUrl)
+        val rootMediaPlaylist = parseHlsMediaPlaylist(request.mediaUrl, rootText)
+        if (rootMediaPlaylist.segments.isNotEmpty()) return
+
+        val masterPlaylist = parseHlsMasterPlaylist(request.mediaUrl, rootText)
+        val targetVariantUrl = masterPlaylist.selectVariantUrl(targetVariant.height) ?: return
+        val variantText = readText(targetVariantUrl)
+        val mediaPlaylist = parseHlsMediaPlaylist(targetVariantUrl, variantText)
+        if (mediaPlaylist.segments.isEmpty()) return
+
+        val currentSegmentIndex = (request.currentPositionMs / DEFAULT_HLS_SEGMENT_DURATION_MS)
+            .toInt()
+            .coerceAtLeast(0)
+        val segmentUrls = mediaPlaylist.segments
+            .drop(currentSegmentIndex + plan.skipSegments.coerceAtLeast(0))
+            .take(plan.warmSegments.coerceAtLeast(1))
+            .map { it.url }
+        if (segmentUrls.isEmpty()) return
+
+        var completed = 0
+        var bytesDownloaded = 0L
+        val startedAtMs = System.currentTimeMillis()
+        segmentUrls.forEach { segmentUrl ->
+            runCatching {
+                val cacheBeforeBytes = cache.cacheSpace
+                CacheWriter(
+                    dataSourceFactory.createDataSource(),
+                    DataSpec(Uri.parse(segmentUrl)),
+                    null,
+                    null
+                ).cache()
+                bytesDownloaded += (cache.cacheSpace - cacheBeforeBytes).coerceAtLeast(0L)
+                completed += 1
+            }.onFailure { error ->
+                PlayerDebugLog.d(logTag, "prepare variant failed url=$segmentUrl error=${error.message}")
+            }
+        }
+        if (completed <= 0) return
+        PlayerDebugLog.d(
+            logTag,
+            "prepared variant target=${targetVariant.qualityLabel} completed=$completed " +
+                "skip=${plan.skipSegments} warm=${plan.warmSegments} reason=${plan.reason}"
+        )
+        onPrefetchMetrics(
+            PrefetchExecutionMetrics(
+                source = "ahead_prefetch_prepare_${targetVariant.qualityLabel}",
+                bytesDownloaded = bytesDownloaded,
+                durationMs = (System.currentTimeMillis() - startedAtMs).coerceAtLeast(1L),
+                segmentCount = completed,
+                targetHeight = targetVariant.height
+            )
         )
     }
 
@@ -331,6 +428,10 @@ internal class HlsAheadPrefetcher(
             ?.url
     }
 
+    private fun HlsMasterPlaylist.variantBandwidth(targetUrl: String): Int {
+        return variants.firstOrNull { variant -> variant.url == targetUrl }?.bandwidth ?: 0
+    }
+
     private companion object {
         const val DEFAULT_READ_BUFFER_BYTES = 16 * 1024
         const val HIGH_SPEED_PREFETCH_THRESHOLD = 2.0f
@@ -371,12 +472,14 @@ internal data class HlsAheadPrefetchRequest(
     val estimatedSegmentsAhead: Int,
     val rebufferCount: Int,
     val videoVariant: PlayerVideoVariant,
+    val preparationPlan: VariantPreparationPlan? = null,
 )
 
 internal data class HlsQualitySwitchWarmupRequest(
     val mediaUrl: String,
     val currentPositionMs: Long,
     val targetHeight: Int,
+    val skipSegments: Int = 0,
     val segmentWindow: Int = 3,
 )
 
@@ -385,6 +488,18 @@ internal data class HlsQualitySwitchWarmupResult(
     val warmedSegments: Int,
     val success: Boolean,
     val detail: String,
+    val reusedSegments: Int = 0,
+    val bytesDownloaded: Long = 0L,
+    val durationMs: Long = 0L,
+    val targetBandwidthBps: Int = 0,
+)
+
+internal data class PrefetchExecutionMetrics(
+    val source: String,
+    val bytesDownloaded: Long,
+    val durationMs: Long,
+    val segmentCount: Int,
+    val targetHeight: Int,
 )
 
 internal data class HlsMediaPlaylist(
