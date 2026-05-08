@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"time"
 
 	"watch_together/server/internal/auth"
 	"watch_together/server/internal/home"
@@ -35,9 +36,29 @@ type Server struct {
 // NewServer assembles the in-memory room manager and the HTTP routes around it.
 func NewServer(config Config) *Server {
 	roomManager := room.NewManager()
+	roomService, roomStore := newRoomService(config.DatabaseURL)
+	if roomStore != nil {
+		roomManager.SetLifecycleHooks(room.LifecycleHooks{
+			OnRoomBecameEmpty: func(roomID string, emptySince time.Time, destroyAfter time.Time) {
+				if err := roomStore.MarkRoomGracePeriod(context.Background(), roomID, emptySince, destroyAfter); err != nil {
+					log.Printf("failed to mark room %s grace_period: %v", roomID, err)
+				}
+			},
+			OnRoomReactivated: func(roomID string) {
+				if err := roomStore.MarkRoomActive(context.Background(), roomID); err != nil {
+					log.Printf("failed to reactivate room %s: %v", roomID, err)
+				}
+			},
+			OnRoomDestroyed: func(roomID string) {
+				if err := roomStore.DestroyRoom(context.Background(), roomID); err != nil {
+					log.Printf("failed to destroy room %s: %v", roomID, err)
+				}
+			},
+		})
+	}
 	go roomManager.StartCleanupLoop(context.Background(), room.DefaultCleanupInterval())
 	mux := http.NewServeMux()
-	roomHTTPHandler := transport.NewRoomHTTPHandler(roomManager, newRoomService(config.DatabaseURL))
+	roomHTTPHandler := transport.NewRoomHTTPHandler(roomManager, roomService)
 	authHTTPHandler := transport.NewAuthHTTPHandler(newAuthService(config.DatabaseURL))
 	homeHTTPHandler := transport.NewHomeHTTPHandler(newHomeService(config.DatabaseURL))
 	mediaHTTPHandler := transport.NewMediaHTTPHandler(newMediaService(config.DatabaseURL))
@@ -112,17 +133,18 @@ func newMediaService(databaseURL string) *media.Service {
 }
 
 // newRoomService connects room business APIs to PostgreSQL when DATABASE_URL is available.
-func newRoomService(databaseURL string) *roomapi.Service {
+func newRoomService(databaseURL string) (*roomapi.Service, *store.PostgresRoomStore) {
 	if strings.TrimSpace(databaseURL) == "" {
 		log.Print("DATABASE_URL is not set; room endpoints will return service unavailable")
-		return nil
+		return nil, nil
 	}
 	db, err := store.OpenPostgres(context.Background(), databaseURL)
 	if err != nil {
 		log.Printf("failed to connect database; room endpoints unavailable: %v", err)
-		return nil
+		return nil, nil
 	}
-	return roomapi.NewService(store.NewPostgresRoomStore(db))
+	roomStore := store.NewPostgresRoomStore(db)
+	return roomapi.NewService(roomStore), roomStore
 }
 
 // newProgressService connects media progress writes to PostgreSQL when DATABASE_URL is available.

@@ -25,6 +25,13 @@ type Manager struct {
 	emptySince           map[string]time.Time
 	now                  func() time.Time
 	emptyRoomGracePeriod time.Duration
+	hooks                LifecycleHooks
+}
+
+type LifecycleHooks struct {
+	OnRoomBecameEmpty func(roomID string, emptySince time.Time, destroyAfter time.Time)
+	OnRoomReactivated func(roomID string)
+	OnRoomDestroyed   func(roomID string)
 }
 
 type RemoveClientResult struct {
@@ -52,7 +59,7 @@ func newManagerWithClock(now func() time.Time, emptyRoomGracePeriod time.Duratio
 func (m *Manager) CreateRoom(hostUserID string, mediaID string) (*Room, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.cleanupExpiredRoomsLocked(m.now())
+	_, _ = m.cleanupExpiredRoomsLocked(m.now())
 
 	for range 10 {
 		roomID, err := generateRoomID(6)
@@ -75,7 +82,7 @@ func (m *Manager) CreateRoom(hostUserID string, mediaID string) (*Room, error) {
 func (m *Manager) RegisterCreatedRoom(roomID string, hostUserID string, mediaID string) *Room {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.cleanupExpiredRoomsLocked(m.now())
+	_, _ = m.cleanupExpiredRoomsLocked(m.now())
 
 	if existing, ok := m.rooms[roomID]; ok {
 		return existing
@@ -89,7 +96,7 @@ func (m *Manager) RegisterCreatedRoom(roomID string, hostUserID string, mediaID 
 func (m *Manager) GetOrCreate(roomID string) *Room {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.cleanupExpiredRoomsLocked(m.now())
+	_, _ = m.cleanupExpiredRoomsLocked(m.now())
 
 	if room, ok := m.rooms[roomID]; ok {
 		return room
@@ -109,21 +116,33 @@ func (m *Manager) RemoveClient(client *ClientConnection) RemoveClientResult {
 	}
 
 	m.mu.Lock()
-	defer m.mu.Unlock()
 
 	room, ok := m.rooms[roomID]
 	if !ok {
+		m.mu.Unlock()
 		return RemoveClientResult{}
 	}
 
 	leaveResult := room.Leave(client)
+	var emptySince time.Time
+	var destroyAfter time.Time
+	triggerEmptyHook := false
 	result := RemoveClientResult{
 		State:           leaveResult.State,
 		Remaining:       leaveResult.Remaining,
 		HostTransferred: leaveResult.HostTransferred,
 	}
 	if leaveResult.RoomEmpty {
-		m.emptySince[roomID] = m.now()
+		if _, existed := m.emptySince[roomID]; !existed {
+			emptySince = m.now()
+			destroyAfter = emptySince.Add(m.emptyRoomGracePeriod)
+			m.emptySince[roomID] = emptySince
+			triggerEmptyHook = true
+		}
+	}
+	m.mu.Unlock()
+	if triggerEmptyHook && m.hooks.OnRoomBecameEmpty != nil {
+		m.hooks.OnRoomBecameEmpty(roomID, emptySince, destroyAfter)
 	}
 	return result
 }
@@ -131,17 +150,26 @@ func (m *Manager) RemoveClient(client *ClientConnection) RemoveClientResult {
 // MarkRoomActive clears any pending empty-room cleanup after a member rejoins.
 func (m *Manager) MarkRoomActive(roomID string) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
+	_, existed := m.emptySince[roomID]
 
 	delete(m.emptySince, roomID)
+	m.mu.Unlock()
+	if existed && m.hooks.OnRoomReactivated != nil {
+		m.hooks.OnRoomReactivated(roomID)
+	}
 }
 
 // CleanupExpiredRooms removes rooms whose empty grace period has elapsed.
 func (m *Manager) CleanupExpiredRooms() int {
 	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	return m.cleanupExpiredRoomsLocked(m.now())
+	removedCount, removedRoomIDs := m.cleanupExpiredRoomsLocked(m.now())
+	m.mu.Unlock()
+	if m.hooks.OnRoomDestroyed != nil {
+		for _, roomID := range removedRoomIDs {
+			m.hooks.OnRoomDestroyed(roomID)
+		}
+	}
+	return removedCount
 }
 
 // StartCleanupLoop periodically removes expired empty rooms.
@@ -182,14 +210,21 @@ func (m *Manager) ClientCount(roomID string) int {
 func (m *Manager) Get(roomID string) (*Room, bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.cleanupExpiredRoomsLocked(m.now())
+	_, _ = m.cleanupExpiredRoomsLocked(m.now())
 
 	room, ok := m.rooms[roomID]
 	return room, ok
 }
 
-func (m *Manager) cleanupExpiredRoomsLocked(now time.Time) int {
+func (m *Manager) SetLifecycleHooks(hooks LifecycleHooks) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.hooks = hooks
+}
+
+func (m *Manager) cleanupExpiredRoomsLocked(now time.Time) (int, []string) {
 	removed := 0
+	removedRoomIDs := make([]string, 0)
 	for roomID, emptySince := range m.emptySince {
 		if now.Sub(emptySince) < m.emptyRoomGracePeriod {
 			continue
@@ -198,9 +233,10 @@ func (m *Manager) cleanupExpiredRoomsLocked(now time.Time) int {
 		if _, ok := m.rooms[roomID]; ok {
 			delete(m.rooms, roomID)
 			removed++
+			removedRoomIDs = append(removedRoomIDs, roomID)
 		}
 	}
-	return removed
+	return removed, removedRoomIDs
 }
 
 func generateRoomID(length int) (string, error) {

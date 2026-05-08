@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"time"
 
 	"watch_together/server/internal/roomapi"
 )
@@ -324,4 +325,49 @@ func rowExists(ctx context.Context, tx *sql.Tx, query string, args ...any) (bool
 
 func rollbackTx(tx *sql.Tx) {
 	_ = tx.Rollback()
+}
+
+func (s *PostgresRoomStore) MarkRoomGracePeriod(
+	ctx context.Context,
+	roomCode string,
+	lastEmptyAt time.Time,
+	destroyAfter time.Time,
+) error {
+	const query = `
+		UPDATE rooms
+		SET
+			status = 'grace_period',
+			last_empty_at = $2,
+			destroy_after = $3,
+			updated_at = NOW()
+		WHERE room_code = $1 AND status IN ('active', 'grace_period')
+	`
+	if _, err := s.db.ExecContext(ctx, query, roomCode, lastEmptyAt, destroyAfter); err != nil {
+		return fmt.Errorf("mark room grace_period: %w", err)
+	}
+	return nil
+}
+
+func (s *PostgresRoomStore) MarkRoomActive(ctx context.Context, roomCode string) error {
+	const query = `
+		UPDATE rooms
+		SET
+			status = 'active',
+			last_empty_at = NULL,
+			destroy_after = NULL,
+			updated_at = NOW()
+		WHERE room_code = $1 AND status IN ('active', 'grace_period')
+	`
+	if _, err := s.db.ExecContext(ctx, query, roomCode); err != nil {
+		return fmt.Errorf("mark room active: %w", err)
+	}
+	return nil
+}
+
+func (s *PostgresRoomStore) DestroyRoom(ctx context.Context, roomCode string) error {
+	const query = `DELETE FROM rooms WHERE room_code = $1`
+	if _, err := s.db.ExecContext(ctx, query, roomCode); err != nil {
+		return fmt.Errorf("destroy room: %w", err)
+	}
+	return nil
 }
