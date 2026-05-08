@@ -148,4 +148,48 @@ class RoomPlayerUiStateTest {
 
         assertTrue(state.shouldKeepScreenOn)
     }
+
+    @Test
+    fun `host authority should pause when app backgrounds during active playback`() {
+        val state = RoomPlayerUiState(
+            latestSyncState = RoomSyncState(
+                roomId = "A7K2M9",
+                mediaId = "episode-01",
+                hostUserId = "host-01",
+                positionMs = 12_000L,
+                paused = false,
+                playbackRate = 1.0,
+                ended = false,
+                seq = 8L
+            ),
+            player = PlayerRuntimeUiState(
+                playbackState = Player.STATE_READY,
+                isPlaying = true
+            )
+        )
+
+        assertTrue(state.shouldPauseAuthorityOnBackground)
+    }
+
+    @Test
+    fun `background pause is skipped when synchronized playback is already paused`() {
+        val state = RoomPlayerUiState(
+            latestSyncState = RoomSyncState(
+                roomId = "A7K2M9",
+                mediaId = "episode-01",
+                hostUserId = "host-01",
+                positionMs = 12_000L,
+                paused = true,
+                playbackRate = 1.0,
+                ended = false,
+                seq = 8L
+            ),
+            player = PlayerRuntimeUiState(
+                playbackState = Player.STATE_READY,
+                isPlaying = false
+            )
+        )
+
+        assertFalse(state.shouldPauseAuthorityOnBackground)
+    }
 }

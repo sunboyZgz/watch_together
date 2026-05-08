@@ -1,6 +1,13 @@
 package com.example.watch_together.ui.player
 
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.util.Log
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -13,9 +20,11 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.media3.common.Player
+import androidx.core.content.ContextCompat
 import com.example.watch_together.config.AppConfig
 import com.example.watch_together.pages.room.RoomTheaterPage
 import com.example.watch_together.sync.ProgressHttpClient
@@ -43,6 +52,8 @@ fun PlayerScreen(
     autoJoinAsViewer: Boolean = false,
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
     val adapter = rememberPlayerAdapter()
     val roomSessionController = remember { RoomSessionController() }
     val progressHttpClient = remember { ProgressHttpClient() }
@@ -85,11 +96,13 @@ fun PlayerScreen(
     var bufferingStartedAtMs by rememberSaveable { mutableStateOf(0L) }
     var bufferingCountsAsRebuffer by rememberSaveable { mutableStateOf(false) }
     var activeSpeedNudgeRestoreAtMs by rememberSaveable { mutableStateOf(0L) }
+    var lastBackgroundPauseSeq by rememberSaveable { mutableStateOf(-1L) }
     val currentUiState by rememberUpdatedState(uiState)
 
     val isHostController = remember(uiState.activeUserId, uiState.latestSyncState) {
         uiState.activeUserId != null && uiState.latestSyncState?.hostUserId == uiState.activeUserId
     }
+    val currentIsHostController by rememberUpdatedState(isHostController)
     val latestSyncState = uiState.latestSyncState
     val playbackSnapshot = uiState.player
 
@@ -655,18 +668,31 @@ fun PlayerScreen(
         appendLog(syncLogs, "play sent=$sent at ${uiState.player.currentPosition}ms")
     }
 
-    fun sendPause() {
+    fun sendPause(reason: String = "user", force: Boolean = false) {
         val currentState = uiState.latestSyncState ?: return
-        if (!uiState.canControlPlayback) {
+        if (!force && !uiState.canControlPlayback) {
             appendLog(syncLogs, "pause ignored: media is not ready")
             return
         }
+        adapter.pause()
         val sent = roomSessionController.sendPause(
             positionMs = uiState.player.currentPosition,
             seq = currentState.seq
         )
-        appendLog(syncLogs, "pause sent=$sent at ${uiState.player.currentPosition}ms")
+        appendLog(syncLogs, "pause sent=$sent reason=$reason at ${uiState.player.currentPosition}ms")
         reportProgress(force = true)
+    }
+
+    fun pauseAuthorityIfNeeded(reason: String) {
+        val snapshot = currentUiState
+        val syncState = snapshot.latestSyncState ?: return
+        if (!currentIsHostController) return
+        if (!snapshot.shouldPauseAuthorityOnBackground) return
+        if (lastBackgroundPauseSeq == syncState.seq) return
+
+        lastBackgroundPauseSeq = syncState.seq
+        appendLog(syncLogs, "lifecycle $reason: host left active playback, pausing room authority")
+        sendPause(reason = reason, force = true)
     }
 
     fun sendSeek(targetPositionMs: Long) {
@@ -769,6 +795,35 @@ fun PlayerScreen(
     }
 
     KeepScreenAwakeEffect(uiState.shouldKeepScreenOn)
+
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event != Lifecycle.Event.ON_STOP) return@LifecycleEventObserver
+            pauseAuthorityIfNeeded(reason = "backgrounded")
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
+
+    DisposableEffect(context) {
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context?, intent: Intent?) {
+                if (intent?.action != Intent.ACTION_SCREEN_OFF) return
+                pauseAuthorityIfNeeded(reason = "screen_off")
+            }
+        }
+        ContextCompat.registerReceiver(
+            context,
+            receiver,
+            IntentFilter(Intent.ACTION_SCREEN_OFF),
+            ContextCompat.RECEIVER_NOT_EXPORTED
+        )
+        onDispose {
+            runCatching { context.unregisterReceiver(receiver) }
+        }
+    }
 
     LaunchedEffect(
         uiState.player.playbackState,

@@ -95,6 +95,14 @@ data class RoomPlayerUiState(
                 (player.currentPosition > 0L || player.bufferedPosition > 0L)
         }
 
+    val shouldPauseAuthorityOnBackground: Boolean
+        get() {
+            if (latestSyncState == null) return false
+            if (latestSyncState.ended || latestSyncState.paused) return false
+            if (!isJoinedToRoom) return false
+            return player.isPlaying || player.playbackState == Player.STATE_BUFFERING
+        }
+
     val hasPlayableMedia: Boolean
         get() = player.playbackState != Player.STATE_IDLE
 
