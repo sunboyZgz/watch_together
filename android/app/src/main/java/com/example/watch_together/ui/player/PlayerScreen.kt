@@ -13,6 +13,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.media3.common.Player
 import com.example.watch_together.config.AppConfig
@@ -767,6 +768,8 @@ fun PlayerScreen(
         )
     }
 
+    KeepScreenAwakeEffect(uiState.shouldKeepScreenOn)
+
     LaunchedEffect(
         uiState.player.playbackState,
         isHostController,
@@ -897,6 +900,17 @@ fun PlayerScreen(
         onJoinAsViewer = ::joinAsViewer,
         onRejoinCurrentUser = ::rejoinCurrentUser
     )
+}
+
+@Composable
+internal fun KeepScreenAwakeEffect(shouldKeepScreenOn: Boolean) {
+    val rootView = LocalView.current
+    DisposableEffect(rootView, shouldKeepScreenOn) {
+        rootView.keepScreenOn = shouldKeepScreenOn
+        onDispose {
+            rootView.keepScreenOn = false
+        }
+    }
 }
 
 @Composable

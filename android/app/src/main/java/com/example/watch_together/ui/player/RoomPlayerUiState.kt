@@ -86,6 +86,15 @@ data class RoomPlayerUiState(
     val displayPlaybackSpeed: Float
         get() = latestSyncState?.playbackRate?.toFloat() ?: player.playbackSpeed
 
+    val shouldKeepScreenOn: Boolean
+        get() {
+            if (latestSyncState?.ended == true) return false
+            if (latestSyncState?.paused == true) return false
+            if (player.isPlaying) return true
+            return player.playbackState == Player.STATE_BUFFERING &&
+                (player.currentPosition > 0L || player.bufferedPosition > 0L)
+        }
+
     val hasPlayableMedia: Boolean
         get() = player.playbackState != Player.STATE_IDLE
 

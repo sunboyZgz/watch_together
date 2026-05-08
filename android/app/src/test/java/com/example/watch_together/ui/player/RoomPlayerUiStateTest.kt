@@ -80,4 +80,72 @@ class RoomPlayerUiStateTest {
 
         assertEquals(2.0f, state.displayPlaybackSpeed)
     }
+
+    @Test
+    fun `should keep screen on during active synchronized playback`() {
+        val state = RoomPlayerUiState(
+            latestSyncState = RoomSyncState(
+                roomId = "A7K2M9",
+                mediaId = "episode-01",
+                hostUserId = "host-01",
+                positionMs = 12_000L,
+                paused = false,
+                playbackRate = 1.0,
+                ended = false,
+                seq = 8L
+            ),
+            player = PlayerRuntimeUiState(
+                playbackState = Player.STATE_READY,
+                isPlaying = true
+            )
+        )
+
+        assertTrue(state.shouldKeepScreenOn)
+    }
+
+    @Test
+    fun `should release screen wake lock when synchronized playback is paused`() {
+        val state = RoomPlayerUiState(
+            latestSyncState = RoomSyncState(
+                roomId = "A7K2M9",
+                mediaId = "episode-01",
+                hostUserId = "host-01",
+                positionMs = 12_000L,
+                paused = true,
+                playbackRate = 1.0,
+                ended = false,
+                seq = 8L
+            ),
+            player = PlayerRuntimeUiState(
+                playbackState = Player.STATE_READY,
+                isPlaying = false
+            )
+        )
+
+        assertFalse(state.shouldKeepScreenOn)
+    }
+
+    @Test
+    fun `should keep screen on while recovering from playback buffering`() {
+        val state = RoomPlayerUiState(
+            latestSyncState = RoomSyncState(
+                roomId = "A7K2M9",
+                mediaId = "episode-01",
+                hostUserId = "host-01",
+                positionMs = 12_000L,
+                paused = false,
+                playbackRate = 1.0,
+                ended = false,
+                seq = 8L
+            ),
+            player = PlayerRuntimeUiState(
+                playbackState = Player.STATE_BUFFERING,
+                isPlaying = false,
+                currentPosition = 12_000L,
+                bufferedPosition = 18_000L
+            )
+        )
+
+        assertTrue(state.shouldKeepScreenOn)
+    }
 }
