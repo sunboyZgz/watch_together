@@ -33,6 +33,8 @@ sealed interface PlayerEvent {
         val reason: Int
     ) : PlayerEvent
 
+    data object RenderedFirstFrame : PlayerEvent
+
     data class Error(
         val message: String
     ) : PlayerEvent
@@ -129,6 +131,9 @@ fun PlayerEvent.toDebugLabel(): String {
 
         is PlayerEvent.PositionDiscontinuity ->
             "PositionDiscontinuity(old=${oldPositionMs}ms, new=${newPositionMs}ms, reason=$reason)"
+
+        PlayerEvent.RenderedFirstFrame ->
+            "RenderedFirstFrame"
 
         is PlayerEvent.Error ->
             "Error(message=$message)"

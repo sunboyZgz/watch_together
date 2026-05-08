@@ -131,6 +131,39 @@ fun PlayerScreen(
         }.isSuccess
     }
 
+    fun beginPostSeekRecovery(reason: String, targetPositionMs: Long) {
+        val nowMs = System.currentTimeMillis()
+        updateUiState { current ->
+            current.copy(
+                awaitingFirstFrameAfterSeek = true,
+                seekRecoveryDeadlineAtMs = nowMs + POST_SEEK_FIRST_FRAME_TIMEOUT_MS,
+                seekRecoveryRetryCount = 0,
+                lastDriftCorrectionAtMs = nowMs,
+                telemetry = current.telemetry.copy(
+                    lastSeekRecoveryReason = "seek_started:$reason"
+                )
+            )
+        }
+        appendLog(syncLogs, "post-seek recovery start reason=$reason target=${targetPositionMs}ms")
+    }
+
+    fun clearPostSeekRecovery(reason: String, renderedFirstFrame: Boolean) {
+        if (!currentUiState.awaitingFirstFrameAfterSeek) return
+        val nowMs = System.currentTimeMillis()
+        updateUiState { current ->
+            current.copy(
+                awaitingFirstFrameAfterSeek = false,
+                seekRecoveryDeadlineAtMs = 0L,
+                seekRecoveryRetryCount = 0,
+                telemetry = current.telemetry.copy(
+                    lastSeekRecoveryReason = reason,
+                    lastRenderedFirstFrameAtMs = if (renderedFirstFrame) nowMs else current.telemetry.lastRenderedFirstFrameAtMs
+                )
+            )
+        }
+        appendLog(syncLogs, "post-seek recovery end reason=$reason")
+    }
+
     DisposableEffect(adapter) {
         adapter.setEventListener { event ->
             appendLog(playerEventLogs, event.toDebugLabel(), maxSize = 8)
@@ -183,6 +216,12 @@ fun PlayerScreen(
                 }
                 logBufferDebug(syncLogs, bufferDebugLogLine("buffer state", snapshot))
                 lastBufferLogState = event.playbackState
+            }
+            if (event is PlayerEvent.RenderedFirstFrame) {
+                clearPostSeekRecovery(
+                    reason = "first_frame_rendered",
+                    renderedFirstFrame = true
+                )
             }
         }
         onDispose {
@@ -261,6 +300,46 @@ fun PlayerScreen(
             val authorityState = uiState.latestSyncState ?: continue
             val nowMs = System.currentTimeMillis()
             val playbackBuffering = uiState.player.playbackState == Player.STATE_BUFFERING
+
+            if (uiState.awaitingFirstFrameAfterSeek) {
+                if (nowMs >= uiState.seekRecoveryDeadlineAtMs) {
+                    if (uiState.seekRecoveryRetryCount < MAX_POST_SEEK_RECOVERY_RETRIES &&
+                        uiState.player.playbackState == Player.STATE_READY &&
+                        !authorityState.paused
+                    ) {
+                        val retryPositionMs = maxOf(
+                            uiState.player.currentPosition,
+                            authorityState.positionMs
+                        )
+                        appendLog(
+                            syncLogs,
+                            "post-seek first frame timeout: retry=${uiState.seekRecoveryRetryCount + 1} target=${retryPositionMs}ms"
+                        )
+                        adapter.pause()
+                        adapter.seekTo(retryPositionMs)
+                        adapter.play()
+                        updateUiState { current ->
+                            current.copy(
+                                awaitingFirstFrameAfterSeek = true,
+                                seekRecoveryDeadlineAtMs = nowMs + POST_SEEK_RETRY_TIMEOUT_MS,
+                                seekRecoveryRetryCount = current.seekRecoveryRetryCount + 1,
+                                lastDriftCorrectionAtMs = nowMs,
+                                telemetry = current.telemetry.copy(
+                                    postSeekRecoveryCount = current.telemetry.postSeekRecoveryCount + 1,
+                                    lastSeekRecoveryReason = "retry_after_timeout"
+                                )
+                            )
+                        }
+                    } else {
+                        clearPostSeekRecovery(
+                            reason = "timeout_without_first_frame",
+                            renderedFirstFrame = false
+                        )
+                    }
+                } else {
+                    continue
+                }
+            }
 
             if (activeSpeedNudgeRestoreAtMs > 0L) {
                 if (nowMs >= activeSpeedNudgeRestoreAtMs) {
@@ -722,6 +801,7 @@ fun PlayerScreen(
         updateUiState { current ->
             current.copy(lastDriftCorrectionAtMs = System.currentTimeMillis())
         }
+        beginPostSeekRecovery(reason = "local_seek_commit", targetPositionMs = target)
         if (isHostController && uiState.latestSyncState != null) {
             appendLog(syncLogs, "progress seek commit path=sync target=${target}ms")
             sendSeek(target)
@@ -1005,6 +1085,9 @@ private fun appendLog(
 private const val BUFFER_DEBUG_LOG_INTERVAL_MS = 3_000L
 private const val BUFFER_DEBUG_LOG_TAG = "WatchTogetherBuffer"
 private const val TELEMETRY_LOG_TAG = "WatchTogetherTelemetry"
+private const val POST_SEEK_FIRST_FRAME_TIMEOUT_MS = 2_500L
+private const val POST_SEEK_RETRY_TIMEOUT_MS = 2_000L
+private const val MAX_POST_SEEK_RECOVERY_RETRIES = 1
 private const val HIGH_SPEED_PLAYBACK_THRESHOLD = 2.0f
 private const val HIGH_SPEED_START_EFFECTIVE_AHEAD_MS = 12_000L
 private const val HIGH_SPEED_START_SEGMENTS_AHEAD = 2

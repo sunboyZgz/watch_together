@@ -17,6 +17,9 @@ data class RoomPlayerSyncEventResult(
 class RoomPlayerSyncEventHandler(
     private val roomSyncCoordinator: RoomSyncCoordinator
 ) {
+    companion object {
+        private const val SEEK_RECOVERY_GRACE_WINDOW_MS = 2_500L
+    }
 
     fun onRoomState(
         currentUiState: RoomPlayerUiState,
@@ -153,7 +156,31 @@ class RoomPlayerSyncEventHandler(
             joinRoomInput = newState.roomId,
             latestSyncState = newState,
             syncStatus = status,
-            player = currentUiState.player.copy(playbackSpeed = newState.playbackRate.toFloat())
+            player = currentUiState.player.copy(playbackSpeed = newState.playbackRate.toFloat()),
+            awaitingFirstFrameAfterSeek = when (reason) {
+                "seek" -> true
+                "pause", "ended" -> false
+                else -> currentUiState.awaitingFirstFrameAfterSeek
+            },
+            seekRecoveryDeadlineAtMs = if (reason == "seek") {
+                System.currentTimeMillis() + SEEK_RECOVERY_GRACE_WINDOW_MS
+            } else if (reason == "pause" || reason == "ended") {
+                0L
+            } else {
+                currentUiState.seekRecoveryDeadlineAtMs
+            },
+            seekRecoveryRetryCount = if (reason == "seek") {
+                0
+            } else if (reason == "pause" || reason == "ended") {
+                0
+            } else {
+                currentUiState.seekRecoveryRetryCount
+            },
+            lastDriftCorrectionAtMs = if (reason == "seek") {
+                System.currentTimeMillis()
+            } else {
+                currentUiState.lastDriftCorrectionAtMs
+            }
         )
 
         return RoomPlayerSyncEventResult(

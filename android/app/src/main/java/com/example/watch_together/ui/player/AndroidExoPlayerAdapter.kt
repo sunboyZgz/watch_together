@@ -128,6 +128,10 @@ class AndroidExoPlayerAdapter(
             )
             emitVideoVariantIfChanged(updated, reason = "video-size")
         }
+
+        override fun onRenderedFirstFrame() {
+            emit(PlayerEvent.RenderedFirstFrame)
+        }
     }
     private val analyticsListener = object : AnalyticsListener {
         override fun onDownstreamFormatChanged(

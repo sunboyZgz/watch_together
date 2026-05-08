@@ -5,6 +5,7 @@ import com.example.watch_together.sync.RoomSyncCoordinator
 import com.example.watch_together.sync.RoomSyncState
 import com.example.watch_together.sync.protocol.PlayPayload
 import com.example.watch_together.sync.protocol.RoomStatePayload
+import com.example.watch_together.sync.protocol.SeekPayload
 import com.example.watch_together.sync.toRoomSyncState
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -75,6 +76,36 @@ class RoomPlayerSyncEventHandlerTest {
 
         assertEquals(SyncStatus.Connected, result.uiState.syncStatus)
         assertTrue(result.logs.any { it.contains("heartbeat acknowledged") })
+    }
+
+    @Test
+    fun `seek event enables post seek recovery window`() {
+        val handler = RoomPlayerSyncEventHandler(RoomSyncCoordinator(FakePlayerAdapter()))
+        val current = RoomPlayerUiState(
+            latestSyncState = RoomSyncState(
+                roomId = "ROOM01",
+                mediaId = "sample_001",
+                hostUserId = "user_a",
+                paused = false,
+                ended = false,
+                positionMs = 10_000L,
+                playbackRate = 1.0,
+                seq = 4L
+            )
+        )
+
+        val result = handler.onSeek(
+            current,
+            SeekPayload(
+                roomId = "ROOM01",
+                userId = "user_a",
+                positionMs = 42_000L,
+                seq = 5L
+            )
+        )
+
+        assertTrue(result.uiState.awaitingFirstFrameAfterSeek)
+        assertTrue(result.uiState.seekRecoveryDeadlineAtMs > 0L)
     }
 }
 

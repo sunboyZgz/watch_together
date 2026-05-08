@@ -63,6 +63,9 @@ data class PlayerTelemetryUiState(
     val speedNudgeCorrectionCount: Int = 0,
     val lastCorrectionReason: String = "",
     val lastCorrectionDriftMs: Long = 0L,
+    val postSeekRecoveryCount: Int = 0,
+    val lastSeekRecoveryReason: String = "",
+    val lastRenderedFirstFrameAtMs: Long = 0L,
 ) {
     val isRebuffering: Boolean
         get() = activeRebufferStartedAtMs > 0L
@@ -79,6 +82,9 @@ data class RoomPlayerUiState(
     val telemetry: PlayerTelemetryUiState = PlayerTelemetryUiState(),
     val lastDriftCorrectionAtMs: Long = 0L,
     val lastEndedReportedSeq: Long = -1L,
+    val awaitingFirstFrameAfterSeek: Boolean = false,
+    val seekRecoveryDeadlineAtMs: Long = 0L,
+    val seekRecoveryRetryCount: Int = 0,
 ) {
     val isJoinedToRoom: Boolean
         get() = latestSyncState != null
