@@ -38,8 +38,10 @@ type LeaveResult struct {
 }
 
 type JoinResult struct {
-	State          State
-	ReplacedClient *ClientConnection
+	State             State
+	Clients           []*ClientConnection
+	ReplacedClient    *ClientConnection
+	MembershipChanged bool
 }
 
 // New creates a room with a minimal default playback state.
@@ -94,9 +96,12 @@ func (r *Room) Join(client *ClientConnection) JoinResult {
 	defer r.mu.Unlock()
 
 	var replacedClient *ClientConnection
+	membershipChanged := false
 	if existing := r.clientsByUser[client.UserID()]; existing != nil && existing != client {
 		delete(r.clients, existing)
 		replacedClient = existing
+	} else if r.clientsByUser[client.UserID()] == nil {
+		membershipChanged = true
 	}
 
 	r.clients[client] = struct{}{}
@@ -107,8 +112,10 @@ func (r *Room) Join(client *ClientConnection) JoinResult {
 		r.state.HostUserID = client.UserID()
 	}
 	return JoinResult{
-		State:          r.currentStateLocked(r.now()),
-		ReplacedClient: replacedClient,
+		State:             r.currentStateLocked(r.now()),
+		Clients:           r.clientsSnapshotLocked(),
+		ReplacedClient:    replacedClient,
+		MembershipChanged: membershipChanged,
 	}
 }
 

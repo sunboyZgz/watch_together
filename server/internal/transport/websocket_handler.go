@@ -183,7 +183,7 @@ func (h *WebSocketHandler) handleJoinRoom(
 		_ = joinResult.ReplacedClient.CloseNow()
 	}
 
-	return client.WriteJSON(ctx, protocol.Envelope{
+	if err := client.WriteJSON(ctx, protocol.Envelope{
 		Type: protocol.TypeRoomState,
 		Payload: mustJSONRaw(protocol.RoomStatePayload{
 			RoomID:       payload.RoomID,
@@ -195,7 +195,13 @@ func (h *WebSocketHandler) handleJoinRoom(
 			PlaybackRate: joinResult.State.PlaybackRate,
 			Seq:          joinResult.State.Seq,
 		}),
-	})
+	}); err != nil {
+		return err
+	}
+	if joinResult.MembershipChanged {
+		h.broadcastRoomMembersChangedToOthers(payload.RoomID, joinResult.Clients, client, "join")
+	}
+	return nil
 }
 
 // handlePlay validates one play control event, applies it to the room authority state,
@@ -414,6 +420,37 @@ func (h *WebSocketHandler) broadcastRoomState(result room.RemoveClientResult) {
 			PositionMs:   result.State.PositionMs,
 			PlaybackRate: result.State.PlaybackRate,
 			Seq:          result.State.Seq,
+		}),
+	})
+}
+
+func (h *WebSocketHandler) broadcastRoomMembersChangedToOthers(
+	roomID string,
+	clients []*room.ClientConnection,
+	exclude *room.ClientConnection,
+	reason string,
+) {
+	if roomID == "" || len(clients) == 0 {
+		return
+	}
+	targets := make([]*room.ClientConnection, 0, len(clients))
+	for _, client := range clients {
+		if client == exclude {
+			continue
+		}
+		targets = append(targets, client)
+	}
+	if len(targets) == 0 {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	_ = broadcastEnvelope(ctx, targets, protocol.Envelope{
+		Type: protocol.TypeRoomMembersChanged,
+		Payload: mustJSONRaw(protocol.RoomMembersChangedPayload{
+			RoomID: roomID,
+			Reason: reason,
 		}),
 	})
 }

@@ -6,6 +6,7 @@ import com.example.watch_together.sync.protocol.EndedPayload
 import com.example.watch_together.sync.protocol.PausePayload
 import com.example.watch_together.sync.protocol.PlayPayload
 import com.example.watch_together.sync.protocol.ProtocolEventType
+import com.example.watch_together.sync.protocol.RoomMembersChangedPayload
 import com.example.watch_together.sync.protocol.RoomStatePayload
 import com.example.watch_together.sync.protocol.SetPlaybackRatePayload
 import com.example.watch_together.sync.protocol.SeekPayload
@@ -13,6 +14,7 @@ import org.json.JSONObject
 
 sealed interface SyncMessage {
     data class RoomState(val payload: RoomStatePayload) : SyncMessage
+    data class RoomMembersChanged(val payload: RoomMembersChangedPayload) : SyncMessage
     data class Play(val payload: PlayPayload) : SyncMessage
     data class Pause(val payload: PausePayload) : SyncMessage
     data class Seek(val payload: SeekPayload) : SyncMessage
@@ -43,6 +45,15 @@ class SyncMessageDecoder {
                         positionMs = payload.getLong("positionMs"),
                         playbackRate = payload.getDouble("playbackRate"),
                         seq = payload.getLong("seq")
+                    )
+                )
+            }
+
+            ProtocolEventType.RoomMembersChanged.wireName -> {
+                SyncMessage.RoomMembersChanged(
+                    RoomMembersChangedPayload(
+                        roomId = payload.getString("roomId"),
+                        reason = payload.optString("reason")
                     )
                 )
             }

@@ -5,6 +5,7 @@ import "encoding/json"
 const (
 	TypeJoinRoom        = "join_room"
 	TypeRoomState       = "room_state"
+	TypeRoomMembersChanged = "room_members_changed"
 	TypePlay            = "play"
 	TypePause           = "pause"
 	TypeSeek            = "seek"

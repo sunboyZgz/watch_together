@@ -16,6 +16,11 @@ data class RoomStatePayload(
     val seq: Long
 ) : ProtocolPayload
 
+data class RoomMembersChangedPayload(
+    val roomId: String,
+    val reason: String
+) : ProtocolPayload
+
 data class PlayPayload(
     val roomId: String,
     val userId: String,

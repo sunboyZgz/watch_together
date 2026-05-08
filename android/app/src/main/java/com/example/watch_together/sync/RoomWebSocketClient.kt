@@ -5,6 +5,7 @@ import com.example.watch_together.sync.protocol.HeartbeatAckPayload
 import com.example.watch_together.sync.protocol.EndedPayload
 import com.example.watch_together.sync.protocol.PausePayload
 import com.example.watch_together.sync.protocol.PlayPayload
+import com.example.watch_together.sync.protocol.RoomMembersChangedPayload
 import com.example.watch_together.sync.protocol.SeekPayload
 import com.example.watch_together.sync.protocol.SetPlaybackRatePayload
 import com.example.watch_together.sync.protocol.toEnvelope
@@ -18,6 +19,7 @@ import org.json.JSONObject
 interface RoomWebSocketListener {
     fun onLog(message: String)
     fun onRoomState(payload: RoomSyncState)
+    fun onRoomMembersChanged(payload: RoomMembersChangedPayload)
     fun onPlay(payload: PlayPayload)
     fun onPause(payload: PausePayload)
     fun onSeek(payload: SeekPayload)
@@ -77,6 +79,7 @@ class RoomWebSocketClient(
                 try {
                     when (val message = decoder.decode(text)) {
                         is SyncMessage.RoomState -> listener.onRoomState(message.payload.toRoomSyncState())
+                        is SyncMessage.RoomMembersChanged -> listener.onRoomMembersChanged(message.payload)
                         is SyncMessage.Play -> listener.onPlay(message.payload)
                         is SyncMessage.Pause -> listener.onPause(message.payload)
                         is SyncMessage.Seek -> listener.onSeek(message.payload)

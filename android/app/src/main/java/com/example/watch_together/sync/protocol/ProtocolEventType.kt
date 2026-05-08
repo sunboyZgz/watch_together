@@ -12,6 +12,10 @@ enum class ProtocolEventType(
         wireName = "room_state",
         direction = ProtocolDirection.ServerToClient
     ),
+    RoomMembersChanged(
+        wireName = "room_members_changed",
+        direction = ProtocolDirection.ServerToClient
+    ),
     Play(
         wireName = "play",
         direction = ProtocolDirection.ClientToServerAndServerToClients

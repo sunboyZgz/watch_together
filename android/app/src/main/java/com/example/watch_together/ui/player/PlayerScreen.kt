@@ -33,6 +33,7 @@ import com.example.watch_together.sync.RoomSessionController
 import com.example.watch_together.sync.RoomSyncCoordinator
 import com.example.watch_together.sync.RoomSyncState
 import com.example.watch_together.sync.RoomWebSocketListener
+import com.example.watch_together.sync.protocol.RoomMembersChangedPayload
 import com.example.watch_together.ui.theme.Watch_togetherTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -530,11 +531,16 @@ fun PlayerScreen(
             override fun onRoomState(payload: RoomSyncState) {
                 coroutineScope.launch {
                     applySyncEventResult(syncEventHandler.onRoomState(currentUiState, payload))
+                }
+            }
+
+            override fun onRoomMembersChanged(payload: RoomMembersChangedPayload) {
+                coroutineScope.launch {
+                    appendLog(syncLogs, "room members changed roomId=${payload.roomId} reason=${payload.reason}")
                     val currentRoomId = currentUiState.currentRoomId
                     val nowMs = System.currentTimeMillis()
                     if (currentRoomId == payload.roomId &&
-                        (currentUiState.roomMembers.isEmpty() ||
-                            nowMs - lastRoomMembersRefreshAtMs >= ROOM_MEMBERS_REFRESH_INTERVAL_MS)
+                        nowMs - lastRoomMembersRefreshAtMs >= ROOM_MEMBERS_REFRESH_INTERVAL_MS
                     ) {
                         loadRoomDetail(payload.roomId, forceRefresh = true)
                     }

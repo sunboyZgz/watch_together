@@ -84,6 +84,55 @@ func TestWebSocketJoinRoomFlow(t *testing.T) {
 	}
 }
 
+func TestWebSocketJoinBroadcastsRoomMembersChangedToExistingClients(t *testing.T) {
+	roomManager := room.NewManager()
+	createdRoom, err := roomManager.CreateRoom("user_a", "sample_001")
+	if err != nil {
+		t.Fatalf("create room: %v", err)
+	}
+	mux := http.NewServeMux()
+	mux.Handle("/ws", NewWebSocketHandler(roomManager, true))
+
+	httpServer := httptest.NewServer(mux)
+	defer httpServer.Close()
+
+	wsURL := "ws" + httpServer.URL[len("http"):] + "/ws"
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	hostConn := mustDialWebSocket(t, ctx, wsURL)
+	defer hostConn.Close(websocket.StatusNormalClosure, "test done")
+	viewerConn := mustDialWebSocket(t, ctx, wsURL)
+	defer viewerConn.Close(websocket.StatusNormalClosure, "test done")
+
+	mustJoinRoom(t, ctx, hostConn, createdRoom.ID(), "user_a")
+	hostState := mustReadEnvelope(t, ctx, hostConn)
+	if hostState.Type != protocol.TypeRoomState {
+		t.Fatalf("expected initial host room_state, got %s", hostState.Type)
+	}
+
+	mustJoinRoom(t, ctx, viewerConn, createdRoom.ID(), "user_b")
+	viewerState := mustReadEnvelope(t, ctx, viewerConn)
+	if viewerState.Type != protocol.TypeRoomState {
+		t.Fatalf("expected viewer room_state, got %s", viewerState.Type)
+	}
+
+	membersChanged := mustReadEnvelope(t, ctx, hostConn)
+	if membersChanged.Type != protocol.TypeRoomMembersChanged {
+		t.Fatalf("expected room_members_changed on existing host, got %s", membersChanged.Type)
+	}
+	var payload protocol.RoomMembersChangedPayload
+	if err := json.Unmarshal(membersChanged.Payload, &payload); err != nil {
+		t.Fatalf("unmarshal room_members_changed payload: %v", err)
+	}
+	if payload.RoomID != createdRoom.ID() {
+		t.Fatalf("expected roomId %s, got %s", createdRoom.ID(), payload.RoomID)
+	}
+	if payload.Reason != "join" {
+		t.Fatalf("expected join reason, got %s", payload.Reason)
+	}
+}
+
 func TestWebSocketJoinRoomMissingRoomReturnsError(t *testing.T) {
 	roomManager := room.NewManager()
 	mux := http.NewServeMux()
@@ -968,6 +1017,21 @@ func mustReadEnvelope(t *testing.T, ctx context.Context, conn *websocket.Conn) p
 	return envelope
 }
 
+func mustReadEnvelopeSkippingMembershipChanged(
+	t *testing.T,
+	ctx context.Context,
+	conn *websocket.Conn,
+) protocol.Envelope {
+	t.Helper()
+	for {
+		envelope := mustReadEnvelope(t, ctx, conn)
+		if envelope.Type == protocol.TypeRoomMembersChanged {
+			continue
+		}
+		return envelope
+	}
+}
+
 func readMessageAs(t *testing.T, ctx context.Context, conn *websocket.Conn, target any) {
 	t.Helper()
 	_, responseData, err := conn.Read(ctx)
@@ -988,7 +1052,7 @@ func assertControlBroadcast(
 	expectedSeq int64,
 ) {
 	t.Helper()
-	envelope := mustReadEnvelope(t, ctx, conn)
+	envelope := mustReadEnvelopeSkippingMembershipChanged(t, ctx, conn)
 	if envelope.Type != expectedType {
 		t.Fatalf("expected %s, got %s", expectedType, envelope.Type)
 	}
@@ -1032,7 +1096,7 @@ func assertPlaybackRateBroadcast(
 	expectedSeq int64,
 ) {
 	t.Helper()
-	envelope := mustReadEnvelope(t, ctx, conn)
+	envelope := mustReadEnvelopeSkippingMembershipChanged(t, ctx, conn)
 	if envelope.Type != protocol.TypeSetPlaybackRate {
 		t.Fatalf("expected %s, got %s", protocol.TypeSetPlaybackRate, envelope.Type)
 	}
@@ -1056,7 +1120,7 @@ func assertEndedBroadcast(
 	expectedSeq int64,
 ) {
 	t.Helper()
-	envelope := mustReadEnvelope(t, ctx, conn)
+	envelope := mustReadEnvelopeSkippingMembershipChanged(t, ctx, conn)
 	if envelope.Type != protocol.TypeEnded {
 		t.Fatalf("expected %s, got %s", protocol.TypeEnded, envelope.Type)
 	}

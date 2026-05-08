@@ -71,6 +71,11 @@ type RoomStatePayload struct {
 	Seq          int64   `json:"seq"`
 }
 
+type RoomMembersChangedPayload struct {
+	RoomID string `json:"roomId"`
+	Reason string `json:"reason"`
+}
+
 type ErrorPayload struct {
 	RoomID  string `json:"roomId"`
 	Message string `json:"message"`
