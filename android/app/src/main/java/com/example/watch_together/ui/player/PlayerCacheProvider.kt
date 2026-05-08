@@ -1,7 +1,6 @@
 package com.example.watch_together.ui.player
 
 import android.content.Context
-import android.util.Log
 import androidx.annotation.OptIn
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.database.StandaloneDatabaseProvider
@@ -31,7 +30,7 @@ internal object PlayerCacheProvider {
         val databaseProvider = StandaloneDatabaseProvider(context)
         val evictor = LeastRecentlyUsedCacheEvictor(MaxCacheBytes)
         return SimpleCache(cacheDirectory, evictor, databaseProvider).also { created ->
-            Log.d(
+            PlayerDebugLog.d(
                 LOG_TAG,
                 "cache initialized dir=${cacheDirectory.absolutePath} maxBytes=$MaxCacheBytes usedBytes=${created.cacheSpace}"
             )

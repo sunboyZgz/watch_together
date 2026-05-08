@@ -32,6 +32,7 @@ data class PlayerRuntimeUiState(
     val videoVariant: PlayerVideoVariant = PlayerVideoVariant(),
     val availableVideoQualities: List<PlayerVideoQualityOption> = listOf(PlayerVideoQualityOption.Auto),
     val videoQualityPreference: PlayerVideoQualityPreference = PlayerVideoQualityPreference.Auto,
+    val videoQualitySwitchState: PlayerVideoQualitySwitchState = PlayerVideoQualitySwitchState(),
     val videoQualityNotice: String = "",
 ) {
     val bufferedAheadMs: Long

@@ -4,7 +4,6 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
-import android.util.Log
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -178,6 +177,22 @@ fun PlayerScreen(
                     )
                 }
                 appendLog(syncLogs, "video variant ${event.variant.debugLabel}")
+            }
+            if (event is PlayerEvent.VideoQualitySwitchChanged) {
+                updateUiState { current ->
+                    current.copy(
+                        player = current.player.copy(
+                            videoQualitySwitchState = event.state,
+                            videoQualityNotice = event.state.noticeLabel.ifBlank {
+                                current.player.videoQualityNotice
+                            }
+                        )
+                    )
+                }
+                appendLog(
+                    syncLogs,
+                    "quality switch phase=${event.state.phase} target=${event.state.preference.label}"
+                )
             }
             if (event is PlayerEvent.VideoQualitiesChanged) {
                 updateUiState { current ->
@@ -1018,10 +1033,24 @@ fun PlayerScreen(
                 current.copy(
                     player = current.player.copy(
                         videoQualityPreference = preference,
+                        videoQualitySwitchState = PlayerVideoQualitySwitchState(
+                            phase = if (preference.isAuto) {
+                                PlayerVideoQualitySwitchPhase.Committed
+                            } else {
+                                PlayerVideoQualitySwitchPhase.PendingRequest
+                            },
+                            preference = preference
+                        ),
                         videoQualityNotice = if (preference.isAuto) {
-                            "已切回自动清晰度，会根据播放流畅度调整。"
+                            PlayerVideoQualitySwitchState(
+                                phase = PlayerVideoQualitySwitchPhase.Committed,
+                                preference = preference
+                            ).noticeLabel
                         } else {
-                            "已切到 ${preference.label}，卡顿时会优先保障流畅。"
+                            PlayerVideoQualitySwitchState(
+                                phase = PlayerVideoQualitySwitchPhase.PendingRequest,
+                                preference = preference
+                            ).noticeLabel
                         }
                     )
                 )
@@ -1095,12 +1124,12 @@ private const val HIGH_SPEED_SEEK_FALLBACK_THRESHOLD_MS = 3_000L
 
 private fun logBufferDebug(logs: MutableList<String>, line: String) {
     appendLog(logs, line)
-    Log.d(BUFFER_DEBUG_LOG_TAG, line)
+    PlayerDebugLog.d(BUFFER_DEBUG_LOG_TAG, line)
 }
 
 private fun logTelemetry(logs: MutableList<String>, line: String) {
     appendLog(logs, line)
-    Log.d(TELEMETRY_LOG_TAG, line)
+    PlayerDebugLog.d(TELEMETRY_LOG_TAG, line)
 }
 
 private fun updateRebufferTelemetry(

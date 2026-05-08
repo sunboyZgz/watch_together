@@ -1,7 +1,8 @@
 package com.example.watch_together.ui.player
 
 import android.content.Context
-import android.util.Log
+import android.os.Handler
+import android.os.Looper
 import androidx.annotation.OptIn
 import androidx.media3.common.C
 import androidx.media3.common.Format
@@ -32,14 +33,14 @@ class AndroidExoPlayerAdapter(
     private val upstreamDataSourceFactory = DefaultHttpDataSource.Factory()
     private val cacheEventListener = object : CacheDataSource.EventListener {
         override fun onCachedBytesRead(cacheSizeBytes: Long, cachedBytesRead: Long) {
-            Log.d(
+            PlayerDebugLog.d(
                 CACHE_LOG_TAG,
                 "cache hit cachedBytesRead=$cachedBytesRead cacheSizeBytes=$cacheSizeBytes"
             )
         }
 
         override fun onCacheIgnored(reason: Int) {
-            Log.d(CACHE_LOG_TAG, "cache ignored reason=${reason.toCacheIgnoreReasonLabel()}")
+            PlayerDebugLog.d(CACHE_LOG_TAG, "cache ignored reason=${reason.toCacheIgnoreReasonLabel()}")
         }
     }
     private val cacheDataSourceFactory: CacheDataSource.Factory = CacheDataSource.Factory()
@@ -71,9 +72,13 @@ class AndroidExoPlayerAdapter(
         .build()
     private var attachedPlayerView: PlayerView? = null
     private var eventListener: ((PlayerEvent) -> Unit)? = null
+    private val mainHandler = Handler(Looper.getMainLooper())
     private var latestVideoVariant = PlayerVideoVariant()
     private var latestPlaybackStrategy = PlayerPlaybackStrategy.Auto
     private var latestQualityPreference = PlayerVideoQualityPreference.Auto
+    private var currentMediaUrl: String = ""
+    private var qualitySwitchGeneration: Long = 0L
+    private var pendingQualitySwitch: PendingQualitySwitch? = null
     private val playerListener = object : Player.Listener {
         override fun onPlaybackStateChanged(playbackState: Int) {
             emit(PlayerEvent.PlaybackStateChanged(playbackState))
@@ -167,15 +172,19 @@ class AndroidExoPlayerAdapter(
     }
 
     override fun load(url: String) {
+        currentMediaUrl = url
+        pendingQualitySwitch = null
+        qualitySwitchGeneration += 1L
         latestVideoVariant = PlayerVideoVariant()
         emit(PlayerEvent.VideoVariantChanged(latestVideoVariant, reason = "load"))
         emit(PlayerEvent.VideoQualitiesChanged(listOf(PlayerVideoQualityOption.Auto)))
+        emit(PlayerEvent.VideoQualitySwitchChanged(PlayerVideoQualitySwitchState()))
         val mediaItem = MediaItem.fromUri(url)
         if (url.isHlsPlaylistUrl()) {
-            Log.d(CACHE_LOG_TAG, "load HLS with local cache url=$url cacheSizeBytes=${cache.cacheSpace}")
+            PlayerDebugLog.d(CACHE_LOG_TAG, "load HLS with local cache url=$url cacheSizeBytes=${cache.cacheSpace}")
             exoPlayer.setMediaSource(hlsMediaSourceFactory.createMediaSource(mediaItem))
         } else {
-            Log.d(CACHE_LOG_TAG, "load without HLS cache url=$url")
+            PlayerDebugLog.d(CACHE_LOG_TAG, "load without HLS cache url=$url")
             exoPlayer.setMediaItem(mediaItem)
         }
         exoPlayer.prepare()
@@ -208,10 +217,129 @@ class AndroidExoPlayerAdapter(
     }
 
     override fun setVideoQualityPreference(preference: PlayerVideoQualityPreference) {
-        if (preference == latestQualityPreference) return
-        latestQualityPreference = preference
-        applyTrackSelection()
-        Log.d(ABR_LOG_TAG, "quality preference=${preference.label} strategy=${latestPlaybackStrategy.logLabel}")
+        if (preference == latestQualityPreference && pendingQualitySwitch == null) return
+        if (preference.isAuto) {
+            qualitySwitchGeneration += 1L
+            pendingQualitySwitch = null
+            latestQualityPreference = preference
+            applyTrackSelection()
+            emit(
+                PlayerEvent.VideoQualitySwitchChanged(
+                    PlayerVideoQualitySwitchState(
+                        phase = PlayerVideoQualitySwitchPhase.Committed,
+                        preference = preference
+                    )
+                )
+            )
+            PlayerDebugLog.d(
+                ABR_LOG_TAG,
+                "quality preference=${preference.label} strategy=${latestPlaybackStrategy.logLabel}"
+            )
+            return
+        }
+
+        if (latestVideoVariant.height == preference.height) {
+            qualitySwitchGeneration += 1L
+            pendingQualitySwitch = null
+            latestQualityPreference = preference
+            applyTrackSelection()
+            emit(
+                PlayerEvent.VideoQualitySwitchChanged(
+                    PlayerVideoQualitySwitchState(
+                        phase = PlayerVideoQualitySwitchPhase.Committed,
+                        preference = preference
+                    )
+                )
+            )
+            PlayerDebugLog.d(
+                ABR_LOG_TAG,
+                "quality preference=${preference.label} strategy=${latestPlaybackStrategy.logLabel}"
+            )
+            return
+        }
+
+        val generation = qualitySwitchGeneration + 1L
+        qualitySwitchGeneration = generation
+        pendingQualitySwitch = PendingQualitySwitch(
+            generation = generation,
+            preference = preference
+        )
+        emit(
+            PlayerEvent.VideoQualitySwitchChanged(
+                PlayerVideoQualitySwitchState(
+                    phase = PlayerVideoQualitySwitchPhase.PendingRequest,
+                    preference = preference
+                )
+            )
+        )
+
+        val mediaUrl = currentMediaUrl
+        if (!mediaUrl.isHlsPlaylistUrl()) {
+            latestQualityPreference = preference
+            pendingQualitySwitch = null
+            applyTrackSelection()
+            emit(
+                PlayerEvent.VideoQualitySwitchChanged(
+                    PlayerVideoQualitySwitchState(
+                        phase = PlayerVideoQualitySwitchPhase.Committed,
+                        preference = preference
+                    )
+                )
+            )
+            PlayerDebugLog.d(
+                ABR_LOG_TAG,
+                "quality preference=${preference.label} strategy=${latestPlaybackStrategy.logLabel}"
+            )
+            return
+        }
+
+        emit(
+            PlayerEvent.VideoQualitySwitchChanged(
+                PlayerVideoQualitySwitchState(
+                    phase = PlayerVideoQualitySwitchPhase.WarmingTargetVariant,
+                    preference = preference
+                )
+            )
+        )
+        hlsAheadPrefetcher.warmupQualitySwitch(
+            HlsQualitySwitchWarmupRequest(
+                mediaUrl = mediaUrl,
+                currentPositionMs = exoPlayer.currentPosition.coerceAtLeast(0L),
+                targetHeight = preference.height ?: MinVideoHeight,
+                segmentWindow = QUALITY_SWITCH_WARMUP_SEGMENTS
+            )
+        ) { result ->
+            mainHandler.post {
+                val pending = pendingQualitySwitch
+                if (pending == null || pending.generation != generation) return@post
+                if (!result.success) {
+                    pendingQualitySwitch = null
+                    emit(
+                        PlayerEvent.VideoQualitySwitchChanged(
+                            PlayerVideoQualitySwitchState(
+                                phase = PlayerVideoQualitySwitchPhase.Fallback,
+                                preference = preference,
+                                detail = "目标清晰度预热失败，继续保持当前播放。"
+                            )
+                        )
+                    )
+                    return@post
+                }
+
+                emit(
+                    PlayerEvent.VideoQualitySwitchChanged(
+                        PlayerVideoQualitySwitchState(
+                            phase = PlayerVideoQualitySwitchPhase.ReadyToCommit,
+                            preference = preference,
+                            detail = "warmedSegments=${result.warmedSegments}"
+                        )
+                    )
+                )
+                latestQualityPreference = preference
+                applyTrackSelection()
+            }
+        }
+        PlayerDebugLog.d(ABR_LOG_TAG, "quality preference=${preference.label} strategy=${latestPlaybackStrategy.logLabel}")
     }
 
     override fun updatePlaybackStrategy(playbackSpeed: Float, rebufferCount: Int) {
@@ -222,7 +350,7 @@ class AndroidExoPlayerAdapter(
         if (nextStrategy == latestPlaybackStrategy) return
         latestPlaybackStrategy = nextStrategy
         applyTrackSelection()
-        Log.d(
+        PlayerDebugLog.d(
             ABR_LOG_TAG,
             "playback strategy=${nextStrategy.logLabel} speed=${playbackSpeed}x " +
                 "rebufferCount=$rebufferCount qualityPreference=${latestQualityPreference.label}"
@@ -267,8 +395,20 @@ class AndroidExoPlayerAdapter(
     private fun emitVideoVariantIfChanged(variant: PlayerVideoVariant, reason: String) {
         if (variant == latestVideoVariant) return
         latestVideoVariant = variant
-        Log.d(ABR_LOG_TAG, "variant changed reason=$reason ${variant.debugLabel}")
+        PlayerDebugLog.d(ABR_LOG_TAG, "variant changed reason=$reason ${variant.debugLabel}")
         emit(PlayerEvent.VideoVariantChanged(variant, reason = reason))
+        val pending = pendingQualitySwitch
+        if (pending != null && pending.preference.height == variant.height) {
+            pendingQualitySwitch = null
+            emit(
+                PlayerEvent.VideoQualitySwitchChanged(
+                    PlayerVideoQualitySwitchState(
+                        phase = PlayerVideoQualitySwitchPhase.Committed,
+                        preference = pending.preference
+                    )
+                )
+            )
+        }
     }
 
     private fun applyTrackSelection() {
@@ -315,7 +455,7 @@ class AndroidExoPlayerAdapter(
 
     private fun logAvailableVideoTracks(variants: List<PlayerVideoVariant>) {
         if (variants.isEmpty()) return
-        Log.d(
+        PlayerDebugLog.d(
             ABR_LOG_TAG,
             "available variants ${variants.joinToString { it.debugLabel }}"
         )
@@ -353,8 +493,14 @@ class AndroidExoPlayerAdapter(
         const val MaxBufferMs = 90_000
         const val BufferForPlaybackMs = 3_500
         const val BufferForPlaybackAfterRebufferMs = 10_000
+        const val QUALITY_SWITCH_WARMUP_SEGMENTS = 3
     }
 }
+
+private data class PendingQualitySwitch(
+    val generation: Long,
+    val preference: PlayerVideoQualityPreference,
+)
 
 @OptIn(UnstableApi::class)
 private fun Int.toCacheIgnoreReasonLabel(): String {

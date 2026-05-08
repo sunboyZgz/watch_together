@@ -14,6 +14,10 @@ sealed interface PlayerEvent {
         val options: List<PlayerVideoQualityOption>
     ) : PlayerEvent
 
+    data class VideoQualitySwitchChanged(
+        val state: PlayerVideoQualitySwitchState
+    ) : PlayerEvent
+
     data class PlayWhenReadyChanged(
         val playWhenReady: Boolean,
         val reason: Int
@@ -101,6 +105,52 @@ data class PlayerVideoQualityPreference(
     }
 }
 
+enum class PlayerVideoQualitySwitchPhase {
+    Idle,
+    PendingRequest,
+    WarmingTargetVariant,
+    ReadyToCommit,
+    Committed,
+    Fallback
+}
+
+data class PlayerVideoQualitySwitchState(
+    val phase: PlayerVideoQualitySwitchPhase = PlayerVideoQualitySwitchPhase.Idle,
+    val preference: PlayerVideoQualityPreference = PlayerVideoQualityPreference.Auto,
+    val detail: String = ""
+) {
+    val inlineHintLabel: String
+        get() = when (phase) {
+            PlayerVideoQualitySwitchPhase.PendingRequest,
+            PlayerVideoQualitySwitchPhase.WarmingTargetVariant -> "切换中 · ${preference.label}"
+            PlayerVideoQualitySwitchPhase.ReadyToCommit -> "即将切到 ${preference.label}"
+            else -> ""
+        }
+
+    val noticeLabel: String
+        get() = when (phase) {
+            PlayerVideoQualitySwitchPhase.Idle -> ""
+            PlayerVideoQualitySwitchPhase.PendingRequest,
+            PlayerVideoQualitySwitchPhase.WarmingTargetVariant ->
+                "正在切换到 ${preference.label}，旧清晰度会继续播放。"
+            PlayerVideoQualitySwitchPhase.ReadyToCommit ->
+                "新清晰度已预热完成，正在平滑切换到 ${preference.label}。"
+            PlayerVideoQualitySwitchPhase.Committed ->
+                if (preference.isAuto) {
+                    "已切回自动清晰度，会根据播放流畅度调整。"
+                } else {
+                    "已切到 ${preference.label}，卡顿时会优先保障流畅。"
+                }
+            PlayerVideoQualitySwitchPhase.Fallback ->
+                detail.ifBlank { "目标清晰度预热失败，继续保持当前播放。" }
+        }
+
+    val isPending: Boolean
+        get() = phase == PlayerVideoQualitySwitchPhase.PendingRequest ||
+            phase == PlayerVideoQualitySwitchPhase.WarmingTargetVariant ||
+            phase == PlayerVideoQualitySwitchPhase.ReadyToCommit
+}
+
 fun Int.toPlaybackStateLabel(): String {
     return when (this) {
         Player.STATE_IDLE -> "IDLE"
@@ -119,6 +169,9 @@ fun PlayerEvent.toDebugLabel(): String {
 
         is PlayerEvent.VideoQualitiesChanged ->
             "VideoQualitiesChanged(${options.joinToString { it.label }})"
+
+        is PlayerEvent.VideoQualitySwitchChanged ->
+            "VideoQualitySwitchChanged(phase=${state.phase}, preference=${state.preference.label})"
 
         is PlayerEvent.PlayWhenReadyChanged ->
             "PlayWhenReadyChanged(playWhenReady=$playWhenReady, reason=$reason)"

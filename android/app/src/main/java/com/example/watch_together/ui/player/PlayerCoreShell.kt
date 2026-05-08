@@ -65,6 +65,7 @@ internal fun PlayerCoreShell(
     videoQualityLabel: String,
     availableVideoQualities: List<PlayerVideoQualityOption>,
     videoQualityPreference: PlayerVideoQualityPreference,
+    videoQualitySwitchState: PlayerVideoQualitySwitchState,
     videoQualityNotice: String,
     controlHint: String,
     playbackButtonEnabled: Boolean,
@@ -89,6 +90,7 @@ internal fun PlayerCoreShell(
             videoQualityLabel = videoQualityLabel,
             availableVideoQualities = availableVideoQualities,
             videoQualityPreference = videoQualityPreference,
+            videoQualitySwitchState = videoQualitySwitchState,
             videoQualityNotice = videoQualityNotice,
             controlHint = controlHint,
             playbackButtonEnabled = playbackButtonEnabled,
@@ -118,6 +120,7 @@ private fun PlayerViewport(
     videoQualityLabel: String,
     availableVideoQualities: List<PlayerVideoQualityOption>,
     videoQualityPreference: PlayerVideoQualityPreference,
+    videoQualitySwitchState: PlayerVideoQualitySwitchState,
     videoQualityNotice: String,
     controlHint: String,
     playbackButtonEnabled: Boolean,
@@ -165,6 +168,7 @@ private fun PlayerViewport(
         isPlaying = isPlaying,
         videoQualityLabel = videoQualityLabel,
         videoQualityPreference = videoQualityPreference,
+        videoQualitySwitchState = videoQualitySwitchState,
         videoQualityNotice = videoQualityNotice,
         controlHint = controlHint,
         playbackButtonEnabled = playbackButtonEnabled,
@@ -212,6 +216,7 @@ private fun PlayerViewport(
                 isPlaying = isPlaying,
                 videoQualityLabel = videoQualityLabel,
                 videoQualityPreference = videoQualityPreference,
+                videoQualitySwitchState = videoQualitySwitchState,
                 videoQualityNotice = videoQualityNotice,
                 controlHint = controlHint,
                 playbackButtonEnabled = playbackButtonEnabled,
@@ -275,6 +280,7 @@ private fun PlayerSurface(
     isPlaying: Boolean,
     videoQualityLabel: String,
     videoQualityPreference: PlayerVideoQualityPreference,
+    videoQualitySwitchState: PlayerVideoQualitySwitchState,
     videoQualityNotice: String,
     controlHint: String,
     playbackButtonEnabled: Boolean,
@@ -327,14 +333,18 @@ private fun PlayerSurface(
                 }
             )
 
-            if (controlsVisible) {
+            if (controlsVisible || videoQualitySwitchState.isPending) {
                 QualitySelectorAnchor(
                     selectedPreference = videoQualityPreference,
                     currentQualityLabel = videoQualityLabel,
+                    inlineHintLabel = videoQualitySwitchState.inlineHintLabel,
                     modifier = Modifier
                         .align(Alignment.TopEnd)
                         .padding(12.dp)
                 )
+            }
+
+            if (controlsVisible) {
                 PlayerOverlayControls(
                     isPlaying = isPlaying,
                     videoQualityNotice = videoQualityNotice,
@@ -358,13 +368,29 @@ private fun PlayerSurface(
 private fun QualitySelectorAnchor(
     selectedPreference: PlayerVideoQualityPreference,
     currentQualityLabel: String,
+    inlineHintLabel: String,
     modifier: Modifier = Modifier
 ) {
-    QualityPill(
-        selectedPreference = selectedPreference,
-        currentQualityLabel = currentQualityLabel,
-        modifier = modifier
-    )
+    Column(
+        modifier = modifier,
+        horizontalAlignment = Alignment.End,
+        verticalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        QualityPill(
+            selectedPreference = selectedPreference,
+            currentQualityLabel = currentQualityLabel
+        )
+        if (inlineHintLabel.isNotBlank()) {
+            Text(
+                text = inlineHintLabel,
+                color = PlayerTextMuted,
+                fontSize = 10.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+    }
 }
 
 @Composable

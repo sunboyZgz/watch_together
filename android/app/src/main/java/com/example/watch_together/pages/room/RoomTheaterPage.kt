@@ -135,6 +135,7 @@ internal fun RoomTheaterPage(
                 videoQualityLabel = uiState.player.videoVariant.displayLabel,
                 availableVideoQualities = uiState.player.availableVideoQualities,
                 videoQualityPreference = uiState.player.videoQualityPreference,
+                videoQualitySwitchState = uiState.player.videoQualitySwitchState,
                 videoQualityNotice = uiState.player.videoQualityNotice,
                 controlHint = when {
                     uiState.player.playbackState == Player.STATE_BUFFERING -> "正在缓冲，播放器恢复后会继续跟随同步。"
