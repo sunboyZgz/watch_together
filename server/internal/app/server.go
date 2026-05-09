@@ -38,6 +38,17 @@ func NewServer(config Config) *Server {
 	roomManager := room.NewManager()
 	roomService, roomStore := newRoomService(config.DatabaseURL)
 	if roomStore != nil {
+		now := time.Now()
+		backfilled, err := roomStore.MarkAllActiveRoomsGracePeriod(
+			context.Background(),
+			now,
+			now.Add(room.DefaultEmptyRoomGracePeriod()),
+		)
+		if err != nil {
+			log.Printf("failed to backfill active rooms into grace_period: %v", err)
+		} else if backfilled > 0 {
+			log.Printf("backfilled %d active rooms into grace_period on startup", backfilled)
+		}
 		roomManager.SetLifecycleHooks(room.LifecycleHooks{
 			OnRoomBecameEmpty: func(roomID string, emptySince time.Time, destroyAfter time.Time) {
 				if err := roomStore.MarkRoomGracePeriod(context.Background(), roomID, emptySince, destroyAfter); err != nil {
@@ -57,6 +68,9 @@ func NewServer(config Config) *Server {
 		})
 	}
 	go roomManager.StartCleanupLoop(context.Background(), room.DefaultCleanupInterval())
+	if roomStore != nil {
+		go startPersistentRoomCleanupLoop(context.Background(), room.DefaultCleanupInterval(), roomStore)
+	}
 	mux := http.NewServeMux()
 	roomHTTPHandler := transport.NewRoomHTTPHandler(roomManager, roomService)
 	authHTTPHandler := transport.NewAuthHTTPHandler(newAuthService(config.DatabaseURL))
@@ -159,6 +173,31 @@ func newProgressService(databaseURL string) *progress.Service {
 		return nil
 	}
 	return progress.NewService(store.NewPostgresProgressStore(db))
+}
+
+func startPersistentRoomCleanupLoop(
+	ctx context.Context,
+	interval time.Duration,
+	roomStore *store.PostgresRoomStore,
+) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			removed, err := roomStore.CleanupExpiredRooms(context.Background(), time.Now())
+			if err != nil {
+				log.Printf("failed to cleanup expired rooms in postgres: %v", err)
+				continue
+			}
+			if removed > 0 {
+				log.Printf("cleaned up %d expired rooms from postgres", removed)
+			}
+		}
+	}
 }
 
 // Address exposes the listen address mainly for logging and local verification.

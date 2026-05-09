@@ -371,3 +371,46 @@ func (s *PostgresRoomStore) DestroyRoom(ctx context.Context, roomCode string) er
 	}
 	return nil
 }
+
+func (s *PostgresRoomStore) MarkAllActiveRoomsGracePeriod(
+	ctx context.Context,
+	lastEmptyAt time.Time,
+	destroyAfter time.Time,
+) (int64, error) {
+	const query = `
+		UPDATE rooms
+		SET
+			status = 'grace_period',
+			last_empty_at = $1,
+			destroy_after = $2,
+			updated_at = NOW()
+		WHERE status = 'active'
+	`
+	result, err := s.db.ExecContext(ctx, query, lastEmptyAt, destroyAfter)
+	if err != nil {
+		return 0, fmt.Errorf("mark all active rooms grace_period: %w", err)
+	}
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("mark all active rooms grace_period rows affected: %w", err)
+	}
+	return rowsAffected, nil
+}
+
+func (s *PostgresRoomStore) CleanupExpiredRooms(ctx context.Context, now time.Time) (int64, error) {
+	const query = `
+		DELETE FROM rooms
+		WHERE status = 'grace_period'
+			AND destroy_after IS NOT NULL
+			AND destroy_after <= $1
+	`
+	result, err := s.db.ExecContext(ctx, query, now)
+	if err != nil {
+		return 0, fmt.Errorf("cleanup expired rooms: %w", err)
+	}
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("cleanup expired rooms rows affected: %w", err)
+	}
+	return rowsAffected, nil
+}

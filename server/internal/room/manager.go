@@ -19,6 +19,10 @@ func DefaultCleanupInterval() time.Duration {
 	return defaultCleanupInterval
 }
 
+func DefaultEmptyRoomGracePeriod() time.Duration {
+	return defaultEmptyRoomGracePeriod
+}
+
 type Manager struct {
 	mu                   sync.RWMutex
 	rooms                map[string]*Room
@@ -58,12 +62,12 @@ func newManagerWithClock(now func() time.Time, emptyRoomGracePeriod time.Duratio
 // CreateRoom generates a unique room ID, initializes the room state, and registers it in memory.
 func (m *Manager) CreateRoom(hostUserID string, mediaID string) (*Room, error) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	_, _ = m.cleanupExpiredRoomsLocked(m.now())
 
 	for range 10 {
 		roomID, err := generateRoomID(6)
 		if err != nil {
+			m.mu.Unlock()
 			return nil, err
 		}
 		if _, exists := m.rooms[roomID]; exists {
@@ -72,23 +76,34 @@ func (m *Manager) CreateRoom(hostUserID string, mediaID string) (*Room, error) {
 
 		room := NewCreatedRoom(roomID, hostUserID, mediaID)
 		m.rooms[roomID] = room
+		emptySince, destroyAfter, shouldTrigger := m.markRoomEmptyLockedIfNeeded(roomID, room)
+		m.mu.Unlock()
+		if shouldTrigger && m.hooks.OnRoomBecameEmpty != nil {
+			m.hooks.OnRoomBecameEmpty(roomID, emptySince, destroyAfter)
+		}
 		return room, nil
 	}
 
+	m.mu.Unlock()
 	return nil, ErrUnableToGenerateRoomID
 }
 
 // RegisterCreatedRoom mirrors a persistent room into the in-memory sync registry.
 func (m *Manager) RegisterCreatedRoom(roomID string, hostUserID string, mediaID string) *Room {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	_, _ = m.cleanupExpiredRoomsLocked(m.now())
 
 	if existing, ok := m.rooms[roomID]; ok {
+		m.mu.Unlock()
 		return existing
 	}
 	registeredRoom := NewCreatedRoom(roomID, hostUserID, mediaID)
 	m.rooms[roomID] = registeredRoom
+	emptySince, destroyAfter, shouldTrigger := m.markRoomEmptyLockedIfNeeded(roomID, registeredRoom)
+	m.mu.Unlock()
+	if shouldTrigger && m.hooks.OnRoomBecameEmpty != nil {
+		m.hooks.OnRoomBecameEmpty(roomID, emptySince, destroyAfter)
+	}
 	return registeredRoom
 }
 
@@ -237,6 +252,19 @@ func (m *Manager) cleanupExpiredRoomsLocked(now time.Time) (int, []string) {
 		}
 	}
 	return removed, removedRoomIDs
+}
+
+func (m *Manager) markRoomEmptyLockedIfNeeded(roomID string, room *Room) (time.Time, time.Time, bool) {
+	if room == nil || room.ClientCount() > 0 {
+		return time.Time{}, time.Time{}, false
+	}
+	if existing, ok := m.emptySince[roomID]; ok {
+		return existing, existing.Add(m.emptyRoomGracePeriod), false
+	}
+	emptySince := m.now()
+	destroyAfter := emptySince.Add(m.emptyRoomGracePeriod)
+	m.emptySince[roomID] = emptySince
+	return emptySince, destroyAfter, true
 }
 
 func generateRoomID(length int) (string, error) {
