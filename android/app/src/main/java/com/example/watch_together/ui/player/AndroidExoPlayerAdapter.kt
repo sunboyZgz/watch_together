@@ -205,7 +205,13 @@ class AndroidExoPlayerAdapter(
         latestAvailableVideoVariants = emptyList()
         emit(PlayerEvent.VideoVariantChanged(latestVideoVariant, reason = "load"))
         emit(PlayerEvent.VideoQualitiesChanged(listOf(PlayerVideoQualityOption.Auto)))
-        emit(PlayerEvent.VideoQualitySwitchChanged(PlayerVideoQualitySwitchState()))
+        emit(
+            PlayerEvent.VideoQualitySwitchChanged(
+                PlayerVideoQualitySwitchState(
+                    effectivePreference = latestQualityPreference
+                )
+            )
+        )
         val mediaItem = MediaItem.fromUri(url)
         if (url.isHlsPlaylistUrl()) {
             PlayerDebugLog.d(CACHE_LOG_TAG, "load HLS with local cache url=$url cacheSizeBytes=${cache.cacheSpace}")
@@ -241,7 +247,13 @@ class AndroidExoPlayerAdapter(
         applyTrackSelection()
         emit(PlayerEvent.VideoVariantChanged(latestVideoVariant, reason = "reset"))
         emit(PlayerEvent.VideoQualitiesChanged(listOf(PlayerVideoQualityOption.Auto)))
-        emit(PlayerEvent.VideoQualitySwitchChanged(PlayerVideoQualitySwitchState()))
+        emit(
+            PlayerEvent.VideoQualitySwitchChanged(
+                PlayerVideoQualitySwitchState(
+                    effectivePreference = latestQualityPreference
+                )
+            )
+        )
         exoPlayer.stop()
         exoPlayer.clearMediaItems()
     }
@@ -273,7 +285,8 @@ class AndroidExoPlayerAdapter(
                 PlayerEvent.VideoQualitySwitchChanged(
                     PlayerVideoQualitySwitchState(
                         phase = PlayerVideoQualitySwitchPhase.Committed,
-                        preference = preference
+                        preference = preference,
+                        effectivePreference = preference
                     )
                 )
             )
@@ -294,7 +307,8 @@ class AndroidExoPlayerAdapter(
                 PlayerEvent.VideoQualitySwitchChanged(
                     PlayerVideoQualitySwitchState(
                         phase = PlayerVideoQualitySwitchPhase.Committed,
-                        preference = preference
+                        preference = preference,
+                        effectivePreference = preference
                     )
                 )
             )
@@ -336,6 +350,7 @@ class AndroidExoPlayerAdapter(
                     PlayerVideoQualitySwitchState(
                         phase = PlayerVideoQualitySwitchPhase.Blocked,
                         preference = preference,
+                        effectivePreference = previousPreference,
                         detail = plan.blockedReason
                     )
                 )
@@ -364,7 +379,8 @@ class AndroidExoPlayerAdapter(
             PlayerEvent.VideoQualitySwitchChanged(
                 PlayerVideoQualitySwitchState(
                     phase = PlayerVideoQualitySwitchPhase.PendingRequest,
-                    preference = preference
+                    preference = preference,
+                    effectivePreference = previousPreference
                 )
             )
         )
@@ -378,7 +394,8 @@ class AndroidExoPlayerAdapter(
                 PlayerEvent.VideoQualitySwitchChanged(
                     PlayerVideoQualitySwitchState(
                         phase = PlayerVideoQualitySwitchPhase.Committed,
-                        preference = preference
+                        preference = preference,
+                        effectivePreference = preference
                     )
                 )
             )
@@ -393,7 +410,8 @@ class AndroidExoPlayerAdapter(
             PlayerEvent.VideoQualitySwitchChanged(
                 PlayerVideoQualitySwitchState(
                     phase = PlayerVideoQualitySwitchPhase.WarmingTargetVariant,
-                    preference = preference
+                    preference = preference,
+                    effectivePreference = previousPreference
                 )
             )
         )
@@ -423,6 +441,7 @@ class AndroidExoPlayerAdapter(
                             PlayerVideoQualitySwitchState(
                                 phase = PlayerVideoQualitySwitchPhase.Fallback,
                                 preference = preference,
+                                effectivePreference = previousPreference,
                                 detail = "目标清晰度预热失败，继续保持当前播放。"
                             )
                         )
@@ -448,6 +467,7 @@ class AndroidExoPlayerAdapter(
                             PlayerVideoQualitySwitchState(
                                 phase = PlayerVideoQualitySwitchPhase.Blocked,
                                 preference = preference,
+                                effectivePreference = previousPreference,
                                 detail = commitDecision.reason
                             )
                         )
@@ -464,6 +484,7 @@ class AndroidExoPlayerAdapter(
                         PlayerVideoQualitySwitchState(
                             phase = PlayerVideoQualitySwitchPhase.ReadyToCommit,
                             preference = preference,
+                            effectivePreference = previousPreference,
                             detail = "warmedSegments=${result.warmedSegments}"
                         )
                     )
@@ -568,7 +589,8 @@ class AndroidExoPlayerAdapter(
                 PlayerEvent.VideoQualitySwitchChanged(
                     PlayerVideoQualitySwitchState(
                         phase = PlayerVideoQualitySwitchPhase.Committed,
-                        preference = pending.preference
+                        preference = pending.preference,
+                        effectivePreference = pending.preference
                     )
                 )
             )
@@ -618,6 +640,7 @@ class AndroidExoPlayerAdapter(
                 PlayerVideoQualitySwitchState(
                     phase = PlayerVideoQualitySwitchPhase.Fallback,
                     preference = state.targetPreference,
+                    effectivePreference = state.fallbackPreference,
                     detail = detail
                 )
             )

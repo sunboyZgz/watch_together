@@ -118,6 +118,7 @@ enum class PlayerVideoQualitySwitchPhase {
 data class PlayerVideoQualitySwitchState(
     val phase: PlayerVideoQualitySwitchPhase = PlayerVideoQualitySwitchPhase.Idle,
     val preference: PlayerVideoQualityPreference = PlayerVideoQualityPreference.Auto,
+    val effectivePreference: PlayerVideoQualityPreference = PlayerVideoQualityPreference.Auto,
     val detail: String = ""
 ) {
     val inlineHintLabel: String

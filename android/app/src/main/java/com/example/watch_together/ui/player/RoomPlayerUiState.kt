@@ -35,6 +35,13 @@ data class PlayerRuntimeUiState(
     val videoQualitySwitchState: PlayerVideoQualitySwitchState = PlayerVideoQualitySwitchState(),
     val videoQualityNotice: String = "",
 ) {
+    val qualityPreferenceForSelectionUi: PlayerVideoQualityPreference
+        get() = if (videoQualitySwitchState.isPending) {
+            videoQualitySwitchState.preference
+        } else {
+            videoQualityPreference
+        }
+
     val bufferedAheadMs: Long
         get() = (bufferedPosition - currentPosition).coerceAtLeast(0L)
 

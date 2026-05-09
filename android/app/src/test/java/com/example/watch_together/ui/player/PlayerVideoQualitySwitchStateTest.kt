@@ -40,4 +40,33 @@ class PlayerVideoQualitySwitchStateTest {
             state.noticeLabel
         )
     }
+
+    @Test
+    fun `selection ui can temporarily show requested quality while switch is pending`() {
+        val runtime = PlayerRuntimeUiState(
+            videoQualityPreference = PlayerVideoQualityPreference(height = 720),
+            videoQualitySwitchState = PlayerVideoQualitySwitchState(
+                phase = PlayerVideoQualitySwitchPhase.PendingRequest,
+                preference = PlayerVideoQualityPreference(height = 1080),
+                effectivePreference = PlayerVideoQualityPreference(height = 720)
+            )
+        )
+
+        assertEquals("1080p", runtime.qualityPreferenceForSelectionUi.label)
+    }
+
+    @Test
+    fun `selection ui falls back to effective quality after blocked switch`() {
+        val runtime = PlayerRuntimeUiState(
+            videoQualityPreference = PlayerVideoQualityPreference(height = 720),
+            videoQualitySwitchState = PlayerVideoQualitySwitchState(
+                phase = PlayerVideoQualitySwitchPhase.Blocked,
+                preference = PlayerVideoQualityPreference(height = 1080),
+                effectivePreference = PlayerVideoQualityPreference(height = 720),
+                detail = "当前网络或缓冲条件不足，暂不切换。"
+            )
+        )
+
+        assertEquals("720p", runtime.qualityPreferenceForSelectionUi.label)
+    }
 }

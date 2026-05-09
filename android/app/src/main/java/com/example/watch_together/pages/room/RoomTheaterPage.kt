@@ -134,7 +134,7 @@ internal fun RoomTheaterPage(
                 playbackSpeed = uiState.displayPlaybackSpeed,
                 videoQualityLabel = uiState.player.videoVariant.displayLabel,
                 availableVideoQualities = uiState.player.availableVideoQualities,
-                videoQualityPreference = uiState.player.videoQualityPreference,
+                videoQualityPreference = uiState.player.qualityPreferenceForSelectionUi,
                 videoQualitySwitchState = uiState.player.videoQualitySwitchState,
                 videoQualityNotice = uiState.player.videoQualityNotice,
                 controlHint = when {

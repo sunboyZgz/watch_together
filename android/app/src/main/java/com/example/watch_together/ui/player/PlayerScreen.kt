@@ -187,6 +187,7 @@ fun PlayerScreen(
                 updateUiState { current ->
                     current.copy(
                         player = current.player.copy(
+                            videoQualityPreference = event.state.effectivePreference,
                             videoQualitySwitchState = event.state,
                             videoQualityNotice = event.state.noticeLabel.ifBlank {
                                 current.player.videoQualityNotice
@@ -1068,24 +1069,31 @@ fun PlayerScreen(
             updateUiState { current ->
                 current.copy(
                     player = current.player.copy(
-                        videoQualityPreference = preference,
+                        videoQualityPreference = if (preference.isAuto) {
+                            preference
+                        } else {
+                            current.player.videoQualityPreference
+                        },
                         videoQualitySwitchState = PlayerVideoQualitySwitchState(
                             phase = if (preference.isAuto) {
                                 PlayerVideoQualitySwitchPhase.Committed
                             } else {
                                 PlayerVideoQualitySwitchPhase.PendingRequest
                             },
-                            preference = preference
+                            preference = preference,
+                            effectivePreference = current.player.videoQualityPreference
                         ),
                         videoQualityNotice = if (preference.isAuto) {
                             PlayerVideoQualitySwitchState(
                                 phase = PlayerVideoQualitySwitchPhase.Committed,
-                                preference = preference
+                                preference = preference,
+                                effectivePreference = preference
                             ).noticeLabel
                         } else {
                             PlayerVideoQualitySwitchState(
                                 phase = PlayerVideoQualitySwitchPhase.PendingRequest,
-                                preference = preference
+                                preference = preference,
+                                effectivePreference = current.player.videoQualityPreference
                             ).noticeLabel
                         }
                     )
