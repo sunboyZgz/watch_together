@@ -520,6 +520,8 @@ private class FakePlayerAdapter : PlayerAdapter {
         seekPositionMs = positionMs
     }
 
+    override fun reset() = Unit
+
     override fun getCurrentPosition(): Long = currentPositionMs
 
     override fun getDuration(): Long = 0L

@@ -71,6 +71,13 @@ internal class HlsAheadPrefetcher(
         executor.shutdownNow()
     }
 
+    fun reset() {
+        lastRequestKey = ""
+        latestMediaUrl = ""
+        latestVariantProfile = ""
+        cachedPlaylist = null
+    }
+
     fun warmupQualitySwitch(
         request: HlsQualitySwitchWarmupRequest,
         onComplete: (HlsQualitySwitchWarmupResult) -> Unit

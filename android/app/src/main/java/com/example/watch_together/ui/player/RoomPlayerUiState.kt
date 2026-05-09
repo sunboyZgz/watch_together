@@ -87,6 +87,9 @@ data class RoomPlayerUiState(
     val seekRecoveryDeadlineAtMs: Long = 0L,
     val seekRecoveryRetryCount: Int = 0,
 ) {
+    val hasActiveRoomSession: Boolean
+        get() = currentRoomId != null && latestSyncState != null
+
     val isJoinedToRoom: Boolean
         get() = latestSyncState != null
 
@@ -115,4 +118,26 @@ data class RoomPlayerUiState(
 
     val canControlPlayback: Boolean
         get() = player.playbackState == Player.STATE_READY
+
+    fun afterJoinFailure(attemptedRoomId: String): RoomPlayerUiState {
+        val retryingCurrentRoom = currentRoomId != null && currentRoomId == attemptedRoomId && hasActiveRoomSession
+        if (retryingCurrentRoom) {
+            return copy(joinRoomInput = attemptedRoomId)
+        }
+        return copy(
+            joinRoomInput = attemptedRoomId,
+            activeUserId = null,
+            currentRoomId = null,
+            roomMembers = emptyList(),
+            latestSyncState = null,
+            syncStatus = SyncStatus.SyncFailed,
+            player = PlayerRuntimeUiState(),
+            telemetry = PlayerTelemetryUiState(),
+            lastDriftCorrectionAtMs = 0L,
+            lastEndedReportedSeq = -1L,
+            awaitingFirstFrameAfterSeek = false,
+            seekRecoveryDeadlineAtMs = 0L,
+            seekRecoveryRetryCount = 0
+        )
+    }
 }

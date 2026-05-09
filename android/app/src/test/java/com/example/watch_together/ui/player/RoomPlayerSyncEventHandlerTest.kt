@@ -116,6 +116,7 @@ private class FakePlayerAdapter : PlayerAdapter {
     override fun play() = Unit
     override fun pause() = Unit
     override fun seekTo(positionMs: Long) = Unit
+    override fun reset() = Unit
     override fun getCurrentPosition(): Long = 0L
     override fun getDuration(): Long = 0L
     override fun isPlaying(): Boolean = false

@@ -35,6 +35,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -51,7 +52,10 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import com.example.watch_together.ui.theme.Watch_togetherTheme
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import com.example.watch_together.sync.RoomHttpClient
+import com.example.watch_together.sync.RoomHttpRequestException
 
 private val HomeBackground = Color(0xFF171A31)
 private val HomeCard = Color(0xFF2A2F4C)
@@ -103,6 +107,8 @@ fun HomePage(
     enableRemoteLoad: Boolean = true
 ) {
     val homeSummaryClient = remember { HomeSummaryClient() }
+    val roomHttpClient = remember { RoomHttpClient() }
+    val coroutineScope = rememberCoroutineScope()
     var homeSummary by remember { mutableStateOf<HomeSummary?>(null) }
     var isHomeSummaryLoading by rememberSaveable { mutableStateOf(false) }
     var homeSummaryError by rememberSaveable { mutableStateOf<String?>(null) }
@@ -149,6 +155,8 @@ fun HomePage(
 
     var joinRoomCode by rememberSaveable { mutableStateOf("") }
     var isJoinDialogVisible by rememberSaveable { mutableStateOf(false) }
+    var isJoinValidationLoading by rememberSaveable { mutableStateOf(false) }
+    var joinRoomError by rememberSaveable { mutableStateOf<String?>(null) }
     var activeFeatureDialog by rememberSaveable { mutableStateOf<HomeFeatureDialogKind?>(null) }
     var activeResumeTitle by rememberSaveable { mutableStateOf("") }
 
@@ -198,7 +206,11 @@ fun HomePage(
             ActionButtonsRow(
                 compactWidth = compactWidth,
                 onCreateRoomClick = onCreateRoomClick,
-                onJoinRoomClick = { isJoinDialogVisible = true }
+                onJoinRoomClick = {
+                    joinRoomError = null
+                    isJoinValidationLoading = false
+                    isJoinDialogVisible = true
+                }
             )
 
             Text(
@@ -243,17 +255,41 @@ fun HomePage(
             HomeOverlayScrim {
                 JoinRoomDialog(
                     roomCode = joinRoomCode,
+                    error = joinRoomError,
+                    isLoading = isJoinValidationLoading,
                     onRoomCodeChange = { value ->
+                        joinRoomError = null
                         joinRoomCode = value
                             .uppercase()
                             .filter { it.isLetterOrDigit() }
                             .take(6)
                     },
-                    onDismiss = { isJoinDialogVisible = false },
+                    onDismiss = {
+                        isJoinValidationLoading = false
+                        isJoinDialogVisible = false
+                    },
                     onConfirm = {
                         val normalizedRoomCode = joinRoomCode.trim().uppercase()
-                        isJoinDialogVisible = false
-                        onJoinRoomConfirm(normalizedRoomCode)
+                        if (normalizedRoomCode.length != 6) {
+                            joinRoomError = "请输入正确的 6 位房间码"
+                            return@JoinRoomDialog
+                        }
+                        isJoinValidationLoading = true
+                        joinRoomError = null
+                        coroutineScope.launch {
+                            runCatching {
+                                withContext(Dispatchers.IO) {
+                                    roomHttpClient.getRoomDetail(normalizedRoomCode)
+                                }
+                            }.onSuccess {
+                                isJoinValidationLoading = false
+                                isJoinDialogVisible = false
+                                onJoinRoomConfirm(normalizedRoomCode)
+                            }.onFailure { error ->
+                                isJoinValidationLoading = false
+                                joinRoomError = roomJoinValidationErrorMessage(error)
+                            }
+                        }
                     },
                     modifier = Modifier.padding(horizontal = pagePadding)
                 )
@@ -628,6 +664,8 @@ private fun SharedRoomInfoCard(compactWidth: Boolean) {
 @Composable
 private fun JoinRoomDialog(
     roomCode: String,
+    error: String?,
+    isLoading: Boolean,
     onRoomCodeChange: (String) -> Unit,
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
@@ -708,11 +746,17 @@ private fun JoinRoomDialog(
                     text = "支持大写字母和数字",
                     style = MaterialTheme.typography.labelMedium.copy(color = HomeTextSecondary)
                 )
+                if (!error.isNullOrBlank()) {
+                    Text(
+                        text = error,
+                        style = MaterialTheme.typography.labelMedium.copy(color = HomePrimary)
+                    )
+                }
             }
 
             Button(
                 onClick = onConfirm,
-                enabled = roomCode.length == 6,
+                enabled = roomCode.length == 6 && !isLoading,
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(26.dp),
                 colors = ButtonDefaults.buttonColors(
@@ -723,7 +767,7 @@ private fun JoinRoomDialog(
                 )
             ) {
                 Text(
-                    text = "加入房间",
+                    text = if (isLoading) "校验中..." else "加入房间",
                     style = MaterialTheme.typography.titleMedium.copy(
                         fontWeight = FontWeight.SemiBold
                     ),
@@ -731,6 +775,15 @@ private fun JoinRoomDialog(
                 )
             }
         }
+    }
+}
+
+private fun roomJoinValidationErrorMessage(error: Throwable): String {
+    val statusCode = (error as? RoomHttpRequestException)?.statusCode
+    return when (statusCode) {
+        404 -> "房间不存在或已失效"
+        400 -> "请输入正确的 6 位房间码"
+        else -> error.message ?: "校验房间失败，请稍后重试"
     }
 }
 

@@ -1,6 +1,7 @@
 package com.example.watch_together.ui.player
 
 import androidx.media3.common.Player
+import com.example.watch_together.sync.RoomMember
 import com.example.watch_together.sync.RoomSyncState
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertEquals
@@ -191,5 +192,128 @@ class RoomPlayerUiStateTest {
         )
 
         assertFalse(state.shouldPauseAuthorityOnBackground)
+    }
+
+    @Test
+    fun `join failure clears stale room context when no active room session exists`() {
+        val state = RoomPlayerUiState(
+            joinRoomInput = "OLD999",
+            activeUserId = "viewer-01",
+            currentRoomId = "OLD999",
+            roomMembers = listOf(
+                RoomMember(
+                    userId = "viewer-01",
+                    nickname = "Viewer",
+                    avatarSeed = "viewer-01",
+                    avatarUrl = null,
+                    role = "member"
+                )
+            ),
+            syncStatus = SyncStatus.JoiningAsViewer,
+            player = PlayerRuntimeUiState(
+                playbackState = Player.STATE_READY,
+                isPlaying = true
+            ),
+            telemetry = PlayerTelemetryUiState(currentMediaUrl = "http://example.com/old.m3u8"),
+            lastEndedReportedSeq = 12L,
+            awaitingFirstFrameAfterSeek = true,
+            seekRecoveryDeadlineAtMs = 999L,
+            seekRecoveryRetryCount = 1
+        )
+
+        val failed = state.afterJoinFailure("BAD123")
+
+        assertEquals("BAD123", failed.joinRoomInput)
+        assertEquals(null, failed.currentRoomId)
+        assertEquals(null, failed.activeUserId)
+        assertTrue(failed.roomMembers.isEmpty())
+        assertEquals(SyncStatus.SyncFailed, failed.syncStatus)
+        assertEquals(Player.STATE_IDLE, failed.player.playbackState)
+        assertEquals("", failed.telemetry.currentMediaUrl)
+        assertFalse(failed.awaitingFirstFrameAfterSeek)
+        assertEquals(0L, failed.seekRecoveryDeadlineAtMs)
+    }
+
+    @Test
+    fun `join failure preserves current room only when retrying the same room`() {
+        val syncState = RoomSyncState(
+            roomId = "ROOM01",
+            mediaId = "episode-01",
+            hostUserId = "host-01",
+            positionMs = 12_000L,
+            paused = false,
+            playbackRate = 1.0,
+            ended = false,
+            seq = 8L
+        )
+        val state = RoomPlayerUiState(
+            joinRoomInput = "ROOM01",
+            activeUserId = "viewer-01",
+            currentRoomId = "ROOM01",
+            roomMembers = listOf(
+                RoomMember(
+                    userId = "viewer-01",
+                    nickname = "Viewer",
+                    avatarSeed = "viewer-01",
+                    avatarUrl = null,
+                    role = "member"
+                )
+            ),
+            latestSyncState = syncState,
+            syncStatus = SyncStatus.Connected
+        )
+
+        val failed = state.afterJoinFailure("ROOM01")
+
+        assertEquals("ROOM01", failed.joinRoomInput)
+        assertEquals("ROOM01", failed.currentRoomId)
+        assertEquals(syncState, failed.latestSyncState)
+        assertEquals(SyncStatus.Connected, failed.syncStatus)
+        assertEquals(1, failed.roomMembers.size)
+    }
+
+    @Test
+    fun `join failure clears current room when switching to a different room`() {
+        val syncState = RoomSyncState(
+            roomId = "ROOM01",
+            mediaId = "episode-01",
+            hostUserId = "host-01",
+            positionMs = 12_000L,
+            paused = false,
+            playbackRate = 1.0,
+            ended = false,
+            seq = 8L
+        )
+        val state = RoomPlayerUiState(
+            joinRoomInput = "ROOM01",
+            activeUserId = "viewer-01",
+            currentRoomId = "ROOM01",
+            roomMembers = listOf(
+                RoomMember(
+                    userId = "viewer-01",
+                    nickname = "Viewer",
+                    avatarSeed = "viewer-01",
+                    avatarUrl = null,
+                    role = "member"
+                )
+            ),
+            latestSyncState = syncState,
+            syncStatus = SyncStatus.Connected,
+            player = PlayerRuntimeUiState(
+                playbackState = Player.STATE_READY,
+                isPlaying = true
+            ),
+            telemetry = PlayerTelemetryUiState(currentMediaUrl = "http://example.com/room01.m3u8")
+        )
+
+        val failed = state.afterJoinFailure("BAD123")
+
+        assertEquals("BAD123", failed.joinRoomInput)
+        assertEquals(null, failed.currentRoomId)
+        assertEquals(null, failed.latestSyncState)
+        assertTrue(failed.roomMembers.isEmpty())
+        assertEquals(SyncStatus.SyncFailed, failed.syncStatus)
+        assertEquals(Player.STATE_IDLE, failed.player.playbackState)
+        assertEquals("", failed.telemetry.currentMediaUrl)
     }
 }

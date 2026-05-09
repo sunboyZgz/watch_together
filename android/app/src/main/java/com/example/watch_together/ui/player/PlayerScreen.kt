@@ -29,6 +29,7 @@ import com.example.watch_together.pages.room.RoomTheaterPage
 import com.example.watch_together.sync.ProgressHttpClient
 import com.example.watch_together.sync.DriftCorrectionType
 import com.example.watch_together.sync.RoomMedia
+import com.example.watch_together.sync.RoomHttpRequestException
 import com.example.watch_together.sync.RoomSessionController
 import com.example.watch_together.sync.RoomSyncCoordinator
 import com.example.watch_together.sync.RoomSyncState
@@ -716,8 +717,17 @@ fun PlayerScreen(
                     reason = "viewer join"
                 )
             }.onFailure { error ->
-                updateUiState { current -> current.copy(syncStatus = SyncStatus.SyncFailed) }
-                appendLog(syncLogs, "Join viewer failed: ${error.message}")
+                val shouldClearStaleRoom = !currentUiState.hasActiveRoomSession
+                if (shouldClearStaleRoom) {
+                    roomSessionController.closeSession()
+                    adapter.reset()
+                    currentRoomMedia = null
+                    loadedRoomId = null
+                    loadedRoomDetailCode = null
+                    lastRoomMembersRefreshAtMs = 0L
+                }
+                updateUiState { current -> current.afterJoinFailure(roomId) }
+                appendLog(syncLogs, roomJoinFailureMessage(roomId, error))
             }
         }
     }
@@ -1100,6 +1110,16 @@ internal fun KeepScreenAwakeEffect(shouldKeepScreenOn: Boolean) {
         onDispose {
             rootView.keepScreenOn = false
         }
+    }
+}
+
+private fun roomJoinFailureMessage(roomId: String, error: Throwable): String {
+    val statusCode = (error as? RoomHttpRequestException)?.statusCode
+    return when (statusCode) {
+        400 -> "Join viewer failed: roomCode=$roomId is invalid"
+        401 -> "Join viewer failed: login expired while joining roomCode=$roomId"
+        404 -> "Join viewer failed: roomCode=$roomId was not found or has expired"
+        else -> "Join viewer failed: ${error.message}"
     }
 }
 

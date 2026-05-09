@@ -143,6 +143,23 @@ func TestJoinRoomByCodeRejectsUnknownRoute(t *testing.T) {
 	}
 }
 
+func TestJoinRoomByCodeReturnsNotFoundWhenRoomMissing(t *testing.T) {
+	store := &fakeRoomStore{err: roomapi.ErrRoomNotFound}
+	handler := NewRoomHTTPHandler(room.NewManager(), roomapi.NewService(store))
+	request := httptest.NewRequest(http.MethodPost, "/rooms/Z9X8Y7/join", nil)
+	request.Header.Set("Authorization", "Bearer dev_user_b")
+	recorder := httptest.NewRecorder()
+
+	handler.JoinRoomByCode(recorder, request)
+
+	if recorder.Code != http.StatusNotFound {
+		t.Fatalf("expected status %d, got %d", http.StatusNotFound, recorder.Code)
+	}
+	if !strings.Contains(recorder.Body.String(), "\"code\":\"NOT_FOUND\"") {
+		t.Fatalf("expected NOT_FOUND error code, got body %s", recorder.Body.String())
+	}
+}
+
 func TestRoomDetailFlow(t *testing.T) {
 	avatarURL := "https://example.com/avatar.png"
 	store := &fakeRoomStore{

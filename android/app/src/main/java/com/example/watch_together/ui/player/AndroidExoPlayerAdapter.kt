@@ -229,6 +229,23 @@ class AndroidExoPlayerAdapter(
         exoPlayer.seekTo(positionMs)
     }
 
+    override fun reset() {
+        currentMediaUrl = ""
+        pendingQualitySwitch = null
+        committedQualitySwitch = null
+        qualitySwitchGeneration += 1L
+        latestQualityPreference = PlayerVideoQualityPreference.Auto
+        latestVideoVariant = PlayerVideoVariant()
+        latestAvailableVideoVariants = emptyList()
+        hlsAheadPrefetcher.reset()
+        applyTrackSelection()
+        emit(PlayerEvent.VideoVariantChanged(latestVideoVariant, reason = "reset"))
+        emit(PlayerEvent.VideoQualitiesChanged(listOf(PlayerVideoQualityOption.Auto)))
+        emit(PlayerEvent.VideoQualitySwitchChanged(PlayerVideoQualitySwitchState()))
+        exoPlayer.stop()
+        exoPlayer.clearMediaItems()
+    }
+
     override fun getCurrentPosition(): Long = exoPlayer.currentPosition
 
     override fun getDuration(): Long = exoPlayer.duration

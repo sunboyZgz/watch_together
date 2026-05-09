@@ -12,6 +12,7 @@ interface PlayerAdapter {
     fun play()
     fun pause()
     fun seekTo(positionMs: Long)
+    fun reset()
 
     fun getCurrentPosition(): Long
     fun getDuration(): Long
