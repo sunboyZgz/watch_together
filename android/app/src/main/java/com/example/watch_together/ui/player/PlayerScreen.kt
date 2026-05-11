@@ -293,6 +293,25 @@ fun PlayerScreen(
         }
     }
 
+    LaunchedEffect(
+        uiState.player.videoQualityNotice,
+        uiState.player.videoQualitySwitchState.phase
+    ) {
+        val notice = uiState.player.videoQualityNotice
+        if (notice.isBlank()) return@LaunchedEffect
+        if (uiState.player.videoQualitySwitchState.isPending) return@LaunchedEffect
+        delay(3_200L)
+        updateUiState { current ->
+            if (current.player.videoQualityNotice != notice || current.player.videoQualitySwitchState.isPending) {
+                current
+            } else {
+                current.copy(
+                    player = current.player.copy(videoQualityNotice = "")
+                )
+            }
+        }
+    }
+
     LaunchedEffect(uiState.currentRoomId, currentRoomMedia?.mediaUrl) {
         val roomId = uiState.currentRoomId ?: return@LaunchedEffect
         val mediaUrl = currentRoomMedia?.mediaUrl?.let(AppConfig::playableMediaUrl)

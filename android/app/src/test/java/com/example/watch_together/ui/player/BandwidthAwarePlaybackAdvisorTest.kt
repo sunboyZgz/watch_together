@@ -67,6 +67,7 @@ class BandwidthAwarePlaybackAdvisorTest {
                 targetBandwidthBps = 5_000_000,
                 effectiveBufferedAheadMs = 24_000L,
                 warmedSegments = 4,
+                bridgedSegments = 2,
                 bandwidthEstimate = BandwidthEstimate(
                     throughputEwmaBps = 9_000_000,
                     confidence = 0.9f,
@@ -80,6 +81,29 @@ class BandwidthAwarePlaybackAdvisorTest {
 
         assertFalse(decision.allowCommit)
         assertEquals("近期缓冲不稳定，暂不切到 1080p。", decision.reason)
+    }
+
+    @Test
+    fun `commit gate blocks switch when warmed target is still detached from playhead`() {
+        val decision = BandwidthAwareQualitySwitchAdvisor.evaluateCommit(
+            QualitySwitchCommitContext(
+                targetBandwidthBps = 5_000_000,
+                effectiveBufferedAheadMs = 24_000L,
+                warmedSegments = 4,
+                bridgedSegments = 0,
+                bandwidthEstimate = BandwidthEstimate(
+                    throughputEwmaBps = 9_000_000,
+                    confidence = 0.9f,
+                    sampleCount = 5
+                ),
+                playbackSpeed = 1f,
+                rebufferCount = 0,
+                targetVariant = PlayerVideoVariant(width = 1920, height = 1080, bitrate = 5_000_000)
+            )
+        )
+
+        assertFalse(decision.allowCommit)
+        assertEquals("新清晰度尚未预热到当前播放窗口附近。", decision.reason)
     }
 
     @Test

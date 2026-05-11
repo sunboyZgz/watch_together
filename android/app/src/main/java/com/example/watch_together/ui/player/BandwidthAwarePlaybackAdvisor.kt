@@ -76,6 +76,8 @@ internal data class QualitySwitchPlanningContext(
 internal data class QualitySwitchPlan(
     val strategy: QualitySwitchStrategy,
     val skipSegments: Int,
+    val backfillSegments: Int,
+    val bridgeSegments: Int,
     val warmSegments: Int,
     val targetWarmupWindowMs: Long,
     val graceWindowMs: Long,
@@ -89,6 +91,7 @@ internal data class QualitySwitchCommitContext(
     val targetBandwidthBps: Int,
     val effectiveBufferedAheadMs: Long,
     val warmedSegments: Int,
+    val bridgedSegments: Int,
     val bandwidthEstimate: BandwidthEstimate,
     val playbackSpeed: Float,
     val rebufferCount: Int,
@@ -150,6 +153,8 @@ internal object BandwidthAwareQualitySwitchAdvisor {
             QualitySwitchStrategy.Conservative -> QualitySwitchPlan(
                 strategy = strategy,
                 skipSegments = 0,
+                backfillSegments = if (context.targetVariant.height >= 1080) 2 else 1,
+                bridgeSegments = if (context.targetVariant.height >= 1080) 2 else 1,
                 warmSegments = if (context.targetVariant.height >= 1080) 4 else 3,
                 targetWarmupWindowMs = if (context.targetVariant.height >= 1080) 24_000L else 18_000L,
                 graceWindowMs = if (context.targetVariant.height >= 1080) 8_000L else 6_000L,
@@ -160,6 +165,8 @@ internal object BandwidthAwareQualitySwitchAdvisor {
             QualitySwitchStrategy.Balanced -> QualitySwitchPlan(
                 strategy = strategy,
                 skipSegments = 1,
+                backfillSegments = 1,
+                bridgeSegments = 2,
                 warmSegments = 4,
                 targetWarmupWindowMs = 18_000L,
                 graceWindowMs = 6_000L,
@@ -170,6 +177,8 @@ internal object BandwidthAwareQualitySwitchAdvisor {
             QualitySwitchStrategy.Aggressive -> QualitySwitchPlan(
                 strategy = strategy,
                 skipSegments = 2,
+                backfillSegments = 1,
+                bridgeSegments = 3,
                 warmSegments = 5,
                 targetWarmupWindowMs = 24_000L,
                 graceWindowMs = 5_000L,
@@ -209,6 +218,12 @@ internal object BandwidthAwareQualitySwitchAdvisor {
             return QualitySwitchCommitDecision(
                 allowCommit = false,
                 reason = "目标清晰度预热不足。"
+            )
+        }
+        if (context.bridgedSegments <= 0) {
+            return QualitySwitchCommitDecision(
+                allowCommit = false,
+                reason = "新清晰度尚未预热到当前播放窗口附近。"
             )
         }
         if (context.effectiveBufferedAheadMs < if (context.targetVariant.height >= 1080) 16_000L else 10_000L) {

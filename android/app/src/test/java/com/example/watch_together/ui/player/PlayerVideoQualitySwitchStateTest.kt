@@ -69,4 +69,14 @@ class PlayerVideoQualitySwitchStateTest {
 
         assertEquals("720p", runtime.qualityPreferenceForSelectionUi.label)
     }
+
+    @Test
+    fun `commit ready timeout keeps a sensible lower bound`() {
+        assertEquals(3_500L, commitReadyTimeoutMs(2_000L))
+    }
+
+    @Test
+    fun `commit ready timeout is capped for long grace windows`() {
+        assertEquals(7_000L, commitReadyTimeoutMs(20_000L))
+    }
 }

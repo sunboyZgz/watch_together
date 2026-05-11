@@ -87,6 +87,7 @@ internal class HlsAheadPrefetcher(
                 HlsQualitySwitchWarmupResult(
                     targetHeight = request.targetHeight,
                     warmedSegments = 0,
+                    bridgedSegments = 0,
                     success = false,
                     detail = "media is not hls"
                 )
@@ -101,6 +102,7 @@ internal class HlsAheadPrefetcher(
                 HlsQualitySwitchWarmupResult(
                     targetHeight = request.targetHeight,
                     warmedSegments = 0,
+                    bridgedSegments = 0,
                     success = false,
                     detail = error.message ?: "warmup failed"
                 )
@@ -232,6 +234,7 @@ internal class HlsAheadPrefetcher(
             return HlsQualitySwitchWarmupResult(
                 targetHeight = request.targetHeight,
                 warmedSegments = 0,
+                bridgedSegments = 0,
                 success = true,
                 detail = "single media playlist"
             )
@@ -242,6 +245,7 @@ internal class HlsAheadPrefetcher(
             HlsQualitySwitchWarmupResult(
                 targetHeight = request.targetHeight,
                 warmedSegments = 0,
+                bridgedSegments = 0,
                 success = false,
                 detail = "no playable variant"
             )
@@ -253,6 +257,7 @@ internal class HlsAheadPrefetcher(
             return HlsQualitySwitchWarmupResult(
                 targetHeight = request.targetHeight,
                 warmedSegments = 0,
+                bridgedSegments = 0,
                 success = false,
                 detail = "target playlist has no segments"
             )
@@ -261,15 +266,23 @@ internal class HlsAheadPrefetcher(
         val currentSegmentIndex = (request.currentPositionMs / DEFAULT_HLS_SEGMENT_DURATION_MS)
             .toInt()
             .coerceAtLeast(0)
-        val segmentUrls = mediaPlaylist.segments
-            .drop(currentSegmentIndex + request.skipSegments.coerceAtLeast(0))
-            .take(request.segmentWindow.coerceAtLeast(1))
-            .map { segment -> segment.url }
+        val targetIndices = qualitySwitchSegmentIndices(
+            playlistSize = mediaPlaylist.segments.size,
+            currentSegmentIndex = currentSegmentIndex,
+            skipSegments = request.skipSegments,
+            backfillSegments = request.backfillSegments,
+            bridgeSegments = request.bridgeSegments,
+            segmentWindow = request.segmentWindow
+        )
+        val segmentUrls = targetIndices.map { segmentIndex ->
+            mediaPlaylist.segments[segmentIndex].url
+        }
 
         if (segmentUrls.isEmpty()) {
             return HlsQualitySwitchWarmupResult(
                 targetHeight = request.targetHeight,
                 warmedSegments = 0,
+                bridgedSegments = 0,
                 success = false,
                 detail = "no target segments to warm"
             )
@@ -278,8 +291,9 @@ internal class HlsAheadPrefetcher(
         var warmedSegments = 0
         var reusedSegments = 0
         var bytesDownloaded = 0L
+        val preparedIndices = linkedSetOf<Int>()
         val startedAtMs = System.currentTimeMillis()
-        segmentUrls.forEach { segmentUrl ->
+        segmentUrls.forEachIndexed { offset, segmentUrl ->
             runCatching {
                 val cacheBeforeBytes = cache.cacheSpace
                 CacheWriter(
@@ -296,21 +310,31 @@ internal class HlsAheadPrefetcher(
                     bytesDownloaded += deltaBytes
                 }
                 warmedSegments += 1
+                preparedIndices += targetIndices[offset]
             }.onFailure { error ->
                 PlayerDebugLog.d(logTag, "quality warmup failed url=$segmentUrl error=${error.message}")
             }
         }
         val durationMs = (System.currentTimeMillis() - startedAtMs).coerceAtLeast(1L)
+        val bridgedSegments = contiguousBridgedSegments(
+            currentSegmentIndex = currentSegmentIndex,
+            preparedIndices = preparedIndices
+        )
+        val preparedStart = preparedIndices.minOrNull() ?: -1
+        val preparedEnd = preparedIndices.maxOrNull() ?: -1
 
         return HlsQualitySwitchWarmupResult(
             targetHeight = request.targetHeight,
             warmedSegments = warmedSegments,
+            bridgedSegments = bridgedSegments,
             success = warmedSegments > 0,
-            detail = "variant=$targetVariantUrl",
+            detail = "variant=$targetVariantUrl prepared=$preparedStart..$preparedEnd bridge=$bridgedSegments",
             reusedSegments = reusedSegments,
             bytesDownloaded = bytesDownloaded,
             durationMs = durationMs,
-            targetBandwidthBps = masterPlaylist.variantBandwidth(targetVariantUrl)
+            targetBandwidthBps = masterPlaylist.variantBandwidth(targetVariantUrl),
+            preparedStartSegmentIndex = preparedStart,
+            preparedEndSegmentIndex = preparedEnd
         )
     }
 
@@ -468,6 +492,54 @@ internal class HlsAheadPrefetcher(
                 else -> "auto_720p"
             }
         }
+
+        fun qualitySwitchSegmentIndices(
+            playlistSize: Int,
+            currentSegmentIndex: Int,
+            skipSegments: Int,
+            backfillSegments: Int,
+            bridgeSegments: Int,
+            segmentWindow: Int
+        ): List<Int> {
+            if (playlistSize <= 0) return emptyList()
+
+            val anchorIndex = (currentSegmentIndex + skipSegments.coerceAtLeast(0))
+                .coerceIn(0, playlistSize - 1)
+            val anchorStart = (anchorIndex - backfillSegments.coerceAtLeast(0))
+                .coerceAtLeast(0)
+            val anchorEnd = (anchorIndex + segmentWindow.coerceAtLeast(1) - 1)
+                .coerceAtMost(playlistSize - 1)
+            val bridgeStart = (currentSegmentIndex + 1).coerceIn(0, playlistSize - 1)
+            val bridgeEnd = (bridgeStart + bridgeSegments.coerceAtLeast(1) - 1)
+                .coerceAtMost(playlistSize - 1)
+
+            val ordered = linkedSetOf<Int>()
+            for (index in bridgeStart..bridgeEnd) {
+                ordered += index
+            }
+            for (index in anchorStart..anchorEnd) {
+                ordered += index
+            }
+            if (bridgeEnd + 1 <= anchorStart - 1) {
+                for (index in (bridgeEnd + 1)..(anchorStart - 1)) {
+                    ordered += index
+                }
+            }
+            return ordered.toList().sorted()
+        }
+
+        fun contiguousBridgedSegments(
+            currentSegmentIndex: Int,
+            preparedIndices: Set<Int>
+        ): Int {
+            var bridged = 0
+            var index = currentSegmentIndex + 1
+            while (preparedIndices.contains(index)) {
+                bridged += 1
+                index += 1
+            }
+            return bridged
+        }
     }
 }
 
@@ -487,18 +559,23 @@ internal data class HlsQualitySwitchWarmupRequest(
     val currentPositionMs: Long,
     val targetHeight: Int,
     val skipSegments: Int = 0,
+    val backfillSegments: Int = 0,
+    val bridgeSegments: Int = 1,
     val segmentWindow: Int = 3,
 )
 
 internal data class HlsQualitySwitchWarmupResult(
     val targetHeight: Int,
     val warmedSegments: Int,
+    val bridgedSegments: Int,
     val success: Boolean,
     val detail: String,
     val reusedSegments: Int = 0,
     val bytesDownloaded: Long = 0L,
     val durationMs: Long = 0L,
     val targetBandwidthBps: Int = 0,
+    val preparedStartSegmentIndex: Int = -1,
+    val preparedEndSegmentIndex: Int = -1,
 )
 
 internal data class PrefetchExecutionMetrics(
