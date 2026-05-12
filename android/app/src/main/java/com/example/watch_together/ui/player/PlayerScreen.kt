@@ -189,6 +189,7 @@ fun PlayerScreen(
                         appendPlayerLog(playerLogs, "self play ack seq=${payload.seq} pos=${payload.positionMs}", maxSize = 10)
                         return@launch
                     }
+                    appendRemoteEventReceivedLog(playerLogs, adapter, "play", payload.seq, payload.positionMs)
                     latestRoomState = currentLatestRoomState?.copy(
                         paused = false,
                         ended = false,
@@ -200,6 +201,7 @@ fun PlayerScreen(
                     adapter.play()
                     isApplyingRemoteEvent = false
                     appendPlayerLog(playerLogs, "remote play seq=${payload.seq} pos=${payload.positionMs}", maxSize = 10)
+                    scheduleRemoteEventObservation(coroutineScope, adapter, playerLogs, "play", payload.seq)
                 }
             }
 
@@ -209,6 +211,7 @@ fun PlayerScreen(
                         appendPlayerLog(playerLogs, "self pause ack seq=${payload.seq} pos=${payload.positionMs}", maxSize = 10)
                         return@launch
                     }
+                    appendRemoteEventReceivedLog(playerLogs, adapter, "pause", payload.seq, payload.positionMs)
                     latestRoomState = currentLatestRoomState?.copy(
                         paused = true,
                         ended = false,
@@ -220,6 +223,7 @@ fun PlayerScreen(
                     adapter.pause()
                     isApplyingRemoteEvent = false
                     appendPlayerLog(playerLogs, "remote pause seq=${payload.seq} pos=${payload.positionMs}", maxSize = 10)
+                    scheduleRemoteEventObservation(coroutineScope, adapter, playerLogs, "pause", payload.seq)
                 }
             }
 
@@ -229,6 +233,7 @@ fun PlayerScreen(
                         appendPlayerLog(playerLogs, "self seek ack seq=${payload.seq} pos=${payload.positionMs}", maxSize = 10)
                         return@launch
                     }
+                    appendRemoteEventReceivedLog(playerLogs, adapter, "seek", payload.seq, payload.positionMs)
                     latestRoomState = currentLatestRoomState?.copy(
                         positionMs = payload.positionMs,
                         seq = payload.seq
@@ -237,6 +242,7 @@ fun PlayerScreen(
                         adapter = adapter,
                         logs = playerLogs,
                         payload = payload,
+                        coroutineScope = coroutineScope,
                         setApplyingRemoteEvent = { isApplyingRemoteEvent = it }
                     )
                 }
@@ -248,6 +254,7 @@ fun PlayerScreen(
                         appendPlayerLog(playerLogs, "self rate ack seq=${payload.seq} rate=${payload.playbackRate}", maxSize = 10)
                         return@launch
                     }
+                    appendRemoteEventReceivedLog(playerLogs, adapter, "rate", payload.seq, payload.positionMs)
                     latestRoomState = currentLatestRoomState?.copy(
                         positionMs = payload.positionMs,
                         playbackRate = payload.playbackRate,
@@ -259,6 +266,7 @@ fun PlayerScreen(
                     playerState = playerState.copy(playbackSpeed = payload.playbackRate.toFloat())
                     isApplyingRemoteEvent = false
                     appendPlayerLog(playerLogs, "remote rate seq=${payload.seq} rate=${payload.playbackRate}", maxSize = 10)
+                    scheduleRemoteEventObservation(coroutineScope, adapter, playerLogs, "rate", payload.seq)
                 }
             }
 
@@ -268,11 +276,13 @@ fun PlayerScreen(
                         appendPlayerLog(playerLogs, "self ended ack seq=${payload.seq}", maxSize = 10)
                         return@launch
                     }
+                    appendRemoteEventReceivedLog(playerLogs, adapter, "ended", payload.seq, payload.positionMs)
                     isApplyingRemoteEvent = true
                     adapter.seekTo(payload.positionMs)
                     adapter.pause()
                     isApplyingRemoteEvent = false
                     appendPlayerLog(playerLogs, "remote ended seq=${payload.seq}", maxSize = 10)
+                    scheduleRemoteEventObservation(coroutineScope, adapter, playerLogs, "ended", payload.seq)
                 }
             }
 
@@ -675,10 +685,45 @@ private fun schedulePostSeekCalibration(
     }
 }
 
+private fun appendRemoteEventReceivedLog(
+    logs: MutableList<String>,
+    adapter: PlayerAdapter,
+    action: String,
+    seq: Long,
+    remotePositionMs: Long
+) {
+    appendPlayerLog(
+        logs,
+        "remote $action received seq=$seq remote=$remotePositionMs ${adapterSyncSnapshot(adapter)}",
+        maxSize = 10
+    )
+}
+
+private fun scheduleRemoteEventObservation(
+    coroutineScope: kotlinx.coroutines.CoroutineScope,
+    adapter: PlayerAdapter,
+    logs: MutableList<String>,
+    action: String,
+    seq: Long
+): Job {
+    return coroutineScope.launch {
+        delay(RemoteEventObservationDelayMs)
+        appendPlayerLog(logs, "remote $action after seq=$seq ${adapterSyncSnapshot(adapter)}", maxSize = 10)
+    }
+}
+
+private fun adapterSyncSnapshot(adapter: PlayerAdapter): String {
+    val positionMs = adapter.getCurrentPosition().coerceAtLeast(0L)
+    val bufferedPositionMs = adapter.getBufferedPosition().coerceAtLeast(0L)
+    val bufferedAheadMs = (bufferedPositionMs - positionMs).coerceAtLeast(0L)
+    return "local=$positionMs bufferAhead=${bufferedAheadMs}ms isPlaying=${adapter.isPlaying()}"
+}
+
 private fun applyRemoteSeekWithThreshold(
     adapter: PlayerAdapter,
     logs: MutableList<String>,
     payload: SeekPayload,
+    coroutineScope: kotlinx.coroutines.CoroutineScope,
     setApplyingRemoteEvent: (Boolean) -> Unit
 ) {
     val localPositionMs = adapter.getCurrentPosition().coerceAtLeast(0L)
@@ -700,6 +745,7 @@ private fun applyRemoteSeekWithThreshold(
         "remote seek applied seq=${payload.seq} drift=${driftMs}ms local=$localPositionMs remote=${payload.positionMs}",
         maxSize = 10
     )
+    scheduleRemoteEventObservation(coroutineScope, adapter, logs, "seek", payload.seq)
 }
 
 private const val TELEMETRY_LOG_TAG = "WatchTogetherTelemetry"
@@ -707,6 +753,7 @@ private const val SYNC_LOG_TAG = "WatchTogetherSync"
 private const val SeekStepMs = 2_000L
 private const val PostSeekCalibrationDelayMs = 900L
 private const val RemoteSeekCorrectionThresholdMs = 700L
+private const val RemoteEventObservationDelayMs = 1_200L
 
 @Preview(showBackground = true, showSystemUi = true)
 @Composable

@@ -218,6 +218,7 @@ func (h *WebSocketHandler) handlePlay(
 	client.MarkHeartbeatAck(time.Now())
 	return h.handleControlEvent(
 		ctx,
+		protocol.TypePlay,
 		payload.RoomID,
 		func(existingRoom *room.Room) (room.State, []*room.ClientConnection, error) {
 			return existingRoom.ApplyPlay(payload.UserID, payload.PositionMs)
@@ -249,6 +250,7 @@ func (h *WebSocketHandler) handlePause(
 	client.MarkHeartbeatAck(time.Now())
 	return h.handleControlEvent(
 		ctx,
+		protocol.TypePause,
 		payload.RoomID,
 		func(existingRoom *room.Room) (room.State, []*room.ClientConnection, error) {
 			return existingRoom.ApplyPause(payload.UserID, payload.PositionMs)
@@ -280,6 +282,7 @@ func (h *WebSocketHandler) handleSeek(
 	client.MarkHeartbeatAck(time.Now())
 	return h.handleControlEvent(
 		ctx,
+		protocol.TypeSeek,
 		payload.RoomID,
 		func(existingRoom *room.Room) (room.State, []*room.ClientConnection, error) {
 			return existingRoom.ApplySeek(payload.UserID, payload.PositionMs)
@@ -311,6 +314,7 @@ func (h *WebSocketHandler) handleSetPlaybackRate(
 	client.MarkHeartbeatAck(time.Now())
 	return h.handleControlEvent(
 		ctx,
+		protocol.TypeSetPlaybackRate,
 		payload.RoomID,
 		func(existingRoom *room.Room) (room.State, []*room.ClientConnection, error) {
 			return existingRoom.ApplyPlaybackRate(payload.UserID, payload.PlaybackRate)
@@ -343,6 +347,7 @@ func (h *WebSocketHandler) handleEnded(
 	client.MarkHeartbeatAck(time.Now())
 	return h.handleControlEvent(
 		ctx,
+		protocol.TypeEnded,
 		payload.RoomID,
 		func(existingRoom *room.Room) (room.State, []*room.ClientConnection, error) {
 			return existingRoom.ApplyEnded(payload.UserID, payload.PositionMs)
@@ -363,6 +368,7 @@ func (h *WebSocketHandler) handleEnded(
 
 func (h *WebSocketHandler) handleControlEvent(
 	ctx context.Context,
+	eventType string,
 	roomID string,
 	apply func(existingRoom *room.Room) (room.State, []*room.ClientConnection, error),
 	buildEnvelope func(state room.State) protocol.Envelope,
@@ -386,7 +392,24 @@ func (h *WebSocketHandler) handleControlEvent(
 		return err
 	}
 
-	return broadcastEnvelope(ctx, clients, buildEnvelope(state))
+	envelope := buildEnvelope(state)
+	startedAt := time.Now()
+	err = broadcastEnvelope(ctx, clients, envelope)
+	if h.debugSync {
+		log.Printf(
+			"sync broadcast type=%s room=%s seq=%d clients=%d pos=%d paused=%t rate=%.2f duration_ms=%d err=%v",
+			eventType,
+			roomID,
+			state.Seq,
+			len(clients),
+			state.PositionMs,
+			state.Paused,
+			state.PlaybackRate,
+			time.Since(startedAt).Milliseconds(),
+			err,
+		)
+	}
+	return err
 }
 
 func broadcastEnvelope(
