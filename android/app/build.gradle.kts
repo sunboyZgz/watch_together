@@ -74,11 +74,6 @@ android {
                 "REWRITE_LOOPBACK_MEDIA_URLS",
                 flavorConfigValue("local", "REWRITE_LOOPBACK_MEDIA_URLS", "true")
             )
-            buildConfigField(
-                "boolean",
-                "DEBUG_SYNC",
-                flavorConfigValue("local", "DEBUG_SYNC", "true")
-            )
         }
 
         create("prod") {
@@ -104,16 +99,24 @@ android {
                 "REWRITE_LOOPBACK_MEDIA_URLS",
                 flavorConfigValue("prod", "REWRITE_LOOPBACK_MEDIA_URLS", "false")
             )
-            buildConfigField(
-                "boolean",
-                "DEBUG_SYNC",
-                flavorConfigValue("prod", "DEBUG_SYNC", "false")
-            )
         }
     }
 
     buildTypes {
+        debug {
+            buildConfigField(
+                "boolean",
+                "DEBUG_SYNC",
+                configValue("DEBUG_SYNC_DEBUG", "true")
+            )
+        }
+
         release {
+            buildConfigField(
+                "boolean",
+                "DEBUG_SYNC",
+                configValue("DEBUG_SYNC_RELEASE", "false")
+            )
             isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
