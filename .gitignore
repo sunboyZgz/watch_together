@@ -112,3 +112,5 @@ scripts/out/
 ### ======== figma .fig
 fig/key.txt
 postman/
+
+docs/android-player-rebuild-roadmap.md

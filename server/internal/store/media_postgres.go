@@ -74,10 +74,11 @@ func (s *PostgresMediaStore) SearchItems(ctx context.Context, params media.Store
 		SELECT
 			episode.id::text,
 			season.title,
-			episode.subtitle,
-			COALESCE(episode.description, season.description) AS description,
-			COALESCE(episode.cover_url, season.cover_url) AS cover_url,
-			episode.duration_ms,
+            episode.subtitle,
+            COALESCE(episode.description, season.description) AS description,
+            COALESCE(episode.cover_url, season.cover_url) AS cover_url,
+            episode.media_url,
+            episode.duration_ms,
 			season.season_label,
 			episode.episode_label,
 			COALESCE(
@@ -145,6 +146,7 @@ func scanMediaItem(row rowScanner) (media.Item, error) {
 	var subtitle sql.NullString
 	var description sql.NullString
 	var coverURL sql.NullString
+	var mediaURL sql.NullString
 	var durationMs sql.NullInt64
 	var seasonLabel sql.NullString
 	var episodeLabel sql.NullString
@@ -156,6 +158,7 @@ func scanMediaItem(row rowScanner) (media.Item, error) {
 		&subtitle,
 		&description,
 		&coverURL,
+		&mediaURL,
 		&durationMs,
 		&seasonLabel,
 		&episodeLabel,
@@ -167,6 +170,7 @@ func scanMediaItem(row rowScanner) (media.Item, error) {
 	item.Subtitle = nullableStringPtr(subtitle)
 	item.Description = nullableStringPtr(description)
 	item.CoverURL = nullableStringPtr(coverURL)
+	item.MediaURL = mediaURL.String
 	if durationMs.Valid {
 		item.DurationMs = &durationMs.Int64
 	}

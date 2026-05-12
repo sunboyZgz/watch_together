@@ -32,6 +32,7 @@ type Item struct {
 	Subtitle     *string
 	Description  *string
 	CoverURL     *string
+	MediaURL     string
 	DurationMs   *int64
 	SeasonLabel  *string
 	EpisodeLabel *string

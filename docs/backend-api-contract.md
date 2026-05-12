@@ -486,6 +486,7 @@ cursor=...
 - `tag` 使用 `media_tags.slug`，可为空。
 - `limit` 默认 20，最大 50。
 - `cursor` 对客户端不透明；Android 只需要原样带回下一页请求。
+- `items[].mediaUrl` 来自 `media_episodes.media_url`，应指向 HLS `master.m3u8`；Android 播放器以该 URL 加载同一个 episode 的 ABR/手动清晰度轨道。
 
 响应：
 
@@ -499,6 +500,7 @@ cursor=...
         "subtitle": "治愈冒险",
         "description": "适合慢慢看",
         "coverUrl": "https://example.com/cover.jpg",
+        "mediaUrl": "https://example.com/media/show/season-01/episode-09/hls/master.m3u8",
         "durationMs": 1458000,
         "seasonLabel": "第 1 季",
         "episodeLabel": "第 09 集",

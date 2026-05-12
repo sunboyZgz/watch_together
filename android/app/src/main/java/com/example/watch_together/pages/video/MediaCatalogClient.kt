@@ -23,6 +23,7 @@ data class MediaEpisode(
     val subtitle: String?,
     val description: String?,
     val coverUrl: String?,
+    val mediaUrl: String?,
     val durationMs: Long,
     val seasonLabel: String?,
     val episodeLabel: String?,
@@ -136,21 +137,24 @@ private fun org.json.JSONArray?.toMediaItems(): List<MediaEpisode> {
     return buildList {
         for (index in 0 until length()) {
             val item = getJSONObject(index)
-            add(
-                MediaEpisode(
-                    episodeId = item.getString("id"),
-                    title = item.getString("title"),
-                    subtitle = item.optNullableString("subtitle"),
-                    description = item.optNullableString("description"),
-                    coverUrl = item.optNullableString("coverUrl"),
-                    durationMs = item.optLong("durationMs"),
-                    seasonLabel = item.optNullableString("seasonLabel"),
-                    episodeLabel = item.optNullableString("episodeLabel"),
-                    tags = item.optJSONArray("tags").toTags()
-                )
-            )
+            add(item.toMediaEpisode())
         }
     }
+}
+
+private fun JSONObject.toMediaEpisode(): MediaEpisode {
+    return MediaEpisode(
+        episodeId = getString("id"),
+        title = getString("title"),
+        subtitle = optNullableString("subtitle"),
+        description = optNullableString("description"),
+        coverUrl = optNullableString("coverUrl"),
+        mediaUrl = optNullableString("mediaUrl")?.let(AppConfig::playableMediaUrl),
+        durationMs = optLong("durationMs"),
+        seasonLabel = optNullableString("seasonLabel"),
+        episodeLabel = optNullableString("episodeLabel"),
+        tags = optJSONArray("tags").toTags()
+    )
 }
 
 private fun JSONObject.optNullableString(name: String): String? {

@@ -46,6 +46,7 @@ func TestMediaItemsSearchesWithQueryTagAndPagination(t *testing.T) {
 			{
 				ID:         "media_1",
 				Title:      "紫罗兰永恒花园",
+				MediaURL:   "http://127.0.0.1:9000/media/tmp/media/show/hls/master.m3u8",
 				DurationMs: &durationMs,
 				Tags:       []media.ItemTag{{Slug: "healing", Name: "治愈"}},
 			},
@@ -87,6 +88,9 @@ func TestMediaItemsSearchesWithQueryTagAndPagination(t *testing.T) {
 	}
 	if response.Data.Items[0].ID != "media_1" {
 		t.Fatalf("expected media_1, got %q", response.Data.Items[0].ID)
+	}
+	if response.Data.Items[0].MediaURL == "" {
+		t.Fatalf("expected mediaUrl in list response")
 	}
 	if response.Meta.Page == nil || response.Meta.Page.NextCursor == nil || *response.Meta.Page.NextCursor != "3" {
 		t.Fatalf("expected next cursor 3, got %+v", response.Meta.Page)

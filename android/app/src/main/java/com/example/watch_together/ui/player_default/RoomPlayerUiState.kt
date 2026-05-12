@@ -1,4 +1,4 @@
-package com.example.watch_together.ui.player
+package com.example.watch_together.ui.player_default
 
 import androidx.media3.common.Player
 import com.example.watch_together.sync.RoomMember

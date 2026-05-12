@@ -33,6 +33,7 @@ type mediaItemResponse struct {
 	Subtitle     *string            `json:"subtitle"`
 	Description  *string            `json:"description"`
 	CoverURL     *string            `json:"coverUrl"`
+	MediaURL     string             `json:"mediaUrl,omitempty"`
 	DurationMs   *int64             `json:"durationMs"`
 	SeasonLabel  *string            `json:"seasonLabel"`
 	EpisodeLabel *string            `json:"episodeLabel"`
@@ -155,6 +156,7 @@ func mediaItemToResponse(item media.Item) mediaItemResponse {
 		Subtitle:     item.Subtitle,
 		Description:  item.Description,
 		CoverURL:     item.CoverURL,
+		MediaURL:     item.MediaURL,
 		DurationMs:   item.DurationMs,
 		SeasonLabel:  item.SeasonLabel,
 		EpisodeLabel: item.EpisodeLabel,

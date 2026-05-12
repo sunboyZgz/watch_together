@@ -6,8 +6,8 @@ import com.example.watch_together.sync.protocol.PausePayload
 import com.example.watch_together.sync.protocol.PlayPayload
 import com.example.watch_together.sync.protocol.SetPlaybackRatePayload
 import com.example.watch_together.sync.protocol.SeekPayload
-import com.example.watch_together.ui.player.PlayerAdapter
-import com.example.watch_together.ui.player.PlayerEvent
+import com.example.watch_together.ui.player_default.PlayerAdapter
+import com.example.watch_together.ui.player_default.PlayerEvent
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue

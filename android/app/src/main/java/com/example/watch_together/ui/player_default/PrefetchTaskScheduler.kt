@@ -1,4 +1,4 @@
-package com.example.watch_together.ui.player
+package com.example.watch_together.ui.player_default
 
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors

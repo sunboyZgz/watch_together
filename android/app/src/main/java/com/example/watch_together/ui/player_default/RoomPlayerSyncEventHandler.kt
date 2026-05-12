@@ -1,4 +1,4 @@
-package com.example.watch_together.ui.player
+package com.example.watch_together.ui.player_default
 
 import com.example.watch_together.sync.RoomSyncCoordinator
 import com.example.watch_together.sync.RoomSyncState

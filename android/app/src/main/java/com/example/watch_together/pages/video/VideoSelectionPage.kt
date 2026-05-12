@@ -79,6 +79,9 @@ private data class VideoCandidate(
     val id: String,
     val title: String,
     val description: String,
+    val mediaUrl: String?,
+    val seasonLabel: String?,
+    val episodeLabel: String?,
     val tags: List<String>,
     val coverBrush: Brush
 )
@@ -93,6 +96,9 @@ private val sampleVideos = listOf(
         id = "violet",
         title = "葬送的芙莉莲",
         description = "治愈冒险 · 适合慢慢看",
+        mediaUrl = null,
+        seasonLabel = null,
+        episodeLabel = null,
         tags = listOf("全部", "治愈", "奇幻"),
         coverBrush = Brush.linearGradient(listOf(Color(0xFF6252AA), Color(0xFF463C7E)))
     ),
@@ -100,6 +106,9 @@ private val sampleVideos = listOf(
         id = "jjk",
         title = "咒术回战",
         description = "热血战斗 · 节奏很顶",
+        mediaUrl = null,
+        seasonLabel = null,
+        episodeLabel = null,
         tags = listOf("全部", "热血", "奇幻"),
         coverBrush = Brush.linearGradient(listOf(Color(0xFF5749A0), Color(0xFF3E396D)))
     ),
@@ -107,6 +116,9 @@ private val sampleVideos = listOf(
         id = "bocchi",
         title = "孤独摇滚！",
         description = "轻松日常 · 氛围感很好",
+        mediaUrl = null,
+        seasonLabel = null,
+        episodeLabel = null,
         tags = listOf("全部", "校园", "搞笑"),
         coverBrush = Brush.linearGradient(listOf(Color(0xFF6B53B0), Color(0xFF475A8C)))
     ),
@@ -114,6 +126,9 @@ private val sampleVideos = listOf(
         id = "suzume",
         title = "铃芽之旅",
         description = "剧场版 · 适合一起看",
+        mediaUrl = null,
+        seasonLabel = null,
+        episodeLabel = null,
         tags = listOf("全部", "剧场版", "公路"),
         coverBrush = Brush.linearGradient(listOf(Color(0xFF47728D), Color(0xFF394E78)))
     )
@@ -123,7 +138,7 @@ private val sampleVideos = listOf(
 @Composable
 fun VideoSelectionPage(
     onBackClick: () -> Unit,
-    onCreateRoomClick: (episodeId: String) -> Unit,
+    onCreateRoomClick: (episode: MediaEpisode) -> Unit,
     modifier: Modifier = Modifier,
     enableRemoteLoad: Boolean = true
 ) {
@@ -295,7 +310,9 @@ fun VideoSelectionPage(
             enabled = selectedVideo != null,
             compactWidth = compactWidth,
             onCreateRoomClick = {
-                selectedVideo?.let { onCreateRoomClick(it.id) }
+                selectedVideo?.let { video ->
+                    onCreateRoomClick(video.toSelectedEpisode())
+                }
             },
             modifier = Modifier
                 .align(Alignment.BottomCenter)
@@ -804,8 +821,26 @@ private fun MediaEpisode.toVideoCandidate(index: Int): VideoCandidate {
         id = episodeId,
         title = title,
         description = descriptionText,
+        mediaUrl = mediaUrl,
+        seasonLabel = seasonLabel,
+        episodeLabel = episodeLabel,
         tags = tags.map { it.name } + "全部",
         coverBrush = coverBrushFor(index)
+    )
+}
+
+private fun VideoCandidate.toSelectedEpisode(): MediaEpisode {
+    return MediaEpisode(
+        episodeId = id,
+        title = title,
+        subtitle = null,
+        description = description,
+        coverUrl = null,
+        mediaUrl = mediaUrl,
+        durationMs = 0,
+        seasonLabel = seasonLabel,
+        episodeLabel = episodeLabel,
+        tags = emptyList()
     )
 }
 

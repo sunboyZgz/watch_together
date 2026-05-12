@@ -44,13 +44,13 @@ import androidx.compose.ui.unit.sp
 import androidx.media3.common.Player
 import androidx.media3.ui.PlayerView
 import com.example.watch_together.sync.RoomMember
-import com.example.watch_together.ui.player.PlayerAdapter
-import com.example.watch_together.ui.player.PlayerCoreShell
-import com.example.watch_together.ui.player.PlayerEvent
-import com.example.watch_together.ui.player.PlayerRuntimeUiState
-import com.example.watch_together.ui.player.PlayerVideoQualityPreference
-import com.example.watch_together.ui.player.RoomPlayerUiState
-import com.example.watch_together.ui.player.SyncStatus
+import com.example.watch_together.ui.player_default.PlayerAdapter
+import com.example.watch_together.ui.player_default.PlayerCoreShell
+import com.example.watch_together.ui.player_default.PlayerEvent
+import com.example.watch_together.ui.player_default.PlayerRuntimeUiState
+import com.example.watch_together.ui.player_default.PlayerVideoQualityPreference
+import com.example.watch_together.ui.player_default.RoomPlayerUiState
+import com.example.watch_together.ui.player_default.SyncStatus
 import com.example.watch_together.ui.theme.Watch_togetherTheme
 
 private val RoomBackground = Color(0xFF0F1325)

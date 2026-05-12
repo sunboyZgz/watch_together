@@ -1,4 +1,4 @@
-package com.example.watch_together.ui.player
+package com.example.watch_together.ui.player_default
 
 import androidx.media3.common.Player
 import kotlin.math.max
@@ -189,22 +189,14 @@ internal object BandwidthAwareQualitySwitchAdvisor {
         }
 
         if (context.targetVariant.height >= 1080 &&
+            context.effectiveBufferedAheadMs < MIN_1080P_EFFECTIVE_AHEAD_MS &&
             context.bandwidthEstimate.hasSignal &&
             context.bandwidthEstimate.throughputEwmaBps <
-            (context.targetBandwidthBps * planningThroughputMultiplier(context)).toLong()
+            (context.targetBandwidthBps * CRITICAL_1080P_THROUGHPUT_MULTIPLIER).toLong()
         ) {
             return basePlan.copy(
                 shouldAttemptWarmup = false,
-                blockedReason = "当前网络条件不足，暂不切到 1080p。"
-            )
-        }
-
-        if (context.targetVariant.height >= 1080 &&
-            context.effectiveBufferedAheadMs < MIN_1080P_EFFECTIVE_AHEAD_MS
-        ) {
-            return basePlan.copy(
-                shouldAttemptWarmup = false,
-                blockedReason = "当前缓冲不足，暂不切到 1080p。"
+                blockedReason = "当前网络与缓冲都不足，暂不切到 1080p。"
             )
         }
 
@@ -345,16 +337,6 @@ internal object BandwidthAwareQualitySwitchAdvisor {
     private const val HIGH_RISK_BUFFER_MS = 18_000L
     private const val MIN_1080P_EFFECTIVE_AHEAD_MS = 12_000L
     private const val HIGH_THROUGHPUT_MULTIPLIER = 1.45
-    private fun planningThroughputMultiplier(context: QualitySwitchPlanningContext): Double {
-        return if (context.playbackSpeed <= NORMAL_SPEED_THRESHOLD &&
-            context.effectiveBufferedAheadMs >= MIN_1080P_EFFECTIVE_AHEAD_MS
-        ) {
-            0.85
-        } else {
-            BLOCK_1080P_THROUGHPUT_MULTIPLIER
-        }
-    }
-
     private fun commitMinEffectiveAheadMs(context: QualitySwitchCommitContext): Long {
         return when {
             context.targetVariant.height >= 1080 &&
@@ -366,7 +348,7 @@ internal object BandwidthAwareQualitySwitchAdvisor {
     }
 
     private const val NORMAL_SPEED_THRESHOLD = 1.05f
-    private const val BLOCK_1080P_THROUGHPUT_MULTIPLIER = 1.02
+    private const val CRITICAL_1080P_THROUGHPUT_MULTIPLIER = 0.55
     private const val PREPARE_MIN_EFFECTIVE_AHEAD_MS = 18_000L
     private const val PREPARE_LONG_AHEAD_MS = 30_000L
     private const val PREPARE_THROUGHPUT_MULTIPLIER = 1.05

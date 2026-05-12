@@ -1,4 +1,4 @@
-package com.example.watch_together.ui.player
+package com.example.watch_together.ui.player_default
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column

@@ -1,4 +1,4 @@
-package com.example.watch_together.ui.player
+package com.example.watch_together.ui.player_default
 
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue

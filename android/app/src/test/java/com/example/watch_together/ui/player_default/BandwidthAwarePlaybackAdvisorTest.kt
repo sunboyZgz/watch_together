@@ -1,4 +1,4 @@
-package com.example.watch_together.ui.player
+package com.example.watch_together.ui.player_default
 
 import androidx.media3.common.Player
 import org.junit.Assert.assertEquals
@@ -9,7 +9,7 @@ import org.junit.Test
 class BandwidthAwarePlaybackAdvisorTest {
 
     @Test
-    fun `plan blocks 1080p when throughput is not enough`() {
+    fun `plan still attempts 1080p warmup when buffer is healthy but throughput is modest`() {
         val plan = BandwidthAwareQualitySwitchAdvisor.plan(
             QualitySwitchPlanningContext(
                 playbackSpeed = 1f,
@@ -29,8 +29,33 @@ class BandwidthAwarePlaybackAdvisorTest {
             )
         )
 
+        assertTrue(plan.shouldAttemptWarmup)
+        assertEquals("", plan.blockedReason)
+    }
+
+    @Test
+    fun `plan blocks 1080p only when both buffer and throughput are critically low`() {
+        val plan = BandwidthAwareQualitySwitchAdvisor.plan(
+            QualitySwitchPlanningContext(
+                playbackSpeed = 1f,
+                bufferedAheadMs = 4_000L,
+                effectiveBufferedAheadMs = 4_000L,
+                estimatedSegmentsAhead = 0,
+                rebufferCount = 1,
+                currentVariant = PlayerVideoVariant(width = 1280, height = 720, bitrate = 2_000_000),
+                targetVariant = PlayerVideoVariant(width = 1920, height = 1080, bitrate = 5_000_000),
+                targetBandwidthBps = 5_000_000,
+                bandwidthEstimate = BandwidthEstimate(
+                    throughputEwmaBps = 2_000_000,
+                    confidence = 0.8f,
+                    sampleCount = 4
+                ),
+                cachedTargetSegments = 0
+            )
+        )
+
         assertFalse(plan.shouldAttemptWarmup)
-        assertEquals("当前网络条件不足，暂不切到 1080p。", plan.blockedReason)
+        assertEquals("当前网络与缓冲都不足，暂不切到 1080p。", plan.blockedReason)
     }
 
     @Test
