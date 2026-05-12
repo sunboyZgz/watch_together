@@ -21,7 +21,7 @@ class BandwidthAwarePlaybackAdvisorTest {
                 targetVariant = PlayerVideoVariant(width = 1920, height = 1080, bitrate = 5_000_000),
                 targetBandwidthBps = 5_000_000,
                 bandwidthEstimate = BandwidthEstimate(
-                    throughputEwmaBps = 4_900_000,
+                    throughputEwmaBps = 4_000_000,
                     confidence = 0.8f,
                     sampleCount = 4
                 ),
@@ -61,20 +61,42 @@ class BandwidthAwarePlaybackAdvisorTest {
     }
 
     @Test
+    fun `commit gate allows normal speed 1080p upgrade with bridge and healthy buffer`() {
+        val decision = BandwidthAwareQualitySwitchAdvisor.evaluateCommit(
+            QualitySwitchCommitContext(
+                targetBandwidthBps = 5_000_000,
+                effectiveBufferedAheadMs = 12_000L,
+                warmedSegments = 2,
+                bridgedSegments = 2,
+                bandwidthEstimate = BandwidthEstimate(
+                    throughputEwmaBps = 4_600_000,
+                    confidence = 0.9f,
+                    sampleCount = 5
+                ),
+                playbackSpeed = 1f,
+                rebufferCount = 0,
+                targetVariant = PlayerVideoVariant(width = 1920, height = 1080, bitrate = 5_000_000)
+            )
+        )
+
+        assertTrue(decision.allowCommit)
+    }
+
+    @Test
     fun `commit gate blocks unstable 1080p upgrade after recent rebuffer`() {
         val decision = BandwidthAwareQualitySwitchAdvisor.evaluateCommit(
             QualitySwitchCommitContext(
                 targetBandwidthBps = 5_000_000,
-                effectiveBufferedAheadMs = 24_000L,
+                effectiveBufferedAheadMs = 16_000L,
                 warmedSegments = 4,
-                bridgedSegments = 2,
+                bridgedSegments = 1,
                 bandwidthEstimate = BandwidthEstimate(
                     throughputEwmaBps = 9_000_000,
                     confidence = 0.9f,
                     sampleCount = 5
                 ),
                 playbackSpeed = 1f,
-                rebufferCount = 1,
+                rebufferCount = 2,
                 targetVariant = PlayerVideoVariant(width = 1920, height = 1080, bitrate = 5_000_000)
             )
         )

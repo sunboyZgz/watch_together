@@ -8,7 +8,7 @@ class PlayerVideoQualitySwitchStateTest {
     @Test
     fun `warming state explains old quality continues playing`() {
         val state = PlayerVideoQualitySwitchState(
-            phase = PlayerVideoQualitySwitchPhase.WarmingTargetVariant,
+            phase = PlayerVideoQualitySwitchPhase.Warming,
             preference = PlayerVideoQualityPreference(height = 1080)
         )
 
@@ -21,7 +21,7 @@ class PlayerVideoQualitySwitchStateTest {
     @Test
     fun `warming state exposes compact inline hint`() {
         val state = PlayerVideoQualitySwitchState(
-            phase = PlayerVideoQualitySwitchPhase.WarmingTargetVariant,
+            phase = PlayerVideoQualitySwitchPhase.Warming,
             preference = PlayerVideoQualityPreference(height = 1080)
         )
 
@@ -46,7 +46,7 @@ class PlayerVideoQualitySwitchStateTest {
         val runtime = PlayerRuntimeUiState(
             videoQualityPreference = PlayerVideoQualityPreference(height = 720),
             videoQualitySwitchState = PlayerVideoQualitySwitchState(
-                phase = PlayerVideoQualitySwitchPhase.PendingRequest,
+                phase = PlayerVideoQualitySwitchPhase.Requested,
                 preference = PlayerVideoQualityPreference(height = 1080),
                 effectivePreference = PlayerVideoQualityPreference(height = 720)
             )
@@ -71,12 +71,24 @@ class PlayerVideoQualitySwitchStateTest {
     }
 
     @Test
-    fun `commit ready timeout keeps a sensible lower bound`() {
-        assertEquals(3_500L, commitReadyTimeoutMs(2_000L))
+    fun `commit attempt timeout keeps a sensible lower bound`() {
+        assertEquals(2_500L, commitAttemptTimeoutMs(2_000L, bridgedSegments = 3))
     }
 
     @Test
-    fun `commit ready timeout is capped for long grace windows`() {
-        assertEquals(7_000L, commitReadyTimeoutMs(20_000L))
+    fun `commit attempt timeout is capped for long grace windows`() {
+        assertEquals(6_000L, commitAttemptTimeoutMs(20_000L, bridgedSegments = 1))
+    }
+
+    @Test
+    fun `commit attempt notice communicates final switch attempt instead of warmup`() {
+        val state = PlayerVideoQualitySwitchState(
+            phase = PlayerVideoQualitySwitchPhase.CommitAttempt,
+            preference = PlayerVideoQualityPreference(height = 1080),
+            detail = "当前播放窗口附近已预热完成，正在尝试接管到 1080p。"
+        )
+
+        assertEquals("切换中 · 1080p", state.inlineHintLabel)
+        assertEquals("当前播放窗口附近已预热完成，正在尝试接管到 1080p。", state.noticeLabel)
     }
 }

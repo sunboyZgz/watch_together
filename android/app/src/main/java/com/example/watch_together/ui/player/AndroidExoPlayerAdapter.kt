@@ -141,12 +141,13 @@ class AndroidExoPlayerAdapter(
             latestAvailableVideoVariants = variants
             logAvailableVideoTracks(variants)
             emit(PlayerEvent.VideoQualitiesChanged(variants.toQualityOptions()))
-            videoVariantsFromTracks(tracks, selectedOnly = true)
+            val selectedVariants = videoVariantsFromTracks(tracks, selectedOnly = true)
                 .filter { variant -> variant.height >= MinVideoHeight }
-                .minByOrNull { variant -> variant.height }
-                ?.let { variant ->
+            if (selectedVariants.size == 1) {
+                selectedVariants.firstOrNull()?.let { variant ->
                     emitVideoVariantIfChanged(variant, reason = "selected-track")
                 }
+            }
         }
 
         override fun onVideoSizeChanged(videoSize: VideoSize) {
@@ -354,7 +355,7 @@ class AndroidExoPlayerAdapter(
         emit(
             PlayerEvent.VideoQualitySwitchChanged(
                 PlayerVideoQualitySwitchState(
-                    phase = PlayerVideoQualitySwitchPhase.PendingRequest,
+                    phase = PlayerVideoQualitySwitchPhase.Requested,
                     preference = preference,
                     effectivePreference = previousPreference
                 )
@@ -376,7 +377,7 @@ class AndroidExoPlayerAdapter(
         emit(
             PlayerEvent.VideoQualitySwitchChanged(
                 PlayerVideoQualitySwitchState(
-                    phase = PlayerVideoQualitySwitchPhase.WarmingTargetVariant,
+                    phase = PlayerVideoQualitySwitchPhase.Warming,
                     preference = preference,
                     effectivePreference = previousPreference
                 )
@@ -456,17 +457,19 @@ class AndroidExoPlayerAdapter(
                 emit(
                     PlayerEvent.VideoQualitySwitchChanged(
                         PlayerVideoQualitySwitchState(
-                            phase = PlayerVideoQualitySwitchPhase.ReadyToCommit,
+                            phase = PlayerVideoQualitySwitchPhase.CommitAttempt,
                             preference = preference,
                             effectivePreference = previousPreference,
-                            detail = "warmedSegments=${result.warmedSegments} bridgedSegments=${result.bridgedSegments}"
+                            detail = "当前播放窗口附近已预热完成，正在尝试接管到 ${preference.label}。"
                         )
                     )
                 )
                 PlayerDebugLog.d(
                     ABR_LOG_TAG,
                     "manual_switch_ready_to_commit generation=$generation target=${preference.label} " +
-                        "warmed=${result.warmedSegments} reused=${result.reusedSegments} bridged=${result.bridgedSegments}"
+                        "prepared=${result.preparedStartSegmentIndex}..${result.preparedEndSegmentIndex} " +
+                        "current=${result.currentSegmentIndex} warmed=${result.warmedSegments} " +
+                        "reused=${result.reusedSegments} bridged=${result.bridgedSegments}"
                 )
                 latestQualityPreference = preference
                 committedQualitySwitch = CommittedQualitySwitch(
@@ -476,10 +479,12 @@ class AndroidExoPlayerAdapter(
                     targetVariant = targetVariant,
                     startedAtMs = System.currentTimeMillis(),
                     startPositionMs = exoPlayer.currentPosition.coerceAtLeast(0L),
-                    graceWindowMs = pending.plan.graceWindowMs
+                    graceWindowMs = pending.plan.graceWindowMs,
+                    bridgedSegments = result.bridgedSegments,
+                    warmedSegments = result.warmedSegments + result.reusedSegments
                 )
                 applyTrackSelection()
-                encourageImmediateVariantRefresh(bridgedSegments = result.bridgedSegments)
+                refreshSourceQueueForManualSwitch(bridgedSegments = result.bridgedSegments)
                 scheduleDeterministicSwitchPulse(
                     state = committedQualitySwitch!!,
                     attemptsRemaining = DeterministicSwitchPulseCount
@@ -526,10 +531,10 @@ class AndroidExoPlayerAdapter(
                 effectiveBufferedAheadMs = effectiveBufferedAheadMs,
                 estimatedSegmentsAhead = estimatedSegmentsAhead,
                 rebufferCount = rebufferCount,
-            currentVariant = videoVariant,
-            availableVariants = latestAvailableVideoVariants,
-            bandwidthEstimate = bandwidthEstimator.currentEstimate()
-        )
+                currentVariant = videoVariant,
+                availableVariants = latestAvailableVideoVariants,
+                bandwidthEstimate = bandwidthEstimator.currentEstimate()
+            )
         )
         hlsAheadPrefetcher.update(
             HlsAheadPrefetchRequest(
@@ -616,6 +621,7 @@ class AndroidExoPlayerAdapter(
             )
             if (!BandwidthAwareQualitySwitchAdvisor.shouldFallback(observation)) {
                 committedQualitySwitch = null
+                applyTrackSelection()
                 return@postDelayed
             }
             fallbackQualitySwitch(active, "切到 ${active.targetPreference.label} 后恢复不稳定，已自动回退。")
@@ -633,9 +639,9 @@ class AndroidExoPlayerAdapter(
             )
             fallbackQualitySwitch(
                 active,
-                "新清晰度未在预期时间内完成切换，已继续保持当前播放。"
+                commitFailureDetail(active)
             )
-        }, commitReadyTimeoutMs(state.graceWindowMs))
+        }, commitAttemptTimeoutMs(state.graceWindowMs, state.bridgedSegments))
     }
 
     private fun scheduleDeterministicSwitchPulse(
@@ -647,7 +653,7 @@ class AndroidExoPlayerAdapter(
             val active = committedQualitySwitch ?: return@postDelayed
             if (active.generation != state.generation) return@postDelayed
             if (latestVideoVariant.height == active.targetVariant.height) return@postDelayed
-            encourageImmediateVariantRefresh(bridgedSegments = 1)
+            refreshSourceQueueForManualSwitch(bridgedSegments = 1)
             scheduleDeterministicSwitchPulse(active, attemptsRemaining - 1)
         }, DeterministicSwitchPulseDelayMs)
     }
@@ -677,6 +683,20 @@ class AndroidExoPlayerAdapter(
             ABR_LOG_TAG,
             "manual_switch_timeout_fallback generation=${state.generation} target=${state.targetPreference.label} detail=$detail"
         )
+    }
+
+    private fun commitFailureDetail(state: CommittedQualitySwitch): String {
+        val advancedPositionMs = (exoPlayer.currentPosition - state.startPositionMs).coerceAtLeast(0L)
+        return when {
+            exoPlayer.playbackState == Player.STATE_BUFFERING ->
+                "切到 ${state.targetPreference.label} 时重新进入缓冲，已回退到当前稳定清晰度。"
+            advancedPositionMs >= OldBufferStillAdvancingThresholdMs ->
+                "旧清晰度缓冲仍在持续消耗，${state.targetPreference.label} 未能及时接管，已回退。"
+            !state.renderedFirstFrame ->
+                "目标清晰度未能及时恢复首帧，已继续保持当前播放。"
+            else ->
+                "新清晰度未在预期时间内完成切换，已继续保持当前播放。"
+        }
     }
 
     private fun commitQualityPreferenceImmediately(preference: PlayerVideoQualityPreference) {
@@ -711,11 +731,25 @@ class AndroidExoPlayerAdapter(
         return pendingQualitySwitch != null || committedQualitySwitch != null
     }
 
-    private fun encourageImmediateVariantRefresh(bridgedSegments: Int) {
+    private fun refreshSourceQueueForManualSwitch(bridgedSegments: Int) {
         if (bridgedSegments <= 0) return
         val resume = exoPlayer.playWhenReady
         val currentPosition = exoPlayer.currentPosition.coerceAtLeast(0L)
-        exoPlayer.seekTo(currentPosition)
+        if (bridgedSegments >= SourceRefreshBridgeThreshold && currentMediaUrl.isHlsPlaylistUrl()) {
+            PlayerDebugLog.d(
+                ABR_LOG_TAG,
+                "manual_switch_source_refresh position=$currentPosition bridge=$bridgedSegments " +
+                    "target=${committedQualitySwitch?.targetPreference?.label.orEmpty()}"
+            )
+            val mediaItem = MediaItem.fromUri(currentMediaUrl)
+            exoPlayer.setMediaSource(
+                hlsMediaSourceFactory.createMediaSource(mediaItem),
+                /* resetPosition = */ false
+            )
+            exoPlayer.prepare()
+        } else {
+            exoPlayer.seekTo(currentPosition)
+        }
         if (resume) {
             exoPlayer.play()
         }
@@ -733,15 +767,19 @@ class AndroidExoPlayerAdapter(
 
                 val manualHeight = latestQualityPreference.height
                 when {
+                    manualHeight != null -> {
+                        val committingManualSwitch = committedQualitySwitch != null
+                        val minHeight = if (committingManualSwitch) manualHeight else MinVideoHeight
+                        // Commit attempts use an exact target height after cache bridge warmup.
+                        // Once stable, relax back to an adaptive ceiling so ExoPlayer can keep
+                        // playback smooth if bandwidth fluctuates.
+                        setMinVideoSize(1, minHeight)
+                        setMaxVideoSize(Int.MAX_VALUE, manualHeight)
+                        setForceHighestSupportedBitrate(committingManualSwitch)
+                    }
                     latestPlaybackStrategy.lockToMobileFast720p -> {
                         setMinVideoSize(1, MobileFastVideoHeight)
                         setMaxVideoSize(MobileFastVideoWidth, MobileFastVideoHeight)
-                    }
-                    manualHeight != null -> {
-                        // Force exact manual height so we do not stay on a lower variant indefinitely.
-                        setMinVideoSize(1, manualHeight)
-                        setMaxVideoSize(Int.MAX_VALUE, manualHeight)
-                        setForceHighestSupportedBitrate(true)
                     }
                     else -> setMinVideoSize(MinVideoWidth, MinVideoHeight)
                 }
@@ -807,6 +845,8 @@ class AndroidExoPlayerAdapter(
         const val BufferForPlaybackAfterRebufferMs = 10_000
         const val DeterministicSwitchPulseDelayMs = 450L
         const val DeterministicSwitchPulseCount = 3
+        const val OldBufferStillAdvancingThresholdMs = 1_800L
+        const val SourceRefreshBridgeThreshold = 2
     }
 }
 
@@ -825,11 +865,18 @@ private data class CommittedQualitySwitch(
     val startedAtMs: Long,
     val startPositionMs: Long,
     val graceWindowMs: Long,
+    val bridgedSegments: Int = 0,
+    val warmedSegments: Int = 0,
     val renderedFirstFrame: Boolean = false,
 )
 
-internal fun commitReadyTimeoutMs(graceWindowMs: Long): Long {
-    return (graceWindowMs / 2L).coerceIn(3_500L, 7_000L)
+internal fun commitAttemptTimeoutMs(graceWindowMs: Long, bridgedSegments: Int): Long {
+    val base = (graceWindowMs / 2L).coerceIn(3_000L, 6_000L)
+    return if (bridgedSegments >= 3) {
+        (base - 500L).coerceAtLeast(2_500L)
+    } else {
+        base
+    }
 }
 
 @OptIn(UnstableApi::class)

@@ -107,9 +107,9 @@ data class PlayerVideoQualityPreference(
 
 enum class PlayerVideoQualitySwitchPhase {
     Idle,
-    PendingRequest,
-    WarmingTargetVariant,
-    ReadyToCommit,
+    Requested,
+    Warming,
+    CommitAttempt,
     Committed,
     Blocked,
     Fallback
@@ -123,20 +123,20 @@ data class PlayerVideoQualitySwitchState(
 ) {
     val inlineHintLabel: String
         get() = when (phase) {
-            PlayerVideoQualitySwitchPhase.PendingRequest,
-            PlayerVideoQualitySwitchPhase.WarmingTargetVariant -> "切换中 · ${preference.label}"
-            PlayerVideoQualitySwitchPhase.ReadyToCommit -> "即将切到 ${preference.label}"
+            PlayerVideoQualitySwitchPhase.Requested,
+            PlayerVideoQualitySwitchPhase.Warming,
+            PlayerVideoQualitySwitchPhase.CommitAttempt -> "切换中 · ${preference.label}"
             else -> ""
         }
 
     val noticeLabel: String
         get() = when (phase) {
             PlayerVideoQualitySwitchPhase.Idle -> ""
-            PlayerVideoQualitySwitchPhase.PendingRequest,
-            PlayerVideoQualitySwitchPhase.WarmingTargetVariant ->
+            PlayerVideoQualitySwitchPhase.Requested,
+            PlayerVideoQualitySwitchPhase.Warming ->
                 "正在切换到 ${preference.label}，旧清晰度会继续播放。"
-            PlayerVideoQualitySwitchPhase.ReadyToCommit ->
-                "新清晰度已预热完成，正在平滑切换到 ${preference.label}。"
+            PlayerVideoQualitySwitchPhase.CommitAttempt ->
+                detail.ifBlank { "新清晰度已预热完成，正在尝试切到 ${preference.label}。" }
             PlayerVideoQualitySwitchPhase.Committed ->
                 if (preference.isAuto) {
                     "已切回自动清晰度，会根据播放流畅度调整。"
@@ -150,9 +150,9 @@ data class PlayerVideoQualitySwitchState(
         }
 
     val isPending: Boolean
-        get() = phase == PlayerVideoQualitySwitchPhase.PendingRequest ||
-            phase == PlayerVideoQualitySwitchPhase.WarmingTargetVariant ||
-            phase == PlayerVideoQualitySwitchPhase.ReadyToCommit
+        get() = phase == PlayerVideoQualitySwitchPhase.Requested ||
+            phase == PlayerVideoQualitySwitchPhase.Warming ||
+            phase == PlayerVideoQualitySwitchPhase.CommitAttempt
 }
 
 fun Int.toPlaybackStateLabel(): String {

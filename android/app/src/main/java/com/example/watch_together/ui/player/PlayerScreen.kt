@@ -1101,7 +1101,7 @@ fun PlayerScreen(
                             phase = if (preference.isAuto) {
                                 PlayerVideoQualitySwitchPhase.Committed
                             } else {
-                                PlayerVideoQualitySwitchPhase.PendingRequest
+                                PlayerVideoQualitySwitchPhase.Requested
                             },
                             preference = preference,
                             effectivePreference = current.player.videoQualityPreference
@@ -1114,7 +1114,7 @@ fun PlayerScreen(
                             ).noticeLabel
                         } else {
                             PlayerVideoQualitySwitchState(
-                                phase = PlayerVideoQualitySwitchPhase.PendingRequest,
+                                phase = PlayerVideoQualitySwitchPhase.Requested,
                                 preference = preference,
                                 effectivePreference = current.player.videoQualityPreference
                             ).noticeLabel

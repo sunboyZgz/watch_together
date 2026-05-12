@@ -56,6 +56,20 @@ class HlsAheadPrefetcherTest {
     }
 
     @Test
+    fun qualitySwitchSegmentIndices_keepsBridgeBeforeBackfillAroundCurrentWindow() {
+        val indices = qualitySwitchSegmentIndices(
+            playlistSize = 20,
+            currentSegmentIndex = 10,
+            skipSegments = 0,
+            backfillSegments = 2,
+            bridgeSegments = 2,
+            segmentWindow = 4
+        )
+
+        assertEquals(listOf(11, 12, 8, 9, 10, 13), indices)
+    }
+
+    @Test
     fun contiguousBridgedSegments_countsContinuousPreparedRunFromCurrentWindow() {
         val bridged = contiguousBridgedSegments(
             currentSegmentIndex = 2,

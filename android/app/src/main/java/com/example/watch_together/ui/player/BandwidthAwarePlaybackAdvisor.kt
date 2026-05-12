@@ -191,7 +191,7 @@ internal object BandwidthAwareQualitySwitchAdvisor {
         if (context.targetVariant.height >= 1080 &&
             context.bandwidthEstimate.hasSignal &&
             context.bandwidthEstimate.throughputEwmaBps <
-            (context.targetBandwidthBps * BLOCK_1080P_THROUGHPUT_MULTIPLIER).toLong()
+            (context.targetBandwidthBps * planningThroughputMultiplier(context)).toLong()
         ) {
             return basePlan.copy(
                 shouldAttemptWarmup = false,
@@ -226,7 +226,8 @@ internal object BandwidthAwareQualitySwitchAdvisor {
                 reason = "新清晰度尚未预热到当前播放窗口附近。"
             )
         }
-        if (context.effectiveBufferedAheadMs < if (context.targetVariant.height >= 1080) 16_000L else 10_000L) {
+        val minEffectiveAheadMs = commitMinEffectiveAheadMs(context)
+        if (context.effectiveBufferedAheadMs < minEffectiveAheadMs) {
             return QualitySwitchCommitDecision(
                 allowCommit = false,
                 reason = "当前有效缓冲不足，延后切换。"
@@ -235,8 +236,12 @@ internal object BandwidthAwareQualitySwitchAdvisor {
         if (context.bandwidthEstimate.hasSignal) {
             val requiredMultiplier = when {
                 context.targetVariant.height >= 1080 &&
+                    context.playbackSpeed <= NORMAL_SPEED_THRESHOLD &&
+                    context.bridgedSegments >= 2 &&
+                    context.effectiveBufferedAheadMs >= minEffectiveAheadMs -> 0.85
+                context.targetVariant.height >= 1080 &&
                     context.bridgedSegments >= 3 &&
-                    context.effectiveBufferedAheadMs >= HEALTHY_COMMIT_BUFFER_MS -> 1.0
+                    context.effectiveBufferedAheadMs >= HEALTHY_COMMIT_BUFFER_MS -> 0.95
                 context.targetVariant.height >= 1080 &&
                     context.bridgedSegments >= 2 -> 1.05
                 context.targetVariant.height >= 1080 -> 1.12
@@ -250,7 +255,13 @@ internal object BandwidthAwareQualitySwitchAdvisor {
                 )
             }
         }
-        if (context.targetVariant.height >= 1080 && context.rebufferCount > 0) {
+        val canRecoverFromRecentRebuffer = context.playbackSpeed <= NORMAL_SPEED_THRESHOLD &&
+            context.bridgedSegments >= 2 &&
+            context.effectiveBufferedAheadMs >= HEALTHY_COMMIT_BUFFER_MS
+        if (context.targetVariant.height >= 1080 &&
+            context.rebufferCount > 0 &&
+            !canRecoverFromRecentRebuffer
+        ) {
             return QualitySwitchCommitDecision(
                 allowCommit = false,
                 reason = "近期缓冲不稳定，暂不切到 1080p。"
@@ -334,6 +345,27 @@ internal object BandwidthAwareQualitySwitchAdvisor {
     private const val HIGH_RISK_BUFFER_MS = 18_000L
     private const val MIN_1080P_EFFECTIVE_AHEAD_MS = 12_000L
     private const val HIGH_THROUGHPUT_MULTIPLIER = 1.45
+    private fun planningThroughputMultiplier(context: QualitySwitchPlanningContext): Double {
+        return if (context.playbackSpeed <= NORMAL_SPEED_THRESHOLD &&
+            context.effectiveBufferedAheadMs >= MIN_1080P_EFFECTIVE_AHEAD_MS
+        ) {
+            0.85
+        } else {
+            BLOCK_1080P_THROUGHPUT_MULTIPLIER
+        }
+    }
+
+    private fun commitMinEffectiveAheadMs(context: QualitySwitchCommitContext): Long {
+        return when {
+            context.targetVariant.height >= 1080 &&
+                context.playbackSpeed <= NORMAL_SPEED_THRESHOLD &&
+                context.bridgedSegments >= 2 -> 8_000L
+            context.targetVariant.height >= 1080 -> 12_000L
+            else -> 10_000L
+        }
+    }
+
+    private const val NORMAL_SPEED_THRESHOLD = 1.05f
     private const val BLOCK_1080P_THROUGHPUT_MULTIPLIER = 1.02
     private const val PREPARE_MIN_EFFECTIVE_AHEAD_MS = 18_000L
     private const val PREPARE_LONG_AHEAD_MS = 30_000L
