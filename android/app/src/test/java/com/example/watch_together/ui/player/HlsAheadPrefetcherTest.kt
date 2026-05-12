@@ -40,4 +40,28 @@ class HlsAheadPrefetcherTest {
             resolved
         )
     }
+
+    @Test
+    fun qualitySwitchSegmentIndices_bridgeCurrentWindowBeforeFarAnchor() {
+        val indices = qualitySwitchSegmentIndices(
+            playlistSize = 20,
+            currentSegmentIndex = 2,
+            skipSegments = 4,
+            backfillSegments = 1,
+            bridgeSegments = 2,
+            segmentWindow = 3
+        )
+
+        assertEquals(listOf(3, 4, 5, 6, 7, 8), indices)
+    }
+
+    @Test
+    fun contiguousBridgedSegments_countsContinuousPreparedRunFromCurrentWindow() {
+        val bridged = contiguousBridgedSegments(
+            currentSegmentIndex = 2,
+            preparedIndices = linkedSetOf(3, 4, 6, 7)
+        )
+
+        assertEquals(2, bridged)
+    }
 }

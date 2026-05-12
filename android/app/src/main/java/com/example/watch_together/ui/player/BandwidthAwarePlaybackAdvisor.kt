@@ -233,8 +233,16 @@ internal object BandwidthAwareQualitySwitchAdvisor {
             )
         }
         if (context.bandwidthEstimate.hasSignal) {
-            val requiredBps = (context.targetBandwidthBps * if (context.targetVariant.height >= 1080) 1.4 else 1.1)
-                .toLong()
+            val requiredMultiplier = when {
+                context.targetVariant.height >= 1080 &&
+                    context.bridgedSegments >= 3 &&
+                    context.effectiveBufferedAheadMs >= HEALTHY_COMMIT_BUFFER_MS -> 1.0
+                context.targetVariant.height >= 1080 &&
+                    context.bridgedSegments >= 2 -> 1.05
+                context.targetVariant.height >= 1080 -> 1.12
+                else -> 1.05
+            }
+            val requiredBps = (context.targetBandwidthBps * requiredMultiplier).toLong()
             if (context.bandwidthEstimate.throughputEwmaBps < requiredBps) {
                 return QualitySwitchCommitDecision(
                     allowCommit = false,
@@ -281,7 +289,15 @@ internal object BandwidthAwareQualitySwitchAdvisor {
 
         val estimate = context.bandwidthEstimate
         if (estimate.hasSignal) {
-            val requiredBps = (targetVariant.bitrate * PREPARE_THROUGHPUT_MULTIPLIER).toLong()
+            val requiredMultiplier = if (targetVariant.height >= 1080 &&
+                context.playbackSpeed <= 1.05f &&
+                context.effectiveBufferedAheadMs >= PREPARE_LONG_AHEAD_MS
+            ) {
+                0.92
+            } else {
+                PREPARE_THROUGHPUT_MULTIPLIER
+            }
+            val requiredBps = (targetVariant.bitrate * requiredMultiplier).toLong()
             if (estimate.throughputEwmaBps < requiredBps) {
                 return VariantPreparationPlan(reason = "throughput below preparation threshold")
             }
@@ -314,10 +330,11 @@ internal object BandwidthAwareQualitySwitchAdvisor {
     private const val MIN_ESTIMATE_CONFIDENCE = 0.35f
     private const val LOW_BUFFER_MS = 10_000L
     private const val HEALTHY_BUFFER_MS = 24_000L
+    private const val HEALTHY_COMMIT_BUFFER_MS = 24_000L
     private const val HIGH_RISK_BUFFER_MS = 18_000L
-    private const val MIN_1080P_EFFECTIVE_AHEAD_MS = 14_000L
+    private const val MIN_1080P_EFFECTIVE_AHEAD_MS = 12_000L
     private const val HIGH_THROUGHPUT_MULTIPLIER = 1.45
-    private const val BLOCK_1080P_THROUGHPUT_MULTIPLIER = 1.15
+    private const val BLOCK_1080P_THROUGHPUT_MULTIPLIER = 1.02
     private const val PREPARE_MIN_EFFECTIVE_AHEAD_MS = 18_000L
     private const val PREPARE_LONG_AHEAD_MS = 30_000L
     private const val PREPARE_THROUGHPUT_MULTIPLIER = 1.05

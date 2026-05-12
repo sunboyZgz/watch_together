@@ -10,9 +10,6 @@ import androidx.media3.datasource.cache.CacheWriter
 import androidx.media3.datasource.cache.SimpleCache
 import java.io.ByteArrayOutputStream
 import java.net.URI
-import java.util.concurrent.ExecutorService
-import java.util.concurrent.Executors
-import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.abs
 
 @OptIn(UnstableApi::class)
@@ -22,12 +19,9 @@ internal class HlsAheadPrefetcher(
     private val logTag: String = "WatchTogetherPrefetch",
     private val onPrefetchMetrics: (PrefetchExecutionMetrics) -> Unit = {},
 ) {
-    private val executor: ExecutorService = Executors.newSingleThreadExecutor { runnable ->
-        Thread(runnable, "watch-together-hls-prefetch").apply {
-            isDaemon = true
-        }
+    private val scheduler = PrefetchTaskScheduler { message ->
+        PlayerDebugLog.d(logTag, message)
     }
-    private val prefetching = AtomicBoolean(false)
     private var lastRequestKey: String = ""
     private var latestMediaUrl: String = ""
     private var latestVariantProfile: String = ""
@@ -53,25 +47,29 @@ internal class HlsAheadPrefetcher(
         ).joinToString("|")
 
         if (requestKey == lastRequestKey) return
-        if (!prefetching.compareAndSet(false, true)) return
         lastRequestKey = requestKey
 
-        executor.execute {
-            try {
-                prefetch(request, startSegmentIndex, window)
-            } catch (error: Throwable) {
-                PlayerDebugLog.d(logTag, "prefetch failed ${error.message}")
-            } finally {
-                prefetching.set(false)
-            }
+        scheduler.submitBackground(requestKey) {
+            prefetch(request, startSegmentIndex, window)
         }
     }
 
+    fun cancelBackgroundPrefetch() {
+        scheduler.cancelBackgroundTask()
+        lastRequestKey = ""
+    }
+
+    fun cancelStaleManualWarmups(generation: Long) {
+        scheduler.cancelStaleManualTasks(generation)
+    }
+
     fun release() {
-        executor.shutdownNow()
+        scheduler.release()
     }
 
     fun reset() {
+        cancelBackgroundPrefetch()
+        scheduler.reset()
         lastRequestKey = ""
         latestMediaUrl = ""
         latestVariantProfile = ""
@@ -80,6 +78,7 @@ internal class HlsAheadPrefetcher(
 
     fun warmupQualitySwitch(
         request: HlsQualitySwitchWarmupRequest,
+        generation: Long,
         onComplete: (HlsQualitySwitchWarmupResult) -> Unit
     ) {
         if (!request.mediaUrl.isHlsPlaylistUrl()) {
@@ -95,19 +94,42 @@ internal class HlsAheadPrefetcher(
             return
         }
 
-        executor.execute {
+        scheduler.submitManual(generation, "${request.targetHeight}p") {
             val result = runCatching {
                 warmupQualitySwitchInternal(request)
             }.getOrElse { error ->
-                HlsQualitySwitchWarmupResult(
-                    targetHeight = request.targetHeight,
-                    warmedSegments = 0,
-                    bridgedSegments = 0,
-                    success = false,
-                    detail = error.message ?: "warmup failed"
+                if (error is InterruptedException) {
+                    HlsQualitySwitchWarmupResult(
+                        targetHeight = request.targetHeight,
+                        warmedSegments = 0,
+                        bridgedSegments = 0,
+                        success = false,
+                        detail = "warmup cancelled"
+                    )
+                } else {
+                    HlsQualitySwitchWarmupResult(
+                        targetHeight = request.targetHeight,
+                        warmedSegments = 0,
+                        bridgedSegments = 0,
+                        success = false,
+                        detail = error.message ?: "warmup failed"
+                    )
+                }
+            }
+            if (!scheduler.shouldDeliverManualResult(generation)) {
+                PlayerDebugLog.d(
+                    logTag,
+                    "manual_switch_warmup_discarded generation=$generation"
                 )
+                return@submitManual
             }
             onComplete(result)
+        }
+    }
+
+    private fun ensureTaskActive() {
+        if (Thread.currentThread().isInterrupted) {
+            throw InterruptedException("prefetch cancelled")
         }
     }
 
@@ -116,6 +138,7 @@ internal class HlsAheadPrefetcher(
         startSegmentIndex: Int,
         window: Int
     ) {
+        ensureTaskActive()
         val playlist = getPlaylist(request) ?: return
         val segmentUrls = playlist.segments
             .drop(startSegmentIndex.coerceAtLeast(0))
@@ -126,7 +149,7 @@ internal class HlsAheadPrefetcher(
 
         PlayerDebugLog.d(
             logTag,
-            "prefetch start speed=${request.playbackSpeed}x currentSegment=${startSegmentIndex - 1} " +
+            "background_prefetch_started speed=${request.playbackSpeed}x currentSegment=${startSegmentIndex - 1} " +
                 "count=${segmentUrls.size} effectiveAhead=${request.effectiveBufferedAheadMs}ms " +
                 "segmentsAhead=${request.estimatedSegmentsAhead} variant=${request.videoVariant.displayLabel}"
         )
@@ -135,7 +158,8 @@ internal class HlsAheadPrefetcher(
         var bytesDownloaded = 0L
         val startedAtMs = System.currentTimeMillis()
         segmentUrls.forEach { segmentUrl ->
-            runCatching {
+            ensureTaskActive()
+            val result = runCatching {
                 val cacheBeforeBytes = cache.cacheSpace
                 PlayerDebugLog.d(
                     logTag,
@@ -154,14 +178,16 @@ internal class HlsAheadPrefetcher(
                     "segment prefetch done url=$segmentUrl cacheBeforeBytes=$cacheBeforeBytes " +
                         "cacheAfterBytes=${cache.cacheSpace}"
                 )
-            }.onFailure { error ->
+            }
+            result.onFailure { error ->
+                if (error is InterruptedException) throw error
                 PlayerDebugLog.d(logTag, "segment prefetch failed url=$segmentUrl error=${error.message}")
             }
         }
 
         PlayerDebugLog.d(
             logTag,
-            "prefetch done completed=$completed requested=${segmentUrls.size} " +
+            "background_prefetch_done completed=$completed requested=${segmentUrls.size} " +
                 "fromSegment=$startSegmentIndex window=$window"
         )
         if (completed > 0) {
@@ -175,6 +201,7 @@ internal class HlsAheadPrefetcher(
                 )
             )
         }
+        ensureTaskActive()
         val preparationPlan = request.preparationPlan
         if (preparationPlan?.shouldPrepare == true) {
             prefetchPreparedVariant(request, preparationPlan)
@@ -228,6 +255,7 @@ internal class HlsAheadPrefetcher(
     private fun warmupQualitySwitchInternal(
         request: HlsQualitySwitchWarmupRequest
     ): HlsQualitySwitchWarmupResult {
+        ensureTaskActive()
         val rootText = readText(request.mediaUrl)
         val rootMediaPlaylist = parseHlsMediaPlaylist(request.mediaUrl, rootText)
         if (rootMediaPlaylist.segments.isNotEmpty()) {
@@ -294,6 +322,7 @@ internal class HlsAheadPrefetcher(
         val preparedIndices = linkedSetOf<Int>()
         val startedAtMs = System.currentTimeMillis()
         segmentUrls.forEachIndexed { offset, segmentUrl ->
+            ensureTaskActive()
             runCatching {
                 val cacheBeforeBytes = cache.cacheSpace
                 CacheWriter(
@@ -312,6 +341,7 @@ internal class HlsAheadPrefetcher(
                 warmedSegments += 1
                 preparedIndices += targetIndices[offset]
             }.onFailure { error ->
+                if (error is InterruptedException) throw error
                 PlayerDebugLog.d(logTag, "quality warmup failed url=$segmentUrl error=${error.message}")
             }
         }
@@ -342,6 +372,7 @@ internal class HlsAheadPrefetcher(
         request: HlsAheadPrefetchRequest,
         plan: VariantPreparationPlan
     ) {
+        ensureTaskActive()
         val targetVariant = plan.targetVariant ?: return
         val rootText = readText(request.mediaUrl)
         val rootMediaPlaylist = parseHlsMediaPlaylist(request.mediaUrl, rootText)
@@ -366,6 +397,7 @@ internal class HlsAheadPrefetcher(
         var bytesDownloaded = 0L
         val startedAtMs = System.currentTimeMillis()
         segmentUrls.forEach { segmentUrl ->
+            ensureTaskActive()
             runCatching {
                 val cacheBeforeBytes = cache.cacheSpace
                 CacheWriter(
@@ -377,6 +409,7 @@ internal class HlsAheadPrefetcher(
                 bytesDownloaded += (cache.cacheSpace - cacheBeforeBytes).coerceAtLeast(0L)
                 completed += 1
             }.onFailure { error ->
+                if (error is InterruptedException) throw error
                 PlayerDebugLog.d(logTag, "prepare variant failed url=$segmentUrl error=${error.message}")
             }
         }
@@ -398,12 +431,14 @@ internal class HlsAheadPrefetcher(
     }
 
     private fun readText(url: String): String {
+        ensureTaskActive()
         val dataSource = dataSourceFactory.createDataSource()
         return try {
             dataSource.open(DataSpec(Uri.parse(url)))
             val output = ByteArrayOutputStream()
             val buffer = ByteArray(DEFAULT_READ_BUFFER_BYTES)
             while (true) {
+                ensureTaskActive()
                 val read = dataSource.read(buffer, 0, buffer.size)
                 if (read == C.RESULT_END_OF_INPUT) break
                 if (read > 0) output.write(buffer, 0, read)
@@ -493,53 +528,6 @@ internal class HlsAheadPrefetcher(
             }
         }
 
-        fun qualitySwitchSegmentIndices(
-            playlistSize: Int,
-            currentSegmentIndex: Int,
-            skipSegments: Int,
-            backfillSegments: Int,
-            bridgeSegments: Int,
-            segmentWindow: Int
-        ): List<Int> {
-            if (playlistSize <= 0) return emptyList()
-
-            val anchorIndex = (currentSegmentIndex + skipSegments.coerceAtLeast(0))
-                .coerceIn(0, playlistSize - 1)
-            val anchorStart = (anchorIndex - backfillSegments.coerceAtLeast(0))
-                .coerceAtLeast(0)
-            val anchorEnd = (anchorIndex + segmentWindow.coerceAtLeast(1) - 1)
-                .coerceAtMost(playlistSize - 1)
-            val bridgeStart = (currentSegmentIndex + 1).coerceIn(0, playlistSize - 1)
-            val bridgeEnd = (bridgeStart + bridgeSegments.coerceAtLeast(1) - 1)
-                .coerceAtMost(playlistSize - 1)
-
-            val ordered = linkedSetOf<Int>()
-            for (index in bridgeStart..bridgeEnd) {
-                ordered += index
-            }
-            for (index in anchorStart..anchorEnd) {
-                ordered += index
-            }
-            if (bridgeEnd + 1 <= anchorStart - 1) {
-                for (index in (bridgeEnd + 1)..(anchorStart - 1)) {
-                    ordered += index
-                }
-            }
-            return ordered.toList().sorted()
-        }
-
-        fun contiguousBridgedSegments(
-            currentSegmentIndex: Int,
-            preparedIndices: Set<Int>
-        ): Int {
-            var bridged = 0
-            var index = currentSegmentIndex + 1
-            while (preparedIndices.contains(index)) {
-                bridged += 1
-                index += 1
-            }
-            return bridged
-        }
     }
 }
 
@@ -689,6 +677,54 @@ internal fun resolveHlsUrl(baseUrl: String, childUrl: String): String {
 
 internal fun String.isHlsPlaylistUrl(): Boolean {
     return substringBefore('?').substringBefore('#').endsWith(".m3u8", ignoreCase = true)
+}
+
+internal fun qualitySwitchSegmentIndices(
+    playlistSize: Int,
+    currentSegmentIndex: Int,
+    skipSegments: Int,
+    backfillSegments: Int,
+    bridgeSegments: Int,
+    segmentWindow: Int
+): List<Int> {
+    if (playlistSize <= 0) return emptyList()
+
+    val anchorIndex = (currentSegmentIndex + skipSegments.coerceAtLeast(0))
+        .coerceIn(0, playlistSize - 1)
+    val anchorStart = (anchorIndex - backfillSegments.coerceAtLeast(0))
+        .coerceAtLeast(0)
+    val anchorEnd = (anchorIndex + segmentWindow.coerceAtLeast(1) - 1)
+        .coerceAtMost(playlistSize - 1)
+    val bridgeStart = (currentSegmentIndex + 1).coerceIn(0, playlistSize - 1)
+    val bridgeEnd = (bridgeStart + bridgeSegments.coerceAtLeast(1) - 1)
+        .coerceAtMost(playlistSize - 1)
+
+    val ordered = linkedSetOf<Int>()
+    for (index in bridgeStart..bridgeEnd) {
+        ordered += index
+    }
+    for (index in anchorStart..anchorEnd) {
+        ordered += index
+    }
+    if (bridgeEnd + 1 <= anchorStart - 1) {
+        for (index in (bridgeEnd + 1)..(anchorStart - 1)) {
+            ordered += index
+        }
+    }
+    return ordered.toList().sorted()
+}
+
+internal fun contiguousBridgedSegments(
+    currentSegmentIndex: Int,
+    preparedIndices: Set<Int>
+): Int {
+    var bridged = 0
+    var index = currentSegmentIndex + 1
+    while (preparedIndices.contains(index)) {
+        bridged += 1
+        index += 1
+    }
+    return bridged
 }
 
 private const val DEFAULT_HLS_SEGMENT_DURATION_MS = 6_000L

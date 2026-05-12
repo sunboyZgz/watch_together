@@ -21,7 +21,7 @@ class BandwidthAwarePlaybackAdvisorTest {
                 targetVariant = PlayerVideoVariant(width = 1920, height = 1080, bitrate = 5_000_000),
                 targetBandwidthBps = 5_000_000,
                 bandwidthEstimate = BandwidthEstimate(
-                    throughputEwmaBps = 5_100_000,
+                    throughputEwmaBps = 4_900_000,
                     confidence = 0.8f,
                     sampleCount = 4
                 ),

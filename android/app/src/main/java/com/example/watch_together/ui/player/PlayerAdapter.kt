@@ -32,6 +32,7 @@ interface PlayerAdapter {
         rebufferCount: Int,
         videoVariant: PlayerVideoVariant
     ) = Unit
+    fun cancelBackgroundPrefetch() = Unit
 
     fun release()
 }

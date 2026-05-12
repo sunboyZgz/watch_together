@@ -279,15 +279,19 @@ fun PlayerScreen(
                 lastBufferLogState = snapshot.playbackState
             }
             if (snapshot.hasActivePlaybackState()) {
-                adapter.updateAheadPrefetch(
-                    mediaUrl = uiState.telemetry.currentMediaUrl,
-                    currentPositionMs = snapshot.currentPosition,
-                    playbackSpeed = snapshot.playbackSpeed,
-                    effectiveBufferedAheadMs = snapshot.effectiveBufferedAheadMs,
-                    estimatedSegmentsAhead = snapshot.estimatedSegmentsAhead,
-                    rebufferCount = uiState.telemetry.rebufferCount,
-                    videoVariant = snapshot.videoVariant
-                )
+                if (uiState.player.videoQualitySwitchState.isPending) {
+                    adapter.cancelBackgroundPrefetch()
+                } else {
+                    adapter.updateAheadPrefetch(
+                        mediaUrl = uiState.telemetry.currentMediaUrl,
+                        currentPositionMs = snapshot.currentPosition,
+                        playbackSpeed = snapshot.playbackSpeed,
+                        effectiveBufferedAheadMs = snapshot.effectiveBufferedAheadMs,
+                        estimatedSegmentsAhead = snapshot.estimatedSegmentsAhead,
+                        rebufferCount = uiState.telemetry.rebufferCount,
+                        videoVariant = snapshot.videoVariant
+                    )
+                }
             }
             delay(500)
         }
