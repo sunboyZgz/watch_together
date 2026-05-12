@@ -140,7 +140,14 @@ fun PlayerScreen(
                     adapter.setPlaybackSpeed(speed)
                 },
                 onVideoQualityPreferenceChange = { preference ->
-                    playerState = playerState.copy(videoQualityPreference = preference)
+                    playerState = playerState.copy(
+                        videoQualityPreference = preference,
+                        videoQualityStatus = if (preference.isAuto) {
+                            "自动模式：优先最高可用清晰度，允许 ABR 回落"
+                        } else {
+                            "手动模式：尝试锁定 ${preference.label}"
+                        }
+                    )
                     adapter.setVideoQualityPreference(preference)
                 }
             )
@@ -184,7 +191,9 @@ private fun LocalPlaybackDiagnostics(playerState: PlayerRuntimeState, logs: List
                 "buffer=${playerState.bufferedAheadMs}ms · " +
                 "effective=${playerState.effectiveBufferedAheadMs}ms · " +
                 "speed=${playerState.playbackSpeed}x · " +
-                "quality=${playerState.videoVariant.displayLabel}",
+                "selected=${playerState.videoQualityPreference.label} · " +
+                "actual=${playerState.videoVariant.displayLabel} · " +
+                "qualityStatus=${playerState.videoQualityStatus}",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )

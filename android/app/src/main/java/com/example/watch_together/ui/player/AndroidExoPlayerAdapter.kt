@@ -8,6 +8,8 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
+import androidx.media3.common.TrackGroup
+import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.common.Tracks
 import androidx.media3.common.VideoSize
 import androidx.media3.common.util.UnstableApi
@@ -158,21 +160,53 @@ class AndroidExoPlayerAdapter(context: Context) : PlayerAdapter {
     }
 
     private fun applyTrackSelection() {
+        val manualOverride = latestQualityPreference.height?.let(::findVideoTrackOverrideForHeight)
         trackSelector.setParameters(
             trackSelector.buildUponParameters().apply {
+                clearOverridesOfType(C.TRACK_TYPE_VIDEO)
                 clearVideoSizeConstraints()
                 setMinVideoSize(MinVideoWidth, MinVideoHeight)
-                setForceHighestSupportedBitrate(false)
                 setForceLowestBitrate(false)
                 setAllowVideoNonSeamlessAdaptiveness(true)
                 setExceedVideoConstraintsIfNecessary(false)
-                latestQualityPreference.height?.let { height ->
-                    setMinVideoSize(1, height)
-                    setMaxVideoSize(Int.MAX_VALUE, height)
+                setMaxVideoSize(Int.MAX_VALUE, Int.MAX_VALUE)
+                setViewportSize(Int.MAX_VALUE, Int.MAX_VALUE, true)
+                if (manualOverride != null) {
+                    setOverrideForType(manualOverride)
+                    setForceHighestSupportedBitrate(false)
+                } else if (latestQualityPreference.isAuto) {
                     setForceHighestSupportedBitrate(true)
+                } else {
+                    setForceHighestSupportedBitrate(false)
                 }
             }
         )
+        if (latestQualityPreference.height != null && manualOverride == null) {
+            PlayerDebugLog.d(ABR_LOG_TAG, "quality preference=${latestQualityPreference.label} no matching supported track yet")
+        }
+    }
+
+    private fun findVideoTrackOverrideForHeight(height: Int): TrackSelectionOverride? {
+        val trackGroups = exoPlayer.currentTracks.groups
+            .filter { it.type == C.TRACK_TYPE_VIDEO }
+        var bestGroup: TrackGroup? = null
+        var bestTrackIndex: Int? = null
+        var bestBitrate = -1
+        for (group in trackGroups) {
+            for (trackIndex in 0 until group.length) {
+                if (!group.isTrackSupported(trackIndex, false)) continue
+                val format = group.getTrackFormat(trackIndex)
+                if (format.height != height) continue
+                val bitrate = format.bitrate.coerceAtLeast(0)
+                if (bitrate > bestBitrate) {
+                    bestGroup = group.mediaTrackGroup
+                    bestTrackIndex = trackIndex
+                    bestBitrate = bitrate
+                }
+            }
+        }
+        val mediaTrackGroup = bestGroup ?: return null
+        return TrackSelectionOverride(mediaTrackGroup, bestTrackIndex ?: return null)
     }
 
     private fun emit(event: PlayerEvent) {

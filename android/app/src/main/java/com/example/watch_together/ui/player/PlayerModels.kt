@@ -59,6 +59,7 @@ data class PlayerRuntimeState(
     val videoVariant: PlayerVideoVariant = PlayerVideoVariant(),
     val availableVideoQualities: List<PlayerVideoQualityOption> = listOf(PlayerVideoQualityOption.Auto),
     val videoQualityPreference: PlayerVideoQualityPreference = PlayerVideoQualityPreference.Auto,
+    val videoQualityStatus: String = "自动选择中",
     val statusMessage: String = "",
 ) {
     val bufferedAheadMs: Long get() = (bufferedPosition - currentPosition).coerceAtLeast(0L)
