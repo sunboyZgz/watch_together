@@ -25,6 +25,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -88,18 +89,30 @@ fun PlayerCoreShell(
             style = MaterialTheme.typography.titleMedium,
             color = MaterialTheme.colorScheme.onBackground
         )
+        var isDraggingProgress by rememberSaveable { mutableStateOf(false) }
+        var dragPositionMs by rememberSaveable { mutableStateOf(0L) }
+        val safeDuration = state.duration.coerceAtLeast(0L)
+        val displayPosition = if (isDraggingProgress) dragPositionMs else state.currentPosition
+        val sliderPosition = if (safeDuration > 0L) displayPosition.coerceIn(0L, safeDuration) else 0L
         Text(
-            text = "$mediaMeta · ${formatMs(state.currentPosition)} / ${formatMs(state.duration)}",
+            text = "$mediaMeta · ${formatMs(sliderPosition)} / ${formatMs(state.duration)}",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
-        val safeDuration = state.duration.takeIf { it > 0L } ?: 1L
         Slider(
-            value = state.currentPosition.coerceIn(0L, safeDuration).toFloat(),
-            onValueChange = {},
-            onValueChangeFinished = {},
-            valueRange = 0f..safeDuration.toFloat(),
-            enabled = false,
+            value = sliderPosition.toFloat(),
+            onValueChange = { value ->
+                isDraggingProgress = true
+                dragPositionMs = value.toLong().coerceIn(0L, safeDuration)
+            },
+            onValueChangeFinished = {
+                if (isDraggingProgress && safeDuration > 0L) {
+                    onProgressSeekCommit(dragPositionMs.coerceIn(0L, safeDuration))
+                }
+                isDraggingProgress = false
+            },
+            valueRange = 0f..safeDuration.coerceAtLeast(1L).toFloat(),
+            enabled = state.canControlPlayback && safeDuration > 0L,
             modifier = Modifier.fillMaxWidth()
         )
         Box(
@@ -151,8 +164,8 @@ private fun PlayerOverlay(
         }
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
             OverlayButton(if (state.isPlaying) "暂停" else "播放", state.canControlPlayback, onPlaybackToggleClick)
-            OverlayButton("-10", state.canControlPlayback, onSeekBackwardClick)
-            OverlayButton("+10", state.canControlPlayback, onSeekForwardClick)
+            OverlayButton("-2s", state.canControlPlayback, onSeekBackwardClick)
+            OverlayButton("+2s", state.canControlPlayback, onSeekForwardClick)
             Spacer(Modifier.weight(1f))
             SpeedMenu(state.playbackSpeed, onPlaybackSpeedChange)
             QualityMenu(

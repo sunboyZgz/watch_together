@@ -29,6 +29,15 @@ interface RoomWebSocketListener {
     fun onError(message: String)
 }
 
+enum class RoomWebSocketConnectionState {
+    Idle,
+    Connecting,
+    Open,
+    Closing,
+    Closed,
+    Failed
+}
+
 class RoomWebSocketClient(
     private val okHttpClient: OkHttpClient = OkHttpClient(),
     private val decoder: SyncMessageDecoder = SyncMessageDecoder()
@@ -37,6 +46,8 @@ class RoomWebSocketClient(
     private var activeRoomId: String? = null
     private var activeUserId: String? = null
     private var sessionGeneration: Long = 0L
+    private var connectionState: RoomWebSocketConnectionState = RoomWebSocketConnectionState.Idle
+    private var lastFailureMessage: String? = null
 
     // joinRoom opens the shared /ws endpoint, sends join_room, and forwards the
     // first protocol messages back to the UI layer.
@@ -45,6 +56,8 @@ class RoomWebSocketClient(
         val generation = ++sessionGeneration
         activeRoomId = roomId
         activeUserId = userId
+        connectionState = RoomWebSocketConnectionState.Connecting
+        lastFailureMessage = null
 
         val request = Request.Builder()
             .url(wsUrl)
@@ -53,6 +66,7 @@ class RoomWebSocketClient(
         webSocket = okHttpClient.newWebSocket(request, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
                 if (!isCurrentSession(generation, webSocket)) return
+                connectionState = RoomWebSocketConnectionState.Open
                 listener.onLog("WebSocket connected to $wsUrl")
 
                 val joinPayload = JoinRoomPayload(
@@ -98,16 +112,20 @@ class RoomWebSocketClient(
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                 if (!isCurrentSession(generation, webSocket)) return
-                listener.onError(t.message ?: "Unknown WebSocket failure")
+                connectionState = RoomWebSocketConnectionState.Failed
+                lastFailureMessage = t.message ?: "Unknown WebSocket failure"
+                listener.onError(lastFailureMessage.orEmpty())
             }
 
             override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
                 if (!isCurrentSession(generation, webSocket)) return
+                connectionState = RoomWebSocketConnectionState.Closing
                 listener.onLog("WebSocket closing: $code / $reason")
             }
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
                 if (!isCurrentSession(generation, webSocket)) return
+                connectionState = RoomWebSocketConnectionState.Closed
                 listener.onLog("WebSocket closed: $code / $reason")
             }
         })
@@ -175,6 +193,12 @@ class RoomWebSocketClient(
         webSocket = null
         activeRoomId = null
         activeUserId = null
+        connectionState = RoomWebSocketConnectionState.Closed
+    }
+
+    fun diagnostics(): String {
+        return "state=$connectionState roomId=${activeRoomId ?: "none"} userId=${activeUserId ?: "none"} " +
+            "lastFailure=${lastFailureMessage ?: "none"}"
     }
 
     private fun sendControl(envelope: Any): Boolean {
