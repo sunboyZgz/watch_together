@@ -60,11 +60,75 @@ data class PlayerRuntimeState(
     val availableVideoQualities: List<PlayerVideoQualityOption> = listOf(PlayerVideoQualityOption.Auto),
     val videoQualityPreference: PlayerVideoQualityPreference = PlayerVideoQualityPreference.Auto,
     val videoQualityStatus: String = "自动选择中",
+    val telemetry: PlayerPlaybackTelemetry = PlayerPlaybackTelemetry(),
     val statusMessage: String = "",
 ) {
     val bufferedAheadMs: Long get() = (bufferedPosition - currentPosition).coerceAtLeast(0L)
     val effectiveBufferedAheadMs: Long get() = (bufferedAheadMs / playbackSpeed.coerceAtLeast(0.25f)).toLong()
     val canControlPlayback: Boolean get() = playbackState == Player.STATE_READY
+}
+
+data class PlayerPlaybackTelemetry(
+    val loadStartedAtMs: Long? = null,
+    val firstReadyMs: Long? = null,
+    val playRequestedAtMs: Long? = null,
+    val playStartMs: Long? = null,
+    val qualitySwitchStartedAtMs: Long? = null,
+    val qualitySwitchTargetHeight: Int? = null,
+    val lastQualitySwitchMs: Long? = null,
+    val rebufferCount: Int = 0,
+    val lastRebufferMs: Long? = null,
+) {
+    fun beginLoad(nowMs: Long): PlayerPlaybackTelemetry {
+        return PlayerPlaybackTelemetry(loadStartedAtMs = nowMs)
+    }
+
+    fun markReady(nowMs: Long): PlayerPlaybackTelemetry {
+        return if (firstReadyMs == null && loadStartedAtMs != null) {
+            copy(firstReadyMs = nowMs - loadStartedAtMs)
+        } else {
+            this
+        }
+    }
+
+    fun markFirstFrame(nowMs: Long): PlayerPlaybackTelemetry {
+        val requestedAt = playRequestedAtMs ?: return this
+        return if (playStartMs == null) {
+            copy(playStartMs = nowMs - requestedAt)
+        } else {
+            this
+        }
+    }
+
+    fun markPlayRequested(nowMs: Long): PlayerPlaybackTelemetry {
+        return copy(playRequestedAtMs = nowMs)
+    }
+
+    fun beginQualitySwitch(targetHeight: Int?, nowMs: Long): PlayerPlaybackTelemetry {
+        return copy(
+            qualitySwitchStartedAtMs = nowMs,
+            qualitySwitchTargetHeight = targetHeight,
+            lastQualitySwitchMs = null
+        )
+    }
+
+    fun markQualitySwitchComplete(actualHeight: Int, nowMs: Long): PlayerPlaybackTelemetry {
+        val targetHeight = qualitySwitchTargetHeight ?: return this
+        val startedAt = qualitySwitchStartedAtMs ?: return this
+        if (actualHeight != targetHeight) return this
+        return copy(
+            qualitySwitchStartedAtMs = null,
+            qualitySwitchTargetHeight = null,
+            lastQualitySwitchMs = nowMs - startedAt
+        )
+    }
+
+    fun markRebuffer(nowMs: Long): PlayerPlaybackTelemetry {
+        return copy(
+            rebufferCount = rebufferCount + 1,
+            lastRebufferMs = nowMs
+        )
+    }
 }
 
 sealed interface PlayerEvent {

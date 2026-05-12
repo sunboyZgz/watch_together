@@ -1,5 +1,6 @@
 package com.example.watch_together.ui.player
 
+import android.os.SystemClock
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -72,6 +73,9 @@ fun PlayerScreen(
     LaunchedEffect(selectedEpisode.episodeId, selectedEpisode.mediaUrl) {
         isMediaLoading = true
         mediaLoadError = null
+        playerState = playerState.copy(
+            telemetry = playerState.telemetry.beginLoad(SystemClock.elapsedRealtime())
+        )
         val mediaUrl = selectedEpisode.mediaUrl
         if (mediaUrl.isNullOrBlank()) {
             mediaLoadError = "GET /media/items 未返回 mediaUrl，无法播放。"
@@ -124,7 +128,14 @@ fun PlayerScreen(
                     .ifBlank { selectedEpisode.episodeId },
                 controlHint = roomHint,
                 onPlaybackToggleClick = {
-                    if (playerState.isPlaying) adapter.pause() else adapter.play()
+                    if (playerState.isPlaying) {
+                        adapter.pause()
+                    } else {
+                        playerState = playerState.copy(
+                            telemetry = playerState.telemetry.markPlayRequested(SystemClock.elapsedRealtime())
+                        )
+                        adapter.play()
+                    }
                 },
                 onSeekBackwardClick = {
                     adapter.seekTo((playerState.currentPosition - 10_000L).coerceAtLeast(0L))
@@ -140,18 +151,22 @@ fun PlayerScreen(
                     adapter.setPlaybackSpeed(speed)
                 },
                 onVideoQualityPreferenceChange = { preference ->
+                    val nowMs = SystemClock.elapsedRealtime()
                     playerState = playerState.copy(
                         videoQualityPreference = preference,
                         videoQualityStatus = if (preference.isAuto) {
                             "自动模式：优先最高可用清晰度，允许 ABR 回落"
                         } else {
                             "手动模式：尝试锁定 ${preference.label}"
-                        }
+                        },
+                        telemetry = playerState.telemetry.beginQualitySwitch(preference.height, nowMs)
                     )
                     adapter.setVideoQualityPreference(preference)
                 }
             )
-            LocalPlaybackDiagnostics(playerState = playerState, logs = playerLogs)
+            if (AppConfig.debugSync) {
+                LocalPlaybackDiagnostics(playerState = playerState, logs = playerLogs)
+            }
         }
     }
 }
@@ -197,6 +212,14 @@ private fun LocalPlaybackDiagnostics(playerState: PlayerRuntimeState, logs: List
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
+        Text(
+            text = "firstReady=${playerState.telemetry.firstReadyMs?.let { "${it}ms" } ?: "待测"} · " +
+                "playStart=${playerState.telemetry.playStartMs?.let { "${it}ms" } ?: "待测"} · " +
+                "lastSwitch=${playerState.telemetry.lastQualitySwitchMs?.let { "${it}ms" } ?: "待测"} · " +
+                "rebuffer=${playerState.telemetry.rebufferCount}",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
         Spacer(Modifier.height(2.dp))
         logs.forEach { line ->
             Text(
@@ -209,11 +232,25 @@ private fun LocalPlaybackDiagnostics(playerState: PlayerRuntimeState, logs: List
 }
 
 private fun reducePlayerEvent(current: PlayerRuntimeState, event: PlayerEvent, adapter: PlayerAdapter): PlayerRuntimeState {
+    val nowMs = SystemClock.elapsedRealtime()
     return when (event) {
         PlayerEvent.Ready -> snapshotFromAdapter(adapter, Player.STATE_READY, current)
-        is PlayerEvent.PlaybackStateChanged -> snapshotFromAdapter(adapter, event.playbackState, current)
-        is PlayerEvent.IsPlayingChanged -> current.copy(isPlaying = event.isPlaying)
-        is PlayerEvent.VideoVariantChanged -> current.copy(videoVariant = event.variant)
+            .copy(telemetry = current.telemetry.markReady(nowMs))
+        is PlayerEvent.PlaybackStateChanged -> {
+            val isPlaybackRebuffer = event.playbackState == Player.STATE_BUFFERING &&
+                current.playbackState == Player.STATE_READY &&
+                current.currentPosition > 0L
+            val telemetry = if (isPlaybackRebuffer) current.telemetry.markRebuffer(nowMs) else current.telemetry
+            snapshotFromAdapter(adapter, event.playbackState, current).copy(telemetry = telemetry)
+        }
+        is PlayerEvent.IsPlayingChanged -> {
+            val telemetry = if (event.isPlaying) current.telemetry.markFirstFrame(nowMs) else current.telemetry
+            current.copy(isPlaying = event.isPlaying, telemetry = telemetry)
+        }
+        is PlayerEvent.VideoVariantChanged -> current.copy(
+            videoVariant = event.variant,
+            telemetry = current.telemetry.markQualitySwitchComplete(event.variant.height, nowMs)
+        )
         is PlayerEvent.VideoQualitiesChanged -> current.copy(availableVideoQualities = event.options)
         is PlayerEvent.Error -> snapshotFromAdapter(adapter, current.playbackState, current).copy(statusMessage = event.message)
     }
