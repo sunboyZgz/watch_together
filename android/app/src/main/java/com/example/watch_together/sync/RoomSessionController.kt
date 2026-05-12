@@ -59,8 +59,4 @@ class RoomSessionController(
     fun sendEnded(positionMs: Long, seq: Long): Boolean {
         return roomWebSocketClient.sendEnded(positionMs = positionMs, seq = seq)
     }
-
-    fun diagnostics(): String {
-        return roomWebSocketClient.diagnostics()
-    }
 }

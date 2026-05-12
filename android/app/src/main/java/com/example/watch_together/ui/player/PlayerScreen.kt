@@ -23,8 +23,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -33,24 +31,9 @@ import androidx.compose.ui.unit.dp
 import androidx.media3.common.Player
 import com.example.watch_together.config.AppConfig
 import com.example.watch_together.pages.video.MediaEpisode
-import com.example.watch_together.sync.RoomHttpClient
-import com.example.watch_together.sync.RoomMedia
-import com.example.watch_together.sync.RoomSessionController
-import com.example.watch_together.sync.RoomSyncState
-import com.example.watch_together.sync.RoomWebSocketListener
-import com.example.watch_together.sync.protocol.EndedPayload
-import com.example.watch_together.sync.protocol.PausePayload
-import com.example.watch_together.sync.protocol.PlayPayload
-import com.example.watch_together.sync.protocol.RoomMembersChangedPayload
-import com.example.watch_together.sync.protocol.SeekPayload
-import com.example.watch_together.sync.protocol.SetPlaybackRatePayload
 import com.example.watch_together.ui.theme.Watch_togetherTheme
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
 @Composable
 fun PlayerScreen(
@@ -64,267 +47,41 @@ fun PlayerScreen(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
-    val coroutineScope = rememberCoroutineScope()
     val adapter = remember(context.applicationContext) { AndroidExoPlayerAdapter(context.applicationContext) }
-    val roomHttpClient = remember { RoomHttpClient() }
-    val roomSessionController = remember { RoomSessionController(roomHttpClient = roomHttpClient) }
     var playerState by remember { mutableStateOf(PlayerRuntimeState()) }
     var mediaLoadError by remember { mutableStateOf<String?>(null) }
     var isMediaLoading by remember { mutableStateOf(false) }
-    var activeEpisode by remember { mutableStateOf(selectedEpisode) }
-    var activeRoomCode by remember { mutableStateOf(initialRoomCode.trim().uppercase()) }
-    var activeRoomRole by remember { mutableStateOf<String?>(null) }
-    var activeRoomUserId by remember { mutableStateOf<String?>(null) }
-    var latestRoomState by remember { mutableStateOf<RoomSyncState?>(null) }
-    var isApplyingRemoteEvent by remember { mutableStateOf(false) }
-    var roomBootstrapStatus by remember { mutableStateOf(roomBootstrapInitialStatus(autoCreateAsHost, autoJoinAsViewer, initialRoomCode)) }
-    var pendingPostSeekCalibrationJob by remember { mutableStateOf<Job?>(null) }
     val playerLogs = remember { mutableStateListOf<String>() }
-    val currentActiveRoomUserId by rememberUpdatedState(activeRoomUserId)
-    val currentPlayerState by rememberUpdatedState(playerState)
-    val currentLatestRoomState by rememberUpdatedState(latestRoomState)
-    val currentIsApplyingRemoteEvent by rememberUpdatedState(isApplyingRemoteEvent)
-    val roomHint = buildRoomHint(
-        roomCode = activeRoomCode,
-        role = activeRoomRole,
-        bootstrapStatus = roomBootstrapStatus
-    )
-    val canApplyLocalPlaybackControl = activeRoomCode.isBlank() || activeRoomRole == "host"
-
-    LaunchedEffect(autoCreateAsHost, selectedEpisode.episodeId, accessToken) {
-        if (!autoCreateAsHost) return@LaunchedEffect
-        if (selectedEpisode.episodeId.isBlank()) return@LaunchedEffect
-        if (accessToken.isBlank()) {
-            roomBootstrapStatus = "创建房间失败：缺少登录 token"
-            appendLog(playerLogs, roomBootstrapStatus, maxSize = 10)
-            return@LaunchedEffect
-        }
-
-        roomBootstrapStatus = "正在创建房间..."
-        appendLog(playerLogs, "POST /rooms episodeId=${selectedEpisode.episodeId}", maxSize = 10)
-        runCatching {
-            withContext(Dispatchers.IO) {
-                roomHttpClient.createRoom(accessToken = accessToken, episodeId = selectedEpisode.episodeId)
-            }
-        }.onSuccess { result ->
-            activeRoomCode = result.roomCode
-            activeRoomRole = "host"
-            activeRoomUserId = result.roomState.hostUserId
-            latestRoomState = result.roomState
-            activeEpisode = result.media.toMediaEpisode()
-            roomBootstrapStatus = "房间已创建 · 正在连接同步"
-            appendLog(playerLogs, "room created code=${result.roomCode} media=${result.media.title}", maxSize = 10)
-        }.onFailure { error ->
-            roomBootstrapStatus = "创建房间失败：${error.message ?: "未知错误"}"
-            appendLog(playerLogs, roomBootstrapStatus, maxSize = 10)
-        }
+    val roomHint = when {
+        autoCreateAsHost -> "房间创建链路重构中 · 当前仅加载后端媒体播放"
+        autoJoinAsViewer -> "加入房间链路重构中 · 当前仅加载后端媒体播放"
+        initialRoomCode.isNotBlank() -> "房间 $initialRoomCode 同步重构中 · 当前仅加载后端媒体播放"
+        else -> "同步功能重构中 · 当前仅加载后端媒体播放"
     }
 
-    LaunchedEffect(autoJoinAsViewer, initialRoomCode, accessToken) {
-        val normalizedRoomCode = initialRoomCode.trim().uppercase()
-        if (!autoJoinAsViewer) return@LaunchedEffect
-        if (normalizedRoomCode.isBlank()) return@LaunchedEffect
-        if (accessToken.isBlank()) {
-            roomBootstrapStatus = "加入房间失败：缺少登录 token"
-            appendLog(playerLogs, roomBootstrapStatus, maxSize = 10)
-            return@LaunchedEffect
-        }
-
-        roomBootstrapStatus = "正在加入房间..."
-        appendLog(playerLogs, "POST /rooms/$normalizedRoomCode/join", maxSize = 10)
-        runCatching {
-            withContext(Dispatchers.IO) {
-                val joinResult = roomHttpClient.joinRoomByCode(accessToken = accessToken, roomCode = normalizedRoomCode)
-                val detail = roomHttpClient.getRoomDetail(joinResult.roomCode)
-                joinResult to detail
-            }
-        }.onSuccess { (joinResult, detail) ->
-            activeRoomCode = joinResult.roomCode
-            activeRoomRole = joinResult.memberRole
-            activeRoomUserId = joinResult.memberUserId
-            activeEpisode = detail.media.toMediaEpisode()
-            roomBootstrapStatus = "房间已加入 · 正在连接同步"
-            appendLog(playerLogs, "room joined code=${joinResult.roomCode} media=${detail.media.title}", maxSize = 10)
-        }.onFailure { error ->
-            roomBootstrapStatus = "加入房间失败：${error.message ?: "未知错误"}"
-            appendLog(playerLogs, roomBootstrapStatus, maxSize = 10)
-        }
-    }
-
-    val syncListener = remember {
-        object : RoomWebSocketListener {
-            override fun onLog(message: String) {
-                coroutineScope.launch {
-                    appendPlayerLog(playerLogs, message, maxSize = 10)
-                }
-            }
-
-            override fun onRoomState(payload: RoomSyncState) {
-                coroutineScope.launch {
-                    latestRoomState = payload
-                    roomBootstrapStatus = "同步已连接 · room_state=${payload.seq}"
-                    isApplyingRemoteEvent = true
-                    adapter.seekTo(payload.positionMs)
-                    adapter.setPlaybackSpeed(payload.playbackRate.toFloat())
-                    playerState = playerState.copy(playbackSpeed = payload.playbackRate.toFloat())
-                    if (payload.paused) adapter.pause() else adapter.play()
-                    isApplyingRemoteEvent = false
-                    appendPlayerLog(
-                        playerLogs,
-                        "room_state applied seq=${payload.seq} paused=${payload.paused} pos=${payload.positionMs} rate=${payload.playbackRate}",
-                        maxSize = 10
-                    )
-                }
-            }
-
-            override fun onRoomMembersChanged(payload: RoomMembersChangedPayload) {
-                coroutineScope.launch {
-                    appendPlayerLog(playerLogs, "members changed reason=${payload.reason}", maxSize = 10)
-                }
-            }
-
-            override fun onPlay(payload: PlayPayload) {
-                coroutineScope.launch {
-                    if (payload.userId == currentActiveRoomUserId) {
-                        appendPlayerLog(playerLogs, "self play ack seq=${payload.seq} pos=${payload.positionMs}", maxSize = 10)
-                        return@launch
-                    }
-                    latestRoomState = currentLatestRoomState?.copy(
-                        paused = false,
-                        ended = false,
-                        positionMs = payload.positionMs,
-                        seq = payload.seq
-                    )
-                    isApplyingRemoteEvent = true
-                    adapter.seekTo(payload.positionMs)
-                    adapter.play()
-                    isApplyingRemoteEvent = false
-                    appendPlayerLog(playerLogs, "remote play seq=${payload.seq} pos=${payload.positionMs}", maxSize = 10)
-                }
-            }
-
-            override fun onPause(payload: PausePayload) {
-                coroutineScope.launch {
-                    if (payload.userId == currentActiveRoomUserId) {
-                        appendPlayerLog(playerLogs, "self pause ack seq=${payload.seq} pos=${payload.positionMs}", maxSize = 10)
-                        return@launch
-                    }
-                    latestRoomState = currentLatestRoomState?.copy(
-                        paused = true,
-                        ended = false,
-                        positionMs = payload.positionMs,
-                        seq = payload.seq
-                    )
-                    isApplyingRemoteEvent = true
-                    adapter.seekTo(payload.positionMs)
-                    adapter.pause()
-                    isApplyingRemoteEvent = false
-                    appendPlayerLog(playerLogs, "remote pause seq=${payload.seq} pos=${payload.positionMs}", maxSize = 10)
-                }
-            }
-
-            override fun onSeek(payload: SeekPayload) {
-                coroutineScope.launch {
-                    if (payload.userId == currentActiveRoomUserId) {
-                        appendPlayerLog(playerLogs, "self seek ack seq=${payload.seq} pos=${payload.positionMs}", maxSize = 10)
-                        return@launch
-                    }
-                    latestRoomState = currentLatestRoomState?.copy(
-                        positionMs = payload.positionMs,
-                        seq = payload.seq
-                    )
-                    applyRemoteSeekWithThreshold(
-                        adapter = adapter,
-                        logs = playerLogs,
-                        payload = payload,
-                        setApplyingRemoteEvent = { isApplyingRemoteEvent = it }
-                    )
-                }
-            }
-
-            override fun onPlaybackRate(payload: SetPlaybackRatePayload) {
-                coroutineScope.launch {
-                    if (payload.userId == currentActiveRoomUserId) {
-                        appendPlayerLog(playerLogs, "self rate ack seq=${payload.seq} rate=${payload.playbackRate}", maxSize = 10)
-                        return@launch
-                    }
-                    latestRoomState = currentLatestRoomState?.copy(
-                        positionMs = payload.positionMs,
-                        playbackRate = payload.playbackRate,
-                        seq = payload.seq
-                    )
-                    isApplyingRemoteEvent = true
-                    adapter.seekTo(payload.positionMs)
-                    adapter.setPlaybackSpeed(payload.playbackRate.toFloat())
-                    playerState = playerState.copy(playbackSpeed = payload.playbackRate.toFloat())
-                    isApplyingRemoteEvent = false
-                    appendPlayerLog(playerLogs, "remote rate seq=${payload.seq} rate=${payload.playbackRate}", maxSize = 10)
-                }
-            }
-
-            override fun onEnded(payload: EndedPayload) {
-                coroutineScope.launch {
-                    if (payload.userId == currentActiveRoomUserId) {
-                        appendPlayerLog(playerLogs, "self ended ack seq=${payload.seq}", maxSize = 10)
-                        return@launch
-                    }
-                    isApplyingRemoteEvent = true
-                    adapter.seekTo(payload.positionMs)
-                    adapter.pause()
-                    isApplyingRemoteEvent = false
-                    appendPlayerLog(playerLogs, "remote ended seq=${payload.seq}", maxSize = 10)
-                }
-            }
-
-            override fun onHeartbeat(serverTimeMs: Long) = Unit
-
-            override fun onError(message: String) {
-                coroutineScope.launch {
-                    roomBootstrapStatus = "同步错误：$message"
-                    appendPlayerLog(playerLogs, roomBootstrapStatus, maxSize = 10)
-                }
-            }
-        }
-    }
-
-    LaunchedEffect(activeRoomCode, activeRoomUserId) {
-        val roomCode = activeRoomCode
-        val userId = activeRoomUserId
-        if (roomCode.isBlank() || userId.isNullOrBlank()) return@LaunchedEffect
-        appendPlayerLog(playerLogs, "starting ws roomId=$roomCode userId=$userId", maxSize = 10)
-        roomSessionController.startSession(
-            roomId = roomCode,
-            userId = userId,
-            listener = syncListener
-        )
-    }
-
-    DisposableEffect(adapter, roomSessionController) {
+    DisposableEffect(adapter) {
         adapter.setEventListener { event ->
             appendLog(playerLogs, event.toDebugLabel(), maxSize = 10)
             playerState = reducePlayerEvent(playerState, event, adapter)
         }
         onDispose {
-            pendingPostSeekCalibrationJob?.cancel()
             adapter.setEventListener(null)
-            roomSessionController.closeSession()
             adapter.release()
         }
     }
 
-    LaunchedEffect(activeEpisode.episodeId, activeEpisode.mediaUrl) {
+    LaunchedEffect(selectedEpisode.episodeId, selectedEpisode.mediaUrl) {
         isMediaLoading = true
         mediaLoadError = null
         playerState = playerState.copy(
             telemetry = playerState.telemetry.beginLoad(SystemClock.elapsedRealtime())
         )
-        val mediaUrl = activeEpisode.mediaUrl
+        val mediaUrl = selectedEpisode.mediaUrl
         if (mediaUrl.isNullOrBlank()) {
             mediaLoadError = "GET /media/items 未返回 mediaUrl，无法播放。"
-            appendLog(playerLogs, "media missing mediaUrl episodeId=${activeEpisode.episodeId}", maxSize = 10)
+            appendLog(playerLogs, "media list missing mediaUrl episodeId=${selectedEpisode.episodeId}", maxSize = 10)
         } else {
-            appendLog(playerLogs, "media selected episodeId=${activeEpisode.episodeId} url=$mediaUrl", maxSize = 10)
-            PlayerDebugLog.d(TELEMETRY_LOG_TAG, "load episodeId=${activeEpisode.episodeId} url=$mediaUrl")
+            appendLog(playerLogs, "media list selected episodeId=${selectedEpisode.episodeId} url=$mediaUrl", maxSize = 10)
             adapter.load(mediaUrl)
         }
         isMediaLoading = false
@@ -351,7 +108,7 @@ fun PlayerScreen(
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             Text(
-                text = "播放器重构 · Phase 3",
+                text = "播放器重构 · Phase 2",
                 style = MaterialTheme.typography.titleLarge,
                 color = MaterialTheme.colorScheme.onBackground
             )
@@ -366,127 +123,32 @@ fun PlayerScreen(
                 modifier = Modifier.fillMaxWidth(),
                 adapter = adapter,
                 state = playerState,
-                mediaTitle = activeEpisode.title.ifBlank { "等待媒体选择" },
-                mediaMeta = listOfNotNull(activeEpisode.seasonLabel, activeEpisode.episodeLabel).joinToString(" · ")
-                    .ifBlank { activeEpisode.episodeId },
+                mediaTitle = selectedEpisode.title.ifBlank { "等待媒体选择" },
+                mediaMeta = listOfNotNull(selectedEpisode.seasonLabel, selectedEpisode.episodeLabel).joinToString(" · ")
+                    .ifBlank { selectedEpisode.episodeId },
                 controlHint = roomHint,
                 onPlaybackToggleClick = {
                     if (playerState.isPlaying) {
-                        if (!currentIsApplyingRemoteEvent && activeRoomRole == "host") {
-                            val sent = roomSessionController.sendPause(
-                                positionMs = currentPlayerState.currentPosition,
-                                seq = currentLatestRoomState?.seq ?: 0L
-                            )
-                            appendHostSendLog(playerLogs, roomSessionController, "pause", sent, "pos=${currentPlayerState.currentPosition}")
-                        }
-                        if (canApplyLocalPlaybackControl) {
-                            adapter.pause()
-                        } else {
-                            appendPlayerLog(playerLogs, "viewer local pause ignored", maxSize = 10)
-                        }
+                        adapter.pause()
                     } else {
                         playerState = playerState.copy(
                             telemetry = playerState.telemetry.markPlayRequested(SystemClock.elapsedRealtime())
                         )
-                        if (!currentIsApplyingRemoteEvent && activeRoomRole == "host") {
-                            val sent = roomSessionController.sendPlay(
-                                positionMs = currentPlayerState.currentPosition,
-                                seq = currentLatestRoomState?.seq ?: 0L
-                            )
-                            appendHostSendLog(playerLogs, roomSessionController, "play", sent, "pos=${currentPlayerState.currentPosition}")
-                        }
-                        if (canApplyLocalPlaybackControl) {
-                            adapter.play()
-                        } else {
-                            appendPlayerLog(playerLogs, "viewer local play ignored", maxSize = 10)
-                        }
+                        adapter.play()
                     }
                 },
                 onSeekBackwardClick = {
-                    val target = (currentPlayerState.currentPosition - SeekStepMs).coerceAtLeast(0L)
-                    if (!currentIsApplyingRemoteEvent && activeRoomRole == "host") {
-                        val sent = roomSessionController.sendSeek(positionMs = target, seq = currentLatestRoomState?.seq ?: 0L)
-                        appendHostSendLog(playerLogs, roomSessionController, "seek", sent, "pos=$target")
-                        if (sent) {
-                            pendingPostSeekCalibrationJob?.cancel()
-                            pendingPostSeekCalibrationJob = schedulePostSeekCalibration(
-                                coroutineScope = coroutineScope,
-                                roomSessionController = roomSessionController,
-                                adapter = adapter,
-                                logs = playerLogs
-                            )
-                        }
-                    }
-                    if (canApplyLocalPlaybackControl) {
-                        adapter.seekTo(target)
-                    } else {
-                        appendPlayerLog(playerLogs, "viewer local seek ignored", maxSize = 10)
-                    }
+                    adapter.seekTo((playerState.currentPosition - 10_000L).coerceAtLeast(0L))
                 },
                 onSeekForwardClick = {
-                    val target = currentPlayerState.currentPosition + SeekStepMs
-                    val duration = currentPlayerState.duration.takeIf { it > 0L }
-                    val safeTarget = duration?.let { target.coerceAtMost(it) } ?: target
-                    if (!currentIsApplyingRemoteEvent && activeRoomRole == "host") {
-                        val sent = roomSessionController.sendSeek(positionMs = safeTarget, seq = currentLatestRoomState?.seq ?: 0L)
-                        appendHostSendLog(playerLogs, roomSessionController, "seek", sent, "pos=$safeTarget")
-                        if (sent) {
-                            pendingPostSeekCalibrationJob?.cancel()
-                            pendingPostSeekCalibrationJob = schedulePostSeekCalibration(
-                                coroutineScope = coroutineScope,
-                                roomSessionController = roomSessionController,
-                                adapter = adapter,
-                                logs = playerLogs
-                            )
-                        }
-                    }
-                    if (canApplyLocalPlaybackControl) {
-                        adapter.seekTo(safeTarget)
-                    } else {
-                        appendPlayerLog(playerLogs, "viewer local seek ignored", maxSize = 10)
-                    }
+                    val target = playerState.currentPosition + 10_000L
+                    val duration = playerState.duration.takeIf { it > 0L }
+                    adapter.seekTo(duration?.let { target.coerceAtMost(it) } ?: target)
                 },
-                onProgressSeekCommit = { positionMs ->
-                    if (!currentIsApplyingRemoteEvent && activeRoomRole == "host") {
-                        val sent = roomSessionController.sendSeek(positionMs = positionMs, seq = currentLatestRoomState?.seq ?: 0L)
-                        appendHostSendLog(playerLogs, roomSessionController, "seek", sent, "pos=$positionMs")
-                        if (sent) {
-                            pendingPostSeekCalibrationJob?.cancel()
-                            pendingPostSeekCalibrationJob = schedulePostSeekCalibration(
-                                coroutineScope = coroutineScope,
-                                roomSessionController = roomSessionController,
-                                adapter = adapter,
-                                logs = playerLogs
-                            )
-                        }
-                    }
-                    if (canApplyLocalPlaybackControl) {
-                        adapter.seekTo(positionMs)
-                    } else {
-                        appendPlayerLog(playerLogs, "viewer local seek ignored", maxSize = 10)
-                    }
-                },
+                onProgressSeekCommit = adapter::seekTo,
                 onPlaybackSpeedChange = { speed ->
-                    if (!currentIsApplyingRemoteEvent && activeRoomRole == "host") {
-                        val sent = roomSessionController.sendPlaybackRate(
-                            playbackRate = speed.toDouble(),
-                            positionMs = currentPlayerState.currentPosition,
-                            seq = currentLatestRoomState?.seq ?: 0L
-                        )
-                        appendHostSendLog(
-                            playerLogs,
-                            roomSessionController,
-                            "rate",
-                            sent,
-                            "speed=$speed pos=${currentPlayerState.currentPosition}"
-                        )
-                    }
-                    if (canApplyLocalPlaybackControl) {
-                        playerState = playerState.copy(playbackSpeed = speed)
-                        adapter.setPlaybackSpeed(speed)
-                    } else {
-                        appendPlayerLog(playerLogs, "viewer local rate ignored", maxSize = 10)
-                    }
+                    playerState = playerState.copy(playbackSpeed = speed)
+                    adapter.setPlaybackSpeed(speed)
                 },
                 onVideoQualityPreferenceChange = { preference ->
                     val nowMs = SystemClock.elapsedRealtime()
@@ -509,26 +171,6 @@ fun PlayerScreen(
     }
 }
 
-private fun roomBootstrapInitialStatus(
-    autoCreateAsHost: Boolean,
-    autoJoinAsViewer: Boolean,
-    initialRoomCode: String
-): String {
-    return when {
-        autoCreateAsHost -> "等待创建房间"
-        autoJoinAsViewer -> "等待加入房间"
-        initialRoomCode.isNotBlank() -> "等待加入房间 ${initialRoomCode.trim().uppercase()}"
-        else -> "本地播放模式"
-    }
-}
-
-private fun buildRoomHint(roomCode: String, role: String?, bootstrapStatus: String): String {
-    val roomLabel = roomCode.takeIf { it.isNotBlank() }?.let { "房间 $it" }
-    val roleLabel = role?.takeIf { it.isNotBlank() }?.let { if (it == "host") "host" else it }
-    return listOfNotNull(roomLabel, roleLabel, bootstrapStatus).joinToString(" · ")
-        .ifBlank { "同步功能重构中 · 当前仅加载后端媒体播放" }
-}
-
 private fun defaultSelectedEpisode(): MediaEpisode {
     return MediaEpisode(
         episodeId = AppConfig.defaultMediaIdForRoom(),
@@ -540,21 +182,6 @@ private fun defaultSelectedEpisode(): MediaEpisode {
         durationMs = 0,
         seasonLabel = null,
         episodeLabel = null,
-        tags = emptyList()
-    )
-}
-
-private fun RoomMedia.toMediaEpisode(): MediaEpisode {
-    return MediaEpisode(
-        episodeId = id,
-        title = title,
-        subtitle = subtitle,
-        description = null,
-        coverUrl = null,
-        mediaUrl = mediaUrl,
-        durationMs = durationMs ?: 0L,
-        seasonLabel = seasonLabel,
-        episodeLabel = episodeLabel,
         tags = emptyList()
     )
 }
@@ -640,73 +267,10 @@ private fun snapshotFromAdapter(adapter: PlayerAdapter, playbackState: Int, curr
     )
 }
 
-private fun appendPlayerLog(logs: MutableList<String>, line: String, maxSize: Int) {
+private fun appendLog(logs: MutableList<String>, line: String, maxSize: Int) {
     logs.add(0, line)
     while (logs.size > maxSize) logs.removeAt(logs.lastIndex)
-    PlayerDebugLog.d(SYNC_LOG_TAG, line)
 }
-
-private fun appendLog(logs: MutableList<String>, line: String, maxSize: Int) {
-    appendPlayerLog(logs, line, maxSize)
-}
-
-private fun appendHostSendLog(
-    logs: MutableList<String>,
-    roomSessionController: RoomSessionController,
-    action: String,
-    sent: Boolean,
-    detail: String
-) {
-    val diagnostics = if (sent) "" else " ${roomSessionController.diagnostics()}"
-    appendPlayerLog(logs, "host $action sent=$sent $detail$diagnostics", maxSize = 10)
-}
-
-private fun schedulePostSeekCalibration(
-    coroutineScope: kotlinx.coroutines.CoroutineScope,
-    roomSessionController: RoomSessionController,
-    adapter: PlayerAdapter,
-    logs: MutableList<String>
-): Job {
-    return coroutineScope.launch {
-        delay(PostSeekCalibrationDelayMs)
-        val positionMs = adapter.getCurrentPosition().coerceAtLeast(0L)
-        val sent = roomSessionController.sendSeek(positionMs = positionMs, seq = 0L)
-        appendHostSendLog(logs, roomSessionController, "seek-calibration", sent, "pos=$positionMs")
-    }
-}
-
-private fun applyRemoteSeekWithThreshold(
-    adapter: PlayerAdapter,
-    logs: MutableList<String>,
-    payload: SeekPayload,
-    setApplyingRemoteEvent: (Boolean) -> Unit
-) {
-    val localPositionMs = adapter.getCurrentPosition().coerceAtLeast(0L)
-    val driftMs = kotlin.math.abs(localPositionMs - payload.positionMs)
-    if (driftMs < RemoteSeekCorrectionThresholdMs) {
-        appendPlayerLog(
-            logs,
-            "remote seek skipped seq=${payload.seq} drift=${driftMs}ms local=$localPositionMs remote=${payload.positionMs}",
-            maxSize = 10
-        )
-        return
-    }
-
-    setApplyingRemoteEvent(true)
-    adapter.seekTo(payload.positionMs)
-    setApplyingRemoteEvent(false)
-    appendPlayerLog(
-        logs,
-        "remote seek applied seq=${payload.seq} drift=${driftMs}ms local=$localPositionMs remote=${payload.positionMs}",
-        maxSize = 10
-    )
-}
-
-private const val TELEMETRY_LOG_TAG = "WatchTogetherTelemetry"
-private const val SYNC_LOG_TAG = "WatchTogetherSync"
-private const val SeekStepMs = 2_000L
-private const val PostSeekCalibrationDelayMs = 900L
-private const val RemoteSeekCorrectionThresholdMs = 700L
 
 @Preview(showBackground = true, showSystemUi = true)
 @Composable
