@@ -383,6 +383,11 @@ class AndroidExoPlayerAdapter(
                 )
             )
         )
+        scheduleManualWarmupTimeout(
+            generation = generation,
+            preference = preference,
+            previousPreference = previousPreference
+        )
         hlsAheadPrefetcher.warmupQualitySwitch(
             HlsQualitySwitchWarmupRequest(
                 mediaUrl = mediaUrl,
@@ -628,6 +633,34 @@ class AndroidExoPlayerAdapter(
         }, state.graceWindowMs)
     }
 
+    private fun scheduleManualWarmupTimeout(
+        generation: Long,
+        preference: PlayerVideoQualityPreference,
+        previousPreference: PlayerVideoQualityPreference
+    ) {
+        mainHandler.postDelayed({
+            val pending = pendingQualitySwitch ?: return@postDelayed
+            if (pending.generation != generation) return@postDelayed
+            qualitySwitchGeneration += 1L
+            pendingQualitySwitch = null
+            hlsAheadPrefetcher.cancelStaleManualWarmups(qualitySwitchGeneration)
+            emit(
+                PlayerEvent.VideoQualitySwitchChanged(
+                    PlayerVideoQualitySwitchState(
+                        phase = PlayerVideoQualitySwitchPhase.Fallback,
+                        preference = preference,
+                        effectivePreference = previousPreference,
+                        detail = "目标清晰度预热超时，已继续保持当前播放。"
+                    )
+                )
+            )
+            PlayerDebugLog.d(
+                ABR_LOG_TAG,
+                "manual_switch_timeout_fallback generation=$generation target=${preference.label} detail=warmup timeout"
+            )
+        }, ManualWarmupTimeoutMs)
+    }
+
     private fun scheduleCommitReadyTimeout(state: CommittedQualitySwitch) {
         mainHandler.postDelayed({
             val active = committedQualitySwitch ?: return@postDelayed
@@ -773,6 +806,7 @@ class AndroidExoPlayerAdapter(
                         // Commit attempts use an exact target height after cache bridge warmup.
                         // Once stable, relax back to an adaptive ceiling so ExoPlayer can keep
                         // playback smooth if bandwidth fluctuates.
+                        clearViewportSizeConstraints()
                         setMinVideoSize(1, minHeight)
                         setMaxVideoSize(Int.MAX_VALUE, manualHeight)
                         setForceHighestSupportedBitrate(committingManualSwitch)
@@ -847,6 +881,7 @@ class AndroidExoPlayerAdapter(
         const val DeterministicSwitchPulseCount = 3
         const val OldBufferStillAdvancingThresholdMs = 1_800L
         const val SourceRefreshBridgeThreshold = 2
+        const val ManualWarmupTimeoutMs = 12_000L
     }
 }
 
