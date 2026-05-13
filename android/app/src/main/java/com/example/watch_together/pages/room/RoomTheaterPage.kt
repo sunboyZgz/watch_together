@@ -171,60 +171,6 @@ internal fun RoomTheaterPage(
     }
 }
 
-@Deprecated("Legacy player_default entry is archived; active app uses the ui.player RoomTheaterPage overload.")
-@Composable
-internal fun RoomTheaterPage(
-    uiState: com.example.watch_together.ui.player_default.RoomPlayerUiState,
-    adapter: com.example.watch_together.ui.player_default.PlayerAdapter,
-    hostUserId: String,
-    mediaTitle: String,
-    mediaEpisodeLabel: String?,
-    isHostController: Boolean,
-    onPlaybackToggleClick: () -> Unit,
-    onSeekBackwardClick: () -> Unit,
-    onSeekForwardClick: () -> Unit,
-    onProgressSeekCommit: (Long) -> Unit,
-    onPlaybackSpeedChange: (Float) -> Unit,
-    onVideoQualityPreferenceChange: (com.example.watch_together.ui.player_default.PlayerVideoQualityPreference) -> Unit,
-    onJoinRoomInputChange: (String) -> Unit,
-    onCreateAndJoinAsHost: () -> Unit,
-    onJoinAsViewer: () -> Unit,
-    onRejoinCurrentUser: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    Box(
-        modifier = modifier
-            .fillMaxSize()
-            .background(RoomBackground)
-            .padding(18.dp),
-        contentAlignment = Alignment.Center
-    ) {
-        Surface(
-            color = RoomCard,
-            shape = RoundedCornerShape(24.dp),
-            border = BorderStroke(1.dp, RoomOutline)
-        ) {
-            Column(
-                modifier = Modifier.padding(18.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                Text(
-                    text = "旧播放器页面已归档",
-                    color = RoomText,
-                    fontSize = 20.sp,
-                    fontWeight = FontWeight.Black
-                )
-                Text(
-                    text = "当前 App 入口已切到新版 ui.player 播放器；legacy player_default 仅保留为可编译参考。",
-                    color = RoomTextMuted,
-                    fontSize = 13.sp,
-                    lineHeight = 18.sp
-                )
-            }
-        }
-    }
-}
-
 @Composable
 private fun RoomHeader(
     roomCode: String,

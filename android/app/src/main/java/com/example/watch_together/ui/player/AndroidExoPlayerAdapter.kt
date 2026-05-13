@@ -22,7 +22,6 @@ import androidx.media3.exoplayer.hls.HlsMediaSource
 import androidx.media3.exoplayer.source.MediaLoadData
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
 import androidx.media3.ui.PlayerView
-import com.example.watch_together.ui.player_default.PlayerCacheProvider
 
 @OptIn(UnstableApi::class)
 class AndroidExoPlayerAdapter(context: Context) : PlayerAdapter {

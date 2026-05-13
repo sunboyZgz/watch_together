@@ -6,8 +6,8 @@ import com.example.watch_together.sync.protocol.PausePayload
 import com.example.watch_together.sync.protocol.PlayPayload
 import com.example.watch_together.sync.protocol.SetPlaybackRatePayload
 import com.example.watch_together.sync.protocol.SeekPayload
-import com.example.watch_together.ui.player_default.PlayerAdapter
-import com.example.watch_together.ui.player_default.PlayerEvent
+import com.example.watch_together.ui.player.PlayerAdapter
+import com.example.watch_together.ui.player.PlayerEvent
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -520,17 +520,21 @@ private class FakePlayerAdapter : PlayerAdapter {
         seekPositionMs = positionMs
     }
 
-    override fun reset() = Unit
-
     override fun getCurrentPosition(): Long = currentPositionMs
 
     override fun getDuration(): Long = 0L
+
+    override fun getBufferedPosition(): Long = 0L
+
+    override fun getBufferedPercentage(): Int = 0
 
     override fun isPlaying(): Boolean = false
 
     override fun setPlaybackSpeed(speed: Float) {
         this.speed = speed
     }
+
+    override fun setVideoQualityPreference(preference: com.example.watch_together.ui.player.PlayerVideoQualityPreference) = Unit
 
     override fun release() = Unit
 }
