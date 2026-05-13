@@ -49,8 +49,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.PointerId
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
@@ -77,11 +77,30 @@ private val PlayerPrimary = Color(0xFFFF82C9)
 private val PlayerAccent = Color(0xFF8FE7FF)
 private const val FullscreenMenuSpeed = "speed"
 private const val FullscreenMenuQuality = "quality"
+private const val FullscreenMenuDisplay = "display"
 private const val FullscreenSwipeMaxSeekMs = 60_000L
 private const val FullscreenControlGestureExclusionDp = 112
+private const val FullscreenMenuGestureExclusionDp = 224
 private const val FullscreenSwipeActivationDp = 28
 private const val FullscreenSwipeMinCommitMs = 1_000L
 private const val HorizontalGestureDominanceRatio = 1.35f
+
+private enum class VideoDisplayMode(
+    val label: String,
+    val description: String,
+    val resizeMode: Int
+) {
+    Fit(
+        label = "适应",
+        description = "完整显示",
+        resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
+    ),
+    Fill(
+        label = "填满",
+        description = "铺满屏幕",
+        resizeMode = AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+    )
+}
 
 @Composable
 fun PlayerCoreShell(
@@ -145,6 +164,7 @@ private fun PlayerViewport(
     var fullscreenRequested by rememberSaveable { mutableStateOf(false) }
     var fullscreenVisible by rememberSaveable { mutableStateOf(false) }
     var originalOrientation by rememberSaveable { mutableStateOf<Int?>(null) }
+    var videoDisplayMode by rememberSaveable { mutableStateOf(VideoDisplayMode.Fit) }
     var interactionTick by rememberSaveable { mutableStateOf(0) }
     var attachGeneration by rememberSaveable { mutableStateOf(0) }
 
@@ -190,9 +210,11 @@ private fun PlayerViewport(
         attachGeneration = attachGeneration,
         state = state,
         controlHint = controlHint,
+        videoDisplayMode = videoDisplayMode,
         controlsVisible = controlsVisible,
         fullscreenVisible = false,
         playbackControlsEnabled = playbackControlsEnabled,
+        onControlInteraction = { keepControlsVisible() },
         onTap = { keepControlsVisible() },
         onPlaybackToggleClick = {
             keepControlsVisible()
@@ -202,14 +224,14 @@ private fun PlayerViewport(
             keepControlsVisible()
             onSeekBackwardClick()
         },
-            onSeekForwardClick = {
-                keepControlsVisible()
-                onSeekForwardClick()
-            },
-            onProgressSeekCommit = onProgressSeekCommit,
-            onSettingsClick = {
-                settingsVisible = true
-                keepControlsVisible()
+        onSeekForwardClick = {
+            keepControlsVisible()
+            onSeekForwardClick()
+        },
+        onProgressSeekCommit = onProgressSeekCommit,
+        onSettingsClick = {
+            settingsVisible = true
+            keepControlsVisible()
         },
         onFullscreenClick = {
             requestFullscreen()
@@ -220,6 +242,10 @@ private fun PlayerViewport(
         },
         onVideoQualityPreferenceChange = {
             onVideoQualityPreferenceChange(it)
+            keepControlsVisible()
+        },
+        onVideoDisplayModeChange = { mode ->
+            videoDisplayMode = mode
             keepControlsVisible()
         },
         modifier = Modifier
@@ -242,9 +268,11 @@ private fun PlayerViewport(
                 attachGeneration = attachGeneration,
                 state = state,
                 controlHint = controlHint,
+                videoDisplayMode = videoDisplayMode,
                 controlsVisible = controlsVisible,
                 fullscreenVisible = true,
                 playbackControlsEnabled = playbackControlsEnabled,
+                onControlInteraction = { keepControlsVisible() },
                 onTap = {
                     controlsVisible = !controlsVisible
                     interactionTick += 1
@@ -275,6 +303,10 @@ private fun PlayerViewport(
                     onVideoQualityPreferenceChange(it)
                     keepControlsVisible()
                 },
+                onVideoDisplayModeChange = { mode ->
+                    videoDisplayMode = mode
+                    keepControlsVisible()
+                },
                 modifier = Modifier
                     .fillMaxSize()
                     .background(Color.Black),
@@ -288,6 +320,7 @@ private fun PlayerViewport(
             playbackSpeed = state.playbackSpeed,
             availableVideoQualities = state.availableVideoQualities,
             videoQualityPreference = state.videoQualityPreference,
+            videoDisplayMode = videoDisplayMode,
             enabled = playbackControlsEnabled,
             onDismiss = {
                 settingsVisible = false
@@ -300,6 +333,10 @@ private fun PlayerViewport(
             onVideoQualityPreferenceChange = { preference ->
                 onVideoQualityPreferenceChange(preference)
                 keepControlsVisible()
+            },
+            onVideoDisplayModeChange = { mode ->
+                videoDisplayMode = mode
+                keepControlsVisible()
             }
         )
     }
@@ -311,9 +348,11 @@ private fun PlayerSurface(
     attachGeneration: Int,
     state: PlayerRuntimeState,
     controlHint: String,
+    videoDisplayMode: VideoDisplayMode,
     controlsVisible: Boolean,
     fullscreenVisible: Boolean,
     playbackControlsEnabled: Boolean,
+    onControlInteraction: () -> Unit,
     onTap: () -> Unit,
     onPlaybackToggleClick: () -> Unit,
     onSeekBackwardClick: () -> Unit,
@@ -323,6 +362,7 @@ private fun PlayerSurface(
     onFullscreenClick: () -> Unit,
     onPlaybackSpeedChange: (Float) -> Unit,
     onVideoQualityPreferenceChange: (PlayerVideoQualityPreference) -> Unit,
+    onVideoDisplayModeChange: (VideoDisplayMode) -> Unit,
     modifier: Modifier,
     shape: RoundedCornerShape
 ) {
@@ -338,13 +378,14 @@ private fun PlayerSurface(
         fullscreenMenu = ""
     }
 
-    val gestureModifier = Modifier.pointerInput(fullscreenVisible, playbackControlsEnabled, scrubDurationMs) {
+    val gestureModifier = Modifier.pointerInput(fullscreenVisible, playbackControlsEnabled, controlsVisible, scrubDurationMs) {
         awaitEachGesture {
             val down = awaitFirstDown(requireUnconsumed = false)
             val controlStripHeightPx = FullscreenControlGestureExclusionDp.dp.toPx()
             val activationDistancePx = FullscreenSwipeActivationDp.dp.toPx()
-            val startsInControlStrip = down.position.y >= size.height - controlStripHeightPx
+            val startsInControlStrip = controlsVisible && down.position.y >= size.height - controlStripHeightPx
             val canScrub = fullscreenVisible && playbackControlsEnabled && scrubDurationMs > 0L && !startsInControlStrip
+            val canToggleControls = !fullscreenVisible || !startsInControlStrip
             var pointerId: PointerId = down.id
             var totalX = 0f
             var totalY = 0f
@@ -369,7 +410,7 @@ private fun PlayerSurface(
                 if (!change.pressed) {
                     if (horizontalScrub && abs(scrubDeltaMs) >= FullscreenSwipeMinCommitMs) {
                         onProgressSeekCommit(scrubTargetPositionMs.coerceIn(0L, scrubDurationMs))
-                    } else if (!horizontalScrub && !gestureResolved) {
+                    } else if (!horizontalScrub && !gestureResolved && canToggleControls) {
                         closeFullscreenMenu()
                         onTap()
                     }
@@ -411,10 +452,11 @@ private fun PlayerSurface(
         }
     }
     val surfaceGestureModifier = Modifier.then(gestureModifier)
-    val tapOnlyModifier = Modifier.pointerInput(fullscreenVisible) {
+    val tapOnlyModifier = Modifier.pointerInput(fullscreenVisible, controlsVisible) {
         awaitEachGesture {
             val down = awaitFirstDown(requireUnconsumed = false)
             val controlStripHeightPx = FullscreenControlGestureExclusionDp.dp.toPx()
+            val startsInControlStrip = controlsVisible && down.position.y >= size.height - controlStripHeightPx
             var moved = false
             while (true) {
                 val event = awaitPointerEvent()
@@ -423,7 +465,7 @@ private fun PlayerSurface(
                 val delta = change.positionChange()
                 if (abs(delta.x) > 2f || abs(delta.y) > 2f) moved = true
                 if (!change.pressed) {
-                    if (!moved && (!fullscreenVisible || down.position.y < size.height - controlStripHeightPx)) {
+                    if (!moved && (!fullscreenVisible || !startsInControlStrip)) {
                         closeFullscreenMenu()
                         onTap()
                     }
@@ -437,6 +479,11 @@ private fun PlayerSurface(
     } else {
         tapOnlyModifier
     }
+    val gestureBottomPadding = when {
+        fullscreenVisible && controlsVisible && fullscreenMenu.isNotBlank() -> FullscreenMenuGestureExclusionDp.dp
+        fullscreenVisible && controlsVisible -> FullscreenControlGestureExclusionDp.dp
+        else -> 0.dp
+    }
 
     Surface(
         modifier = modifier,
@@ -447,7 +494,6 @@ private fun PlayerSurface(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .then(activeGestureModifier)
                 .background(
                     Brush.linearGradient(
                         listOf(Color(0xFF31285C), Color(0xFF172038), Color.Black)
@@ -459,7 +505,7 @@ private fun PlayerSurface(
                 factory = { context ->
                     PlayerView(context).apply {
                         useController = false
-                        resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
+                        resizeMode = videoDisplayMode.resizeMode
                         setShutterBackgroundColor(android.graphics.Color.BLACK)
                         adapter.attach(this)
                     }
@@ -467,9 +513,15 @@ private fun PlayerSurface(
                 update = { playerView ->
                     attachGeneration
                     playerView.useController = false
-                    playerView.resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
+                    playerView.resizeMode = videoDisplayMode.resizeMode
                     adapter.attach(playerView)
                 }
+            )
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(bottom = gestureBottomPadding)
+                    .then(activeGestureModifier)
             )
 
             if (controlsVisible) {
@@ -498,6 +550,7 @@ private fun PlayerSurface(
                     playbackSpeed = state.playbackSpeed,
                     availableVideoQualities = state.availableVideoQualities,
                     videoQualityPreference = state.videoQualityPreference,
+                    videoDisplayMode = videoDisplayMode,
                     enabled = playbackControlsEnabled,
                     onPlaybackSpeedChange = { speed ->
                         closeFullscreenMenu()
@@ -506,6 +559,10 @@ private fun PlayerSurface(
                     onVideoQualityPreferenceChange = { preference ->
                         closeFullscreenMenu()
                         onVideoQualityPreferenceChange(preference)
+                    },
+                    onVideoDisplayModeChange = { mode ->
+                        closeFullscreenMenu()
+                        onVideoDisplayModeChange(mode)
                     },
                     modifier = Modifier
                         .align(Alignment.BottomEnd)
@@ -526,11 +583,18 @@ private fun PlayerSurface(
                     onSettingsClick = onSettingsClick,
                     onFullscreenClick = onFullscreenClick,
                     onFullscreenSpeedClick = {
+                        onControlInteraction()
                         fullscreenMenu = if (fullscreenMenu == FullscreenMenuSpeed) "" else FullscreenMenuSpeed
                     },
                     onFullscreenQualityClick = {
+                        onControlInteraction()
                         fullscreenMenu = if (fullscreenMenu == FullscreenMenuQuality) "" else FullscreenMenuQuality
                     },
+                    onFullscreenDisplayClick = {
+                        onControlInteraction()
+                        fullscreenMenu = if (fullscreenMenu == FullscreenMenuDisplay) "" else FullscreenMenuDisplay
+                    },
+                    onProgressSeekCommit = onProgressSeekCommit,
                     modifier = Modifier.align(Alignment.BottomCenter)
                 )
             }
@@ -695,7 +759,8 @@ private fun SeekProgressBar(
     bufferedProgress: Float,
     enabled: Boolean,
     onProgressChange: (Float) -> Unit,
-    onProgressCommit: () -> Unit
+    onProgressCommit: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
     val colors = SliderDefaults.colors(
         thumbColor = PlayerText,
@@ -711,7 +776,7 @@ private fun SeekProgressBar(
         onValueChangeFinished = onProgressCommit,
         enabled = enabled,
         colors = colors,
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .height(26.dp),
         thumb = {
@@ -764,6 +829,8 @@ private fun PlayerOverlayControls(
     onFullscreenClick: () -> Unit,
     onFullscreenSpeedClick: () -> Unit,
     onFullscreenQualityClick: () -> Unit,
+    onFullscreenDisplayClick: () -> Unit,
+    onProgressSeekCommit: (Long) -> Unit,
     modifier: Modifier = Modifier
 ) {
     Column(
@@ -775,7 +842,7 @@ private fun PlayerOverlayControls(
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Row(horizontalArrangement = Arrangement.spacedBy(7.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -787,6 +854,17 @@ private fun PlayerOverlayControls(
                 )
                 OverlayControlChip(label = "-2s", enabled = playbackControlsEnabled, onClick = onSeekBackwardClick)
                 OverlayControlChip(label = "+2s", enabled = playbackControlsEnabled, onClick = onSeekForwardClick)
+            }
+
+            if (fullscreenVisible) {
+                FullscreenControlProgressBar(
+                    state = state,
+                    enabled = playbackControlsEnabled,
+                    onProgressSeekCommit = onProgressSeekCommit,
+                    modifier = Modifier.weight(1f)
+                )
+            } else {
+                Spacer(Modifier.weight(1f))
             }
 
             if (fullscreenVisible) {
@@ -802,6 +880,12 @@ private fun PlayerOverlayControls(
                         selected = fullscreenMenu == FullscreenMenuQuality,
                         enabled = playbackControlsEnabled,
                         onClick = onFullscreenQualityClick
+                    )
+                    FullscreenBottomMenuChip(
+                        label = "画面",
+                        selected = fullscreenMenu == FullscreenMenuDisplay,
+                        enabled = playbackControlsEnabled,
+                        onClick = onFullscreenDisplayClick
                     )
                 }
             } else {
@@ -820,14 +904,71 @@ private fun PlayerOverlayControls(
 }
 
 @Composable
+private fun FullscreenControlProgressBar(
+    state: PlayerRuntimeState,
+    enabled: Boolean,
+    onProgressSeekCommit: (Long) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var dragging by rememberSaveable { mutableStateOf(false) }
+    var dragPositionMs by rememberSaveable { mutableStateOf(0L) }
+    val safeDuration = state.duration.coerceAtLeast(0L)
+    val displayPosition = if (dragging) dragPositionMs else state.currentPosition
+    val progress = if (safeDuration > 0L) {
+        (displayPosition.toFloat() / safeDuration.toFloat()).coerceIn(0f, 1f)
+    } else {
+        0f
+    }
+
+    Row(
+        modifier = modifier,
+        horizontalArrangement = Arrangement.spacedBy(9.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = formatMs(displayPosition),
+            color = PlayerTextMuted,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Bold,
+            maxLines = 1
+        )
+        SeekProgressBar(
+            progress = progress,
+            bufferedProgress = state.bufferedPercentage / 100f,
+            enabled = enabled && safeDuration > 0L,
+            onProgressChange = { nextProgress ->
+                dragging = true
+                dragPositionMs = (safeDuration * nextProgress).toLong().coerceIn(0L, safeDuration)
+            },
+            onProgressCommit = {
+                if (dragging && safeDuration > 0L) {
+                    onProgressSeekCommit(dragPositionMs.coerceIn(0L, safeDuration))
+                }
+                dragging = false
+            },
+            modifier = Modifier.weight(1f)
+        )
+        Text(
+            text = formatMs(safeDuration),
+            color = PlayerTextMuted,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Bold,
+            maxLines = 1
+        )
+    }
+}
+
+@Composable
 private fun PlayerSettingsDrawer(
     playbackSpeed: Float,
     availableVideoQualities: List<PlayerVideoQualityOption>,
     videoQualityPreference: PlayerVideoQualityPreference,
+    videoDisplayMode: VideoDisplayMode,
     enabled: Boolean,
     onDismiss: () -> Unit,
     onPlaybackSpeedChange: (Float) -> Unit,
-    onVideoQualityPreferenceChange: (PlayerVideoQualityPreference) -> Unit
+    onVideoQualityPreferenceChange: (PlayerVideoQualityPreference) -> Unit,
+    onVideoDisplayModeChange: (VideoDisplayMode) -> Unit
 ) {
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Box(
@@ -862,6 +1003,24 @@ private fun PlayerSettingsDrawer(
                         selected = playbackSpeed.toSpeedLabel(),
                         enabled = enabled,
                         onSelect = { label -> onPlaybackSpeedChange(label.toFloat()) }
+                    )
+                    PlayerSettingsDivider()
+                    PlayerSettingsRow(
+                        title = "画面",
+                        options = VideoDisplayMode.entries.map { it.label },
+                        selected = videoDisplayMode.label,
+                        enabled = enabled,
+                        onSelect = { label ->
+                            VideoDisplayMode.entries
+                                .firstOrNull { mode -> mode.label == label }
+                                ?.let(onVideoDisplayModeChange)
+                        }
+                    )
+                    Text(
+                        text = "${videoDisplayMode.label}：${videoDisplayMode.description}。填满会铺满屏幕，但可能裁切少量画面。",
+                        color = Color(0xFF8B8494),
+                        fontSize = 11.sp,
+                        lineHeight = 15.sp
                     )
                     PlayerSettingsDivider()
                     PlayerSettingsRow(
@@ -970,13 +1129,19 @@ private fun FullscreenFloatingSelectorPanel(
     playbackSpeed: Float,
     availableVideoQualities: List<PlayerVideoQualityOption>,
     videoQualityPreference: PlayerVideoQualityPreference,
+    videoDisplayMode: VideoDisplayMode,
     enabled: Boolean,
     onPlaybackSpeedChange: (Float) -> Unit,
     onVideoQualityPreferenceChange: (PlayerVideoQualityPreference) -> Unit,
+    onVideoDisplayModeChange: (VideoDisplayMode) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val scrollState = rememberScrollState()
-    val title = if (menu == FullscreenMenuSpeed) "倍速" else "清晰度"
+    val title = when (menu) {
+        FullscreenMenuSpeed -> "倍速"
+        FullscreenMenuQuality -> "清晰度"
+        else -> "画面"
+    }
     Surface(
         modifier = modifier,
         color = Color(0xD6141827),
@@ -994,24 +1159,37 @@ private fun FullscreenFloatingSelectorPanel(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                if (menu == FullscreenMenuSpeed) {
-                    listOf(0.75f, 1.0f, 1.25f, 1.5f, 2.0f).forEach { speed ->
-                        FullscreenMenuOptionChip(
-                            label = speed.toSpeedLabel(),
-                            selected = playbackSpeed.toSpeedLabel() == speed.toSpeedLabel(),
-                            enabled = enabled,
-                            onClick = { onPlaybackSpeedChange(speed) }
-                        )
+                when (menu) {
+                    FullscreenMenuSpeed -> {
+                        listOf(0.75f, 1.0f, 1.25f, 1.5f, 2.0f).forEach { speed ->
+                            FullscreenMenuOptionChip(
+                                label = speed.toSpeedLabel(),
+                                selected = playbackSpeed.toSpeedLabel() == speed.toSpeedLabel(),
+                                enabled = enabled,
+                                onClick = { onPlaybackSpeedChange(speed) }
+                            )
+                        }
                     }
-                } else {
-                    availableVideoQualities.ifEmpty { listOf(PlayerVideoQualityOption.Auto) }.forEach { option ->
-                        val preference = PlayerVideoQualityPreference(option.height)
-                        FullscreenMenuOptionChip(
-                            label = option.settingsLabel(),
-                            selected = if (preference.isAuto) videoQualityPreference.isAuto else videoQualityPreference.height == preference.height,
-                            enabled = enabled,
-                            onClick = { onVideoQualityPreferenceChange(preference) }
-                        )
+                    FullscreenMenuQuality -> {
+                        availableVideoQualities.ifEmpty { listOf(PlayerVideoQualityOption.Auto) }.forEach { option ->
+                            val preference = PlayerVideoQualityPreference(option.height)
+                            FullscreenMenuOptionChip(
+                                label = option.settingsLabel(),
+                                selected = if (preference.isAuto) videoQualityPreference.isAuto else videoQualityPreference.height == preference.height,
+                                enabled = enabled,
+                                onClick = { onVideoQualityPreferenceChange(preference) }
+                            )
+                        }
+                    }
+                    FullscreenMenuDisplay -> {
+                        VideoDisplayMode.entries.forEach { mode ->
+                            FullscreenMenuOptionChip(
+                                label = mode.label,
+                                selected = videoDisplayMode == mode,
+                                enabled = enabled,
+                                onClick = { onVideoDisplayModeChange(mode) }
+                            )
+                        }
                     }
                 }
             }
@@ -1162,6 +1340,7 @@ private fun SettingsIconButton(enabled: Boolean, onClick: () -> Unit) {
 }
 
 @Composable
+@Suppress("DEPRECATION")
 private fun FullscreenSystemUiEffect() {
     val view = LocalView.current
     DisposableEffect(view) {
@@ -1170,6 +1349,10 @@ private fun FullscreenSystemUiEffect() {
             onDispose { }
         } else {
             WindowCompat.setDecorFitsSystemWindows(window, false)
+            val originalStatusBarColor = window.statusBarColor
+            val originalNavigationBarColor = window.navigationBarColor
+            window.statusBarColor = android.graphics.Color.TRANSPARENT
+            window.navigationBarColor = android.graphics.Color.TRANSPARENT
             val originalCutoutMode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                 window.attributes.layoutInDisplayCutoutMode
             } else {
@@ -1177,7 +1360,7 @@ private fun FullscreenSystemUiEffect() {
             }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                 window.attributes = window.attributes.apply {
-                    layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+                    layoutInDisplayCutoutMode = fullscreenCutoutMode()
                 }
             }
             val controller = WindowCompat.getInsetsController(window, window.decorView)
@@ -1187,6 +1370,8 @@ private fun FullscreenSystemUiEffect() {
             onDispose {
                 controller.show(WindowInsetsCompat.Type.systemBars())
                 WindowCompat.setDecorFitsSystemWindows(window, true)
+                window.statusBarColor = originalStatusBarColor
+                window.navigationBarColor = originalNavigationBarColor
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                     window.attributes = window.attributes.apply { layoutInDisplayCutoutMode = originalCutoutMode }
                 }
@@ -1219,6 +1404,14 @@ private fun Float.toSpeedLabel(): String {
 
 private fun PlayerVideoQualityOption.settingsLabel(): String {
     return if (isAuto) "自动" else label
+}
+
+private fun fullscreenCutoutMode(): Int {
+    return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+        WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
+    } else {
+        WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+    }
 }
 
 private tailrec fun Context.findActivity(): Activity? {
