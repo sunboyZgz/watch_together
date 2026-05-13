@@ -10,7 +10,7 @@ import com.example.watch_together.pages.home.HomePage
 import com.example.watch_together.pages.login.LoginPage
 import com.example.watch_together.pages.video.MediaEpisode
 import com.example.watch_together.pages.video.VideoSelectionPage
-import com.example.watch_together.ui.player.PlayerScreen
+import com.example.watch_together.pages.room.RoomTheaterScreen
 
 private enum class AppScreen {
     Login,
@@ -73,7 +73,7 @@ fun WatchTogetherApp() {
             }
         )
 
-        AppScreen.Player -> PlayerScreen(
+        AppScreen.Player -> RoomTheaterScreen(
             accessToken = sessionAccessToken,
             currentUserId = sessionUserId,
             currentUserNickname = sessionNickname,

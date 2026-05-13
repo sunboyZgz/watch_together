@@ -408,15 +408,18 @@ private fun PlayerSurface(
                 pointerId = change.id
 
                 if (!change.pressed) {
-                    if (horizontalScrub && abs(scrubDeltaMs) >= FullscreenSwipeMinCommitMs) {
-                        onProgressSeekCommit(scrubTargetPositionMs.coerceIn(0L, scrubDurationMs))
-                    } else if (!horizontalScrub && !gestureResolved && canToggleControls) {
-                        closeFullscreenMenu()
-                        onTap()
-                    }
+                    val shouldCommitScrub = horizontalScrub && abs(scrubDeltaMs) >= FullscreenSwipeMinCommitMs
+                    val commitPositionMs = scrubTargetPositionMs.coerceIn(0L, scrubDurationMs)
+                    val shouldToggleControls = !horizontalScrub && !gestureResolved && canToggleControls
                     scrubGestureActive = false
                     scrubAccumulatedPx = 0f
                     scrubDeltaMs = 0L
+                    if (shouldCommitScrub) {
+                        onProgressSeekCommit(commitPositionMs)
+                    } else if (shouldToggleControls) {
+                        closeFullscreenMenu()
+                        onTap()
+                    }
                     break
                 }
 

@@ -44,6 +44,7 @@ import kotlinx.coroutines.withContext
 import java.util.UUID
 
 @Composable
+@Suppress("DEPRECATION")
 fun PlayerScreen(
     accessToken: String = "",
     currentUserId: String = "",

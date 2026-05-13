@@ -1,6 +1,7 @@
 package com.example.watch_together.pages.room
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -8,33 +9,32 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
+import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -43,39 +43,139 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.media3.common.Player
 import androidx.media3.ui.PlayerView
+import com.example.watch_together.R
 import com.example.watch_together.sync.RoomMember
-import com.example.watch_together.ui.player_default.PlayerAdapter
-import com.example.watch_together.ui.player_default.PlayerCoreShell
-import com.example.watch_together.ui.player_default.PlayerEvent
-import com.example.watch_together.ui.player_default.PlayerRuntimeUiState
-import com.example.watch_together.ui.player_default.PlayerVideoQualityPreference
-import com.example.watch_together.ui.player_default.RoomPlayerUiState
-import com.example.watch_together.ui.player_default.SyncStatus
+import com.example.watch_together.ui.player.PlayerAdapter
+import com.example.watch_together.ui.player.PlayerScreen
+import com.example.watch_together.ui.player.PlayerEvent
+import com.example.watch_together.ui.player.PlayerRuntimeState
+import com.example.watch_together.ui.player.PlayerVideoQualityOption
+import com.example.watch_together.ui.player.PlayerVideoQualityPreference
 import com.example.watch_together.ui.theme.Watch_togetherTheme
 
-private val RoomBackground = Color(0xFF0F1325)
-private val RoomPanel = Color(0xB8242B45)
-private val RoomPanelSoft = Color(0x66333A58)
-private val RoomPrimary = Color(0xFFFF78C6)
-private val RoomAccent = Color(0xFF8FE7FF)
+private val RoomBackground = Color(0xFF080D22)
+private val RoomCard = Color(0xB81B2541)
+private val RoomCardStrong = Color(0xD61C2744)
+private val RoomPrimary = Color(0xFFFF76C8)
+private val RoomPrimarySoft = Color(0xFFFFA0DD)
+private val RoomPurple = Color(0xFFA875FF)
+private val RoomAccent = Color(0xFF92E8FF)
+private val RoomSuccess = Color(0xFF5EF09B)
 private val RoomText = Color(0xFFF9F3FF)
 private val RoomTextMuted = Color(0xC8D7D1E5)
-private val RoomOutline = Color(0x22FFFFFF)
+private val RoomTextDim = Color(0x8FD7D1E5)
+private val RoomOutline = Color(0x26FFFFFF)
 
-private val RoomBackdropGlowA = Brush.radialGradient(
-    colors = listOf(Color(0xFF514AA7), Color(0x00514AA7))
+private val RoomPrimaryGradient = Brush.horizontalGradient(
+    listOf(RoomPrimary, RoomPurple)
 )
-private val RoomBackdropGlowB = Brush.radialGradient(
-    colors = listOf(Color(0xFF7A466F), Color(0x007A466F))
-)
-private val RoomBackdropGlowC = Brush.radialGradient(
-    colors = listOf(Color(0xFF426B82), Color(0x00426B82))
-)
-
 @Composable
 internal fun RoomTheaterPage(
-    uiState: RoomPlayerUiState,
+    playerState: PlayerRuntimeState,
     adapter: PlayerAdapter,
+    roomCode: String,
+    roomRole: String?,
+    roomStatusLabel: String,
+    roomMembers: List<RoomMember>,
+    mediaTitle: String,
+    mediaSeasonLabel: String?,
+    mediaEpisodeLabel: String?,
+    isHostController: Boolean,
+    controlsEnabled: Boolean,
+    onPlaybackToggleClick: () -> Unit,
+    onSeekBackwardClick: () -> Unit,
+    onSeekForwardClick: () -> Unit,
+    onProgressSeekCommit: (Long) -> Unit,
+    onPlaybackSpeedChange: (Float) -> Unit,
+    onVideoQualityPreferenceChange: (PlayerVideoQualityPreference) -> Unit,
+    onInviteClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val clipboard = LocalClipboardManager.current
+
+    BoxWithConstraints(
+        modifier = modifier
+            .fillMaxSize()
+            .background(RoomBackground)
+    ) {
+        val compactWidth = maxWidth < 380.dp
+        val compactHeight = maxHeight < 760.dp
+        val horizontalPadding = if (compactWidth) 16.dp else 18.dp
+        val sectionGap = if (compactHeight) 14.dp else 16.dp
+        val displayRoomCode = roomCode.take(6).uppercase().ifBlank { "A7K2M9" }
+        val hasActiveRoom = roomCode.isNotBlank()
+        val onlineCount = roomMembers.size.coerceAtLeast(if (hasActiveRoom) 1 else 2)
+        val displayTitle = mediaTitle.takeUnless { it.isBlank() || it == "等待选择影片" } ?: "CLANNAD After Story"
+        val currentEpisodeNumber = episodeNumberFromLabel(mediaEpisodeLabel) ?: 14
+        val currentEpisodeLabel = "EP %02d".format(currentEpisodeNumber)
+        val displayPosition = playerState.currentPosition.takeIf { it > 0L } ?: (17 * 60 + 32) * 1000L
+
+        RoomNightBackdrop()
+
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = horizontalPadding)
+                .padding(top = if (compactHeight) 18.dp else 28.dp, bottom = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(sectionGap)
+        ) {
+            RoomHeader(
+                roomCode = displayRoomCode,
+                onlineCount = onlineCount,
+                roomMembers = roomMembers,
+                onShareClick = { clipboard.setText(AnnotatedString(displayRoomCode)) }
+            )
+
+            RoomPlayerCard(
+                adapter = adapter,
+                state = playerState,
+                title = displayTitle,
+                seasonLabel = mediaSeasonLabel,
+                episodeLabel = currentEpisodeLabel,
+                controlHint = roomStatusLabel,
+                isHostController = isHostController,
+                onlineCount = onlineCount,
+                roomRole = roomRole,
+                controlsEnabled = controlsEnabled,
+                onProgressSeekCommit = onProgressSeekCommit,
+                onPlaybackToggleClick = onPlaybackToggleClick,
+                onSeekBackwardClick = onSeekBackwardClick,
+                onSeekForwardClick = onSeekForwardClick,
+                onPlaybackSpeedChange = onPlaybackSpeedChange,
+                onVideoQualityPreferenceChange = onVideoQualityPreferenceChange
+            )
+
+            WorkInfoCard(
+                title = displayTitle,
+                currentEpisodeNumber = currentEpisodeNumber,
+                compactWidth = compactWidth
+            )
+
+            EpisodeSwitcherCard(
+                selectedEpisode = currentEpisodeNumber,
+                episodeCount = 24
+            )
+
+            BottomActionBar(
+                hasRoom = hasActiveRoom,
+                currentPosition = displayPosition,
+                isPlaying = playerState.isPlaying,
+                onInviteClick = {
+                    if (hasActiveRoom) clipboard.setText(AnnotatedString(displayRoomCode))
+                    onInviteClick()
+                },
+                onContinueClick = onPlaybackToggleClick
+            )
+        }
+    }
+}
+
+@Deprecated("Legacy player_default entry is archived; active app uses the ui.player RoomTheaterPage overload.")
+@Composable
+internal fun RoomTheaterPage(
+    uiState: com.example.watch_together.ui.player_default.RoomPlayerUiState,
+    adapter: com.example.watch_together.ui.player_default.PlayerAdapter,
     hostUserId: String,
     mediaTitle: String,
     mediaEpisodeLabel: String?,
@@ -85,179 +185,392 @@ internal fun RoomTheaterPage(
     onSeekForwardClick: () -> Unit,
     onProgressSeekCommit: (Long) -> Unit,
     onPlaybackSpeedChange: (Float) -> Unit,
-    onVideoQualityPreferenceChange: (PlayerVideoQualityPreference) -> Unit,
+    onVideoQualityPreferenceChange: (com.example.watch_together.ui.player_default.PlayerVideoQualityPreference) -> Unit,
     onJoinRoomInputChange: (String) -> Unit,
     onCreateAndJoinAsHost: () -> Unit,
     onJoinAsViewer: () -> Unit,
     onRejoinCurrentUser: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    BoxWithConstraints(
+    Box(
         modifier = modifier
             .fillMaxSize()
             .background(RoomBackground)
+            .padding(18.dp),
+        contentAlignment = Alignment.Center
     ) {
-        val compactHeight = maxHeight < 760.dp
-        val compactWidth = maxWidth < 380.dp
-        val horizontalPadding = if (compactWidth) 16.dp else 20.dp
-        val sectionGap = if (compactHeight) 14.dp else 18.dp
-        val roomCode = uiState.currentRoomId?.take(6)?.uppercase() ?: "A7K2M9"
-        val playbackStatusLabel = playbackStatusLabel(uiState, isHostController)
-        val mediaMeta = buildString {
-            append(mediaEpisodeLabel ?: "当前影片")
-            append(" · ")
-            append(playbackStatusLabel)
-        }
-
-        RoomPlayerBackdrop()
-
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = horizontalPadding)
-                .padding(top = if (compactHeight) 18.dp else 28.dp, bottom = 28.dp),
-            verticalArrangement = Arrangement.spacedBy(sectionGap)
+        Surface(
+            color = RoomCard,
+            shape = RoundedCornerShape(24.dp),
+            border = BorderStroke(1.dp, RoomOutline)
         ) {
-            RoomHeader(
-                roomCode = roomCode,
-                syncStatus = uiState.syncStatus
-            )
-
-            PlayerCoreShell(
-                adapter = adapter,
-                mediaTitle = mediaTitle,
-                mediaMeta = mediaMeta,
-                currentPosition = uiState.player.currentPosition,
-                duration = uiState.player.duration,
-                isPlaying = uiState.player.isPlaying,
-                playbackSpeed = uiState.displayPlaybackSpeed,
-                videoQualityLabel = uiState.player.videoVariant.displayLabel,
-                availableVideoQualities = uiState.player.availableVideoQualities,
-                videoQualityPreference = uiState.player.qualityPreferenceForSelectionUi,
-                videoQualitySwitchState = uiState.player.videoQualitySwitchState,
-                videoQualityNotice = uiState.player.videoQualityNotice,
-                controlHint = when {
-                    uiState.player.playbackState == Player.STATE_BUFFERING -> "正在缓冲，播放器恢复后会继续跟随同步。"
-                    uiState.player.playbackState == Player.STATE_ENDED -> "当前视频已播放结束。"
-                    !uiState.canControlPlayback -> "视频载入后可操作。"
-                    isHostController -> "房主操作会自动同步给房间成员。"
-                    uiState.isJoinedToRoom -> "你正在跟随房主，播放控制由房主同步。"
-                    else -> "先创建或加入房间，视频会自动载入。"
-                },
-                playbackButtonEnabled = uiState.canControlPlayback &&
-                    (isHostController || !uiState.isJoinedToRoom),
-                secondaryControlsEnabled = uiState.canControlPlayback,
-                compactWidth = compactWidth,
-                onPlaybackToggleClick = onPlaybackToggleClick,
-                onSeekBackwardClick = onSeekBackwardClick,
-                onSeekForwardClick = onSeekForwardClick,
-                onProgressSeekCommit = onProgressSeekCommit,
-                onPlaybackSpeedChange = onPlaybackSpeedChange,
-                onVideoQualityPreferenceChange = onVideoQualityPreferenceChange
-            )
-
-            TheaterStatusPanel(
-                hostUserId = hostUserId,
-                roomMembers = uiState.roomMembers,
-                activeUserId = uiState.activeUserId,
-                isHostController = isHostController,
-                playbackSpeed = uiState.displayPlaybackSpeed,
-                videoQualityLabel = uiState.player.videoVariant.displayLabel,
-                isJoinedToRoom = uiState.isJoinedToRoom,
-                syncStatus = uiState.syncStatus,
-                latestSeq = uiState.latestSyncState?.seq
-            )
-
-            SessionQuickActions(
-                currentRoomId = uiState.currentRoomId,
-                syncStatus = uiState.syncStatus,
-                joinRoomInput = uiState.joinRoomInput,
-                onJoinRoomInputChange = onJoinRoomInputChange,
-                onCreateAndJoinAsHost = onCreateAndJoinAsHost,
-                onJoinAsViewer = onJoinAsViewer,
-                onRejoinCurrentUser = onRejoinCurrentUser,
-                canRejoinCurrentUser = uiState.activeUserId != null && uiState.currentRoomId != null
-            )
+            Column(
+                modifier = Modifier.padding(18.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Text(
+                    text = "旧播放器页面已归档",
+                    color = RoomText,
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.Black
+                )
+                Text(
+                    text = "当前 App 入口已切到新版 ui.player 播放器；legacy player_default 仅保留为可编译参考。",
+                    color = RoomTextMuted,
+                    fontSize = 13.sp,
+                    lineHeight = 18.sp
+                )
+            }
         }
-    }
-}
-
-private fun playbackStatusLabel(
-    uiState: RoomPlayerUiState,
-    isHostController: Boolean
-): String {
-    return when (uiState.player.playbackState) {
-        Player.STATE_BUFFERING -> "缓冲中"
-        Player.STATE_ENDED -> "已结束"
-        Player.STATE_IDLE -> "等待载入"
-        Player.STATE_READY -> when {
-            uiState.player.isPlaying -> "正在播放"
-            uiState.isJoinedToRoom && !isHostController -> "跟随同步中"
-            else -> "已暂停"
-        }
-        else -> "准备中"
     }
 }
 
 @Composable
 private fun RoomHeader(
     roomCode: String,
-    syncStatus: SyncStatus
+    onlineCount: Int,
+    roomMembers: List<RoomMember>,
+    onShareClick: () -> Unit
 ) {
-    val clipboard = LocalClipboardManager.current
-
     Row(
         modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.Top,
-        horizontalArrangement = Arrangement.SpaceBetween
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.Top
     ) {
-        Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = "星夜放映室",
+                    color = RoomText,
+                    fontWeight = FontWeight.Black,
+                    fontSize = 34.sp,
+                    lineHeight = 38.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = " ✦",
+                    color = Color(0xFFC995FF),
+                    fontSize = 24.sp,
+                    fontWeight = FontWeight.Black
+                )
+            }
             Text(
-                text = "星夜放映室",
-                color = RoomText,
-                fontWeight = FontWeight.Black,
-                fontSize = 32.sp,
-                lineHeight = 36.sp
-            )
-            Text(
-                text = "同步观影 · ${syncStatus.label}",
+                text = "一起看，才更有星空的味道 ✦",
                 color = RoomTextMuted,
-                fontSize = 14.sp,
+                fontSize = 15.sp,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
         }
 
-        Surface(
-            modifier = Modifier.clickable {
-                clipboard.setText(AnnotatedString(roomCode))
-            },
-            color = Color(0x1CFFFFFF),
-            shape = RoundedCornerShape(999.dp),
-            border = BorderStroke(1.dp, RoomOutline)
+        Column(
+            horizontalAlignment = Alignment.End,
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Column(
-                modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(9.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    text = "房间码",
-                    color = RoomTextMuted,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.SemiBold
-                )
-                Text(
-                    text = roomCode,
-                    color = RoomText,
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.Bold
-                )
-                Text(
-                    text = "点击复制",
-                    color = RoomAccent.copy(alpha = 0.9f),
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.SemiBold
+                RoomCodeChip(roomCode = roomCode)
+                GlassIconButton(iconRes = R.drawable.share_upload, onClick = onShareClick)
+            }
+            OnlineMemberPreview(
+                onlineCount = onlineCount,
+                roomMembers = roomMembers
+            )
+        }
+    }
+}
+
+@Composable
+private fun RoomCodeChip(roomCode: String) {
+    Surface(
+        color = Color(0x1CFFFFFF),
+        shape = RoundedCornerShape(999.dp),
+        border = BorderStroke(1.dp, RoomOutline)
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 9.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("房间码", color = RoomTextMuted, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+            Text(roomCode, color = RoomText, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+        }
+    }
+}
+
+@Composable
+private fun GlassIconButton(
+    iconRes: Int,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        modifier = modifier.size(48.dp),
+        color = Color(0x22FFFFFF),
+        shape = RoundedCornerShape(18.dp),
+        border = BorderStroke(1.dp, RoomOutline),
+        onClick = onClick
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            Icon(
+                painter = painterResource(iconRes),
+                contentDescription = null,
+                tint = Color.Unspecified,
+                modifier = Modifier.size(25.dp)
+            )
+        }
+    }
+}
+
+@Composable
+private fun OnlineMemberPreview(
+    onlineCount: Int,
+    roomMembers: List<RoomMember>
+) {
+    Row(
+        modifier = Modifier.clickable { },
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(modifier = Modifier.width(66.dp).height(34.dp)) {
+            RoomAvatar(
+                label = roomMembers.getOrNull(0)?.nickname?.firstOrNull()?.toString() ?: "朋",
+                gradient = Brush.linearGradient(listOf(Color(0xFF84D9FF), Color(0xFF6D7BFF))),
+                modifier = Modifier.align(Alignment.CenterStart)
+            )
+            RoomAvatar(
+                label = roomMembers.getOrNull(1)?.nickname?.firstOrNull()?.toString() ?: "渚",
+                gradient = Brush.linearGradient(listOf(Color(0xFFFF89CB), Color(0xFFFFB27A))),
+                modifier = Modifier.align(Alignment.CenterStart).offset(x = 28.dp)
+            )
+        }
+        Text(
+            text = "$onlineCount 人在线",
+            color = RoomText,
+            fontSize = 15.sp,
+            fontWeight = FontWeight.SemiBold
+        )
+        Text(text = "›", color = RoomText, fontSize = 28.sp, lineHeight = 28.sp)
+    }
+}
+
+@Composable
+private fun RoomAvatar(
+    label: String,
+    gradient: Brush,
+    modifier: Modifier = Modifier
+) {
+    Box(
+        modifier = modifier
+            .size(34.dp)
+            .clip(CircleShape)
+            .background(gradient),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(label, color = RoomText, fontSize = 13.sp, fontWeight = FontWeight.Black)
+        Box(
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .size(9.dp)
+                .clip(CircleShape)
+                .background(RoomSuccess)
+        )
+    }
+}
+
+@Composable
+private fun RoomPlayerCard(
+    adapter: PlayerAdapter,
+    state: PlayerRuntimeState,
+    title: String,
+    seasonLabel: String?,
+    episodeLabel: String,
+    controlHint: String,
+    isHostController: Boolean,
+    onlineCount: Int,
+    roomRole: String?,
+    controlsEnabled: Boolean,
+    onProgressSeekCommit: (Long) -> Unit,
+    onPlaybackToggleClick: () -> Unit,
+    onSeekBackwardClick: () -> Unit,
+    onSeekForwardClick: () -> Unit,
+    onPlaybackSpeedChange: (Float) -> Unit,
+    onVideoQualityPreferenceChange: (PlayerVideoQualityPreference) -> Unit
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = RoomCard,
+        shape = RoundedCornerShape(28.dp),
+        border = BorderStroke(1.dp, RoomOutline)
+    ) {
+        Column(
+            modifier = Modifier.padding(10.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            PlayerScreen(
+                adapter = adapter,
+                state = state,
+                mediaTitle = title,
+                mediaMeta = listOfNotNull(seasonLabel, episodeLabel)
+                    .joinToString(" · ")
+                    .ifBlank { "正在一起看到 ${formatMs(state.currentPosition)}" },
+                controlHint = controlHint,
+                controlsEnabled = controlsEnabled,
+                onPlaybackToggleClick = onPlaybackToggleClick,
+                onSeekBackwardClick = onSeekBackwardClick,
+                onSeekForwardClick = onSeekForwardClick,
+                onProgressSeekCommit = onProgressSeekCommit,
+                onPlaybackSpeedChange = onPlaybackSpeedChange,
+                onVideoQualityPreferenceChange = onVideoQualityPreferenceChange,
+                modifier = Modifier.fillMaxWidth()
+            )
+
+            RoomActionStrip(
+                onlineCount = onlineCount,
+                isHostController = isHostController,
+                qualityLabel = state.videoVariant.displayLabel.ifBlank { state.videoQualityPreference.label },
+                roleLabel = roomRole,
+                availableVideoQualities = state.availableVideoQualities,
+                videoQualityPreference = state.videoQualityPreference,
+                onVideoQualityPreferenceChange = onVideoQualityPreferenceChange
+            )
+        }
+    }
+}
+
+@Composable
+private fun RoomActionStrip(
+    onlineCount: Int,
+    isHostController: Boolean,
+    qualityLabel: String,
+    roleLabel: String?,
+    availableVideoQualities: List<PlayerVideoQualityOption>,
+    videoQualityPreference: PlayerVideoQualityPreference,
+    onVideoQualityPreferenceChange: (PlayerVideoQualityPreference) -> Unit
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = Color(0x20FFFFFF),
+        shape = RoundedCornerShape(22.dp),
+        border = BorderStroke(1.dp, RoomOutline)
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 9.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            RoomActionItem(
+                iconRes = R.drawable.participants,
+                text = "$onlineCount 人在线",
+                modifier = Modifier.weight(1f)
+            )
+            RoomDivider()
+            RoomActionItem(
+                iconRes = R.drawable.crown,
+                text = when {
+                    isHostController -> "主控中"
+                    roleLabel.isNullOrBlank() -> "待加入"
+                    else -> "跟随中"
+                },
+                modifier = Modifier.weight(1f)
+            )
+            RoomDivider()
+            RoomActionItem(
+                iconRes = R.drawable.hd_quality,
+                text = qualityLabel.ifBlank { "切换清晰度" },
+                modifier = Modifier.weight(1.15f),
+                onClick = {
+                    onVideoQualityPreferenceChange(nextQualityPreference(availableVideoQualities, videoQualityPreference))
+                }
+            )
+            RoomDivider()
+            RoomActionItem(
+                iconRes = R.drawable.chat,
+                text = "一起聊天",
+                modifier = Modifier.weight(1f)
+            )
+        }
+    }
+}
+
+@Composable
+private fun RoomActionItem(
+    iconRes: Int,
+    text: String,
+    modifier: Modifier = Modifier,
+    onClick: (() -> Unit)? = null
+) {
+    Row(
+        modifier = modifier
+            .clip(RoundedCornerShape(999.dp))
+            .clickable(enabled = onClick != null) { onClick?.invoke() }
+            .padding(horizontal = 2.dp, vertical = 2.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(
+            painter = painterResource(iconRes),
+            contentDescription = null,
+            tint = Color.Unspecified,
+            modifier = Modifier.size(18.dp)
+        )
+        Text(
+            text = text,
+            color = RoomText,
+            fontSize = 10.5.sp,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+    }
+}
+
+@Composable
+private fun RoomDivider() {
+    Box(
+        modifier = Modifier
+            .width(1.dp)
+            .height(20.dp)
+            .background(RoomOutline)
+    )
+}
+
+@Composable
+private fun WorkInfoCard(
+    title: String,
+    currentEpisodeNumber: Int,
+    compactWidth: Boolean
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = RoomCardStrong,
+        shape = RoundedCornerShape(24.dp),
+        border = BorderStroke(1.dp, RoomOutline)
+    ) {
+        if (compactWidth) {
+            Column(
+                modifier = Modifier.padding(14.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+                WorkPoster(modifier = Modifier.fillMaxWidth().height(160.dp))
+                WorkCopy(title = title, currentEpisodeNumber = currentEpisodeNumber)
+            }
+        } else {
+            Row(
+                modifier = Modifier.padding(14.dp),
+                horizontalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                WorkPoster(modifier = Modifier.width(116.dp).height(160.dp))
+                WorkCopy(
+                    title = title,
+                    currentEpisodeNumber = currentEpisodeNumber,
+                    modifier = Modifier.weight(1f)
                 )
             }
         }
@@ -265,266 +578,287 @@ private fun RoomHeader(
 }
 
 @Composable
-private fun TheaterStatusPanel(
-    hostUserId: String,
-    roomMembers: List<RoomMember>,
-    activeUserId: String?,
-    isHostController: Boolean,
-    playbackSpeed: Float,
-    videoQualityLabel: String,
-    isJoinedToRoom: Boolean,
-    syncStatus: SyncStatus,
-    latestSeq: Long?
-) {
-    val hostMember = roomMembers.firstOrNull { it.role.equals("host", ignoreCase = true) }
-    val viewerMember = roomMembers.firstOrNull { !it.role.equals("host", ignoreCase = true) }
-    val hostDisplayName = memberDisplayName(
-        member = hostMember,
-        activeUserId = activeUserId,
-        fallbackUserId = hostUserId
-    )
-    val viewerDisplayName = viewerSlotDisplayName(viewerMember, activeUserId)
+private fun WorkPoster(modifier: Modifier = Modifier) {
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(14.dp))
+            .background(Brush.verticalGradient(listOf(Color(0xFF7FB9FF), Color(0xFFFFA7DD), Color(0xFF222A58))))
+    ) {
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            drawCircle(Color(0x55FFFFFF), radius = size.width * 0.5f, center = androidx.compose.ui.geometry.Offset(size.width * 0.26f, size.height * 0.08f))
+            drawCircle(Color(0x44FF76C8), radius = size.width * 0.42f, center = androidx.compose.ui.geometry.Offset(size.width * 0.82f, size.height * 0.23f))
+            drawLine(Color(0xAAFFFFFF), androidx.compose.ui.geometry.Offset(size.width * 0.30f, size.height * 0.55f), androidx.compose.ui.geometry.Offset(size.width * 0.30f, size.height * 0.78f), 3.dp.toPx())
+            drawLine(Color(0xAAFFFFFF), androidx.compose.ui.geometry.Offset(size.width * 0.64f, size.height * 0.49f), androidx.compose.ui.geometry.Offset(size.width * 0.64f, size.height * 0.78f), 3.dp.toPx())
+        }
+        Text(
+            text = "CLANNAD",
+            color = RoomText,
+            fontSize = 22.sp,
+            fontWeight = FontWeight.Light,
+            letterSpacing = 2.sp,
+            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 22.dp)
+        )
+    }
+}
 
+@Composable
+private fun WorkCopy(
+    title: String,
+    currentEpisodeNumber: Int,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier,
+        verticalArrangement = Arrangement.spacedBy(9.dp)
+    ) {
+        Text(
+            text = title,
+            color = RoomText,
+            fontSize = 25.sp,
+            lineHeight = 29.sp,
+            fontWeight = FontWeight.Black,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis
+        )
+        Text(
+            text = "第 2 季 / 共 24 集 / 治愈 · 校园 · 恋爱",
+            color = RoomTextMuted,
+            fontSize = 14.sp,
+            lineHeight = 19.sp
+        )
+        Text(
+            text = "冈崎朋也与古河渚在毕业后步入新的人生阶段，围绕家庭、成长与羁绊展开更加深刻的故事。温柔而克制的叙事，让平凡日常闪耀出动人的情感力量。",
+            color = RoomText,
+            fontSize = 15.sp,
+            lineHeight = 25.sp,
+            maxLines = 5,
+            overflow = TextOverflow.Ellipsis
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            GenreTag("治愈")
+            GenreTag("校园", accent = RoomAccent)
+            GenreTag("恋爱", accent = RoomPrimary)
+        }
+        Text(
+            text = "当前播放 EP %02d".format(currentEpisodeNumber),
+            color = RoomTextDim,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.SemiBold
+        )
+    }
+}
+
+@Composable
+private fun GenreTag(label: String, accent: Color = RoomPurple) {
+    Surface(
+        color = accent.copy(alpha = 0.14f),
+        shape = RoundedCornerShape(8.dp),
+        border = BorderStroke(1.dp, accent.copy(alpha = 0.55f))
+    ) {
+        Text(
+            text = label,
+            color = accent.copy(alpha = 0.95f),
+            fontSize = 13.sp,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp)
+        )
+    }
+}
+
+@Composable
+private fun EpisodeSwitcherCard(
+    selectedEpisode: Int,
+    episodeCount: Int
+) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        color = RoomPanel,
-        shape = RoundedCornerShape(26.dp),
+        color = RoomCardStrong,
+        shape = RoundedCornerShape(24.dp),
         border = BorderStroke(1.dp, RoomOutline)
     ) {
         Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
+            modifier = Modifier.padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(13.dp)
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        painter = painterResource(R.drawable.play),
+                        contentDescription = null,
+                        tint = Color.Unspecified,
+                        modifier = Modifier.size(24.dp)
+                    )
                     Text(
-                        text = "房间同步",
+                        text = "本季全部剧集",
                         color = RoomText,
                         fontSize = 17.sp,
                         fontWeight = FontWeight.Black
                     )
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(5.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        text = if (isHostController) {
-                            "你的播放器操作会成为房间权威状态。"
-                        } else {
-                            "当前设备正在跟随房主状态。"
-                        },
+                        text = "第 2 季（共 24 集）",
                         color = RoomTextMuted,
-                        fontSize = 12.sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Icon(
+                        painter = painterResource(R.drawable.chevron_down),
+                        contentDescription = null,
+                        tint = Color.Unspecified,
+                        modifier = Modifier.size(18.dp)
                     )
                 }
-                LiveStatusPill(
-                    label = if (isJoinedToRoom) "在线" else "待加入",
-                    active = isJoinedToRoom
-                )
             }
 
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                CompactMetric(
-                    label = "房主",
-                    value = if (isHostController) "你" else hostDisplayName,
-                    modifier = Modifier.weight(1f)
-                )
-                CompactMetric(
-                    label = "成员",
-                    value = viewerDisplayName,
-                    modifier = Modifier.weight(1f)
-                )
-                CompactMetric(
-                    label = "倍速",
-                    value = "${playbackSpeed}x",
-                    modifier = Modifier.weight(1f),
-                    accent = RoomAccent
-                )
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                (1..episodeCount).chunked(6).forEach { episodeRow ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        episodeRow.forEach { episodeNumber ->
+                            EpisodeCell(
+                                episodeNumber = episodeNumber,
+                                selected = episodeNumber == selectedEpisode,
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                        repeat(6 - episodeRow.size) {
+                            Spacer(modifier = Modifier.weight(1f))
+                        }
+                    }
+                }
             }
-
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                StatusChip(if (isHostController) "主控中" else "跟随中")
-                StatusChip(videoQualityLabel)
-                StatusChip("seq ${latestSeq ?: "-"}")
-                StatusChip(syncStatus.label)
-            }
-        }
-    }
-}
-
-@Composable
-private fun LiveStatusPill(
-    label: String,
-    active: Boolean
-) {
-    Surface(
-        color = if (active) Color(0x227DFFB0) else Color(0x22FFC36F),
-        shape = RoundedCornerShape(999.dp),
-        border = BorderStroke(1.dp, if (active) Color(0x667DFFB0) else Color(0x66FFC36F))
-    ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(7.dp)
-                    .clip(CircleShape)
-                    .background(if (active) Color(0xFF7DFFB0) else Color(0xFFFFC36F))
-            )
             Text(
-                text = label,
-                color = RoomText,
+                text = "✦  左右滑动查看更多剧集",
+                color = RoomTextDim,
                 fontSize = 12.sp,
-                fontWeight = FontWeight.Bold
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.align(Alignment.CenterHorizontally)
             )
         }
     }
 }
 
 @Composable
-private fun CompactMetric(
-    label: String,
-    value: String,
-    modifier: Modifier = Modifier,
-    accent: Color = RoomPrimary
+private fun EpisodeCell(
+    episodeNumber: Int,
+    selected: Boolean,
+    modifier: Modifier = Modifier
 ) {
-    Surface(
-        modifier = modifier,
-        color = RoomPanelSoft,
-        shape = RoundedCornerShape(18.dp),
-        border = BorderStroke(1.dp, RoomOutline)
-    ) {
-        Column(
-            modifier = Modifier.padding(horizontal = 11.dp, vertical = 9.dp),
-            verticalArrangement = Arrangement.spacedBy(3.dp)
-        ) {
-            Text(text = label, color = RoomTextMuted, fontSize = 11.sp)
-            Text(
-                text = value,
-                color = accent,
-                fontSize = 15.sp,
-                fontWeight = FontWeight.Bold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-        }
+    val background = if (selected) {
+        RoomPrimaryGradient
+    } else {
+        Brush.verticalGradient(listOf(Color(0x2EFFFFFF), Color(0x18FFFFFF)))
     }
-}
-
-@Composable
-private fun StatusChip(label: String) {
     Surface(
-        color = Color(0x18FFFFFF),
-        shape = RoundedCornerShape(999.dp)
+        modifier = modifier
+            .height(54.dp)
+            .clickable { },
+        color = Color.Transparent,
+        shape = RoundedCornerShape(9.dp),
+        border = BorderStroke(1.dp, if (selected) RoomPrimarySoft else RoomOutline)
     ) {
-        Text(
-            text = label,
-            color = RoomText,
-            fontSize = 12.sp,
-            fontWeight = FontWeight.SemiBold,
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
-        )
-    }
-}
-
-@Composable
-private fun SessionQuickActions(
-    currentRoomId: String?,
-    syncStatus: SyncStatus,
-    joinRoomInput: String,
-    onJoinRoomInputChange: (String) -> Unit,
-    onCreateAndJoinAsHost: () -> Unit,
-    onJoinAsViewer: () -> Unit,
-    onRejoinCurrentUser: () -> Unit,
-    canRejoinCurrentUser: Boolean
-) {
-    var expanded by rememberSaveable { mutableStateOf(false) }
-
-    Surface(
-        color = Color(0x0FFFFFFF),
-        shape = RoundedCornerShape(22.dp),
-        border = BorderStroke(1.dp, RoomOutline)
-    ) {
-        Column(
-            modifier = Modifier.padding(14.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(background),
+            contentAlignment = Alignment.Center
         ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { expanded = !expanded },
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column {
-                    Text(
-                        text = "开发联调入口",
-                        color = RoomText,
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Text(
-                        text = "当前房间：${currentRoomId ?: "未创建"} · ${syncStatus.label}",
-                        color = RoomTextMuted,
-                        fontSize = 12.sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text("EP", color = RoomTextMuted, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
                 Text(
-                    text = if (expanded) "收起" else "展开",
-                    color = RoomPrimary,
-                    fontSize = 13.sp,
+                    text = "%02d".format(episodeNumber),
+                    color = RoomText,
+                    fontSize = 18.sp,
+                    lineHeight = 20.sp,
                     fontWeight = FontWeight.Bold
                 )
             }
+        }
+    }
+}
 
-            if (expanded) {
-                OutlinedTextField(
-                    value = joinRoomInput,
-                    onValueChange = onJoinRoomInputChange,
-                    modifier = Modifier.fillMaxWidth(),
-                    label = { Text("Room ID") },
-                    singleLine = true,
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = RoomText,
-                        unfocusedTextColor = RoomText,
-                        focusedLabelColor = RoomPrimary,
-                        unfocusedLabelColor = RoomTextMuted,
-                        focusedBorderColor = RoomPrimary,
-                        unfocusedBorderColor = RoomOutline,
-                        focusedContainerColor = Color(0x10FFFFFF),
-                        unfocusedContainerColor = Color(0x10FFFFFF)
-                    )
+@Composable
+private fun BottomActionBar(
+    hasRoom: Boolean,
+    currentPosition: Long,
+    isPlaying: Boolean,
+    onInviteClick: () -> Unit,
+    onContinueClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Surface(
+            modifier = Modifier.weight(0.95f).height(64.dp),
+            color = Color(0x22FFFFFF),
+            shape = RoundedCornerShape(32.dp),
+            border = BorderStroke(1.dp, RoomOutline),
+            onClick = onInviteClick
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 12.dp),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    painter = painterResource(R.drawable.invite_friend),
+                    contentDescription = null,
+                    tint = Color.Unspecified,
+                    modifier = Modifier.size(24.dp)
                 )
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(
-                        onClick = onCreateAndJoinAsHost,
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = ButtonDefaults.buttonColors(containerColor = RoomPrimary)
-                    ) {
-                        Text("Create + Join as host", color = RoomText, fontWeight = FontWeight.Bold)
-                    }
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedButton(
-                            onClick = onJoinAsViewer,
-                            enabled = joinRoomInput.isNotBlank(),
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Text("Join viewer")
-                        }
-                        OutlinedButton(
-                            onClick = onRejoinCurrentUser,
-                            enabled = canRejoinCurrentUser,
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Text("Rejoin")
-                        }
-                    }
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    text = if (hasRoom) "邀请好友" else "创建房间",
+                    color = RoomText,
+                    fontSize = 12.5.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        }
+
+        Surface(
+            modifier = Modifier.weight(2.45f).height(64.dp),
+            color = Color.Transparent,
+            shape = RoundedCornerShape(32.dp),
+            onClick = onContinueClick
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(RoomPrimaryGradient)
+                    .padding(horizontal = 14.dp),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    painter = painterResource(R.drawable.play),
+                    contentDescription = null,
+                    tint = Color.Unspecified,
+                    modifier = Modifier.size(27.dp)
+                )
+                Spacer(Modifier.width(8.dp))
+                Column(horizontalAlignment = Alignment.Start) {
+                    Text(
+                        text = if (isPlaying) "正在观看" else "继续观看",
+                        color = RoomText,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Black
+                    )
+                    Text(
+                        text = "从 ${formatMs(currentPosition)} 继续播放",
+                        color = Color(0xDFFFFFFF),
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
                 }
             }
         }
@@ -532,27 +866,44 @@ private fun SessionQuickActions(
 }
 
 @Composable
-private fun RoomPlayerBackdrop() {
+private fun RoomNightBackdrop() {
     Box(modifier = Modifier.fillMaxSize()) {
         Box(
             modifier = Modifier
                 .align(Alignment.TopStart)
-                .size(230.dp)
-                .background(RoomBackdropGlowA)
+                .offset(x = (-72).dp, y = (-44).dp)
+                .size(260.dp)
+                .background(Brush.radialGradient(listOf(Color(0x773E4BC7), Color.Transparent)))
         )
         Box(
             modifier = Modifier
                 .align(Alignment.TopEnd)
-                .padding(top = 80.dp)
-                .size(240.dp)
-                .background(RoomBackdropGlowB)
+                .offset(x = 96.dp, y = (-28).dp)
+                .size(250.dp)
+                .background(Brush.radialGradient(listOf(Color(0x775C285E), Color.Transparent)))
         )
         Box(
             modifier = Modifier
-                .align(Alignment.BottomCenter)
+                .align(Alignment.Center)
+                .offset(x = (-70).dp, y = (-80).dp)
                 .size(300.dp)
-                .background(RoomBackdropGlowC)
+                .background(Brush.radialGradient(listOf(Color(0x334C74A8), Color.Transparent)))
         )
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            drawIntoCanvas { canvas ->
+                val paint = android.graphics.Paint().apply {
+                    color = android.graphics.Color.argb(150, 255, 255, 255)
+                    textAlign = android.graphics.Paint.Align.CENTER
+                    textSize = 18.sp.toPx()
+                }
+                canvas.nativeCanvas.drawText("✦", size.width * 0.78f, size.height * 0.035f, paint)
+                canvas.nativeCanvas.drawText("✦", size.width * 0.43f, size.height * 0.095f, paint)
+                canvas.nativeCanvas.drawText("✦", size.width * 0.36f, size.height * 0.225f, paint)
+            }
+            drawCircle(Color(0x88FFFFFF), radius = 1.5.dp.toPx(), center = androidx.compose.ui.geometry.Offset(size.width * 0.28f, size.height * 0.14f))
+            drawCircle(Color(0x66FFFFFF), radius = 1.2.dp.toPx(), center = androidx.compose.ui.geometry.Offset(size.width * 0.64f, size.height * 0.19f))
+            drawCircle(Color(0x66FFFFFF), radius = 1.4.dp.toPx(), center = androidx.compose.ui.geometry.Offset(size.width * 0.18f, size.height * 0.33f))
+        }
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -564,6 +915,35 @@ private fun RoomPlayerBackdrop() {
                 )
         )
     }
+}
+
+private fun nextQualityPreference(
+    availableVideoQualities: List<PlayerVideoQualityOption>,
+    currentPreference: PlayerVideoQualityPreference
+): PlayerVideoQualityPreference {
+    val options = availableVideoQualities.ifEmpty { listOf(PlayerVideoQualityOption.Auto) }
+    val currentIndex = options.indexOfFirst { option -> option.height == currentPreference.height }
+    val nextOption = options[(currentIndex + 1).floorMod(options.size)]
+    return PlayerVideoQualityPreference(nextOption.height)
+}
+
+private fun Int.floorMod(modulus: Int): Int {
+    if (modulus <= 0) return 0
+    return ((this % modulus) + modulus) % modulus
+}
+
+private fun episodeNumberFromLabel(label: String?): Int? {
+    return label
+        ?.let { Regex("\\d+").find(it)?.value?.toIntOrNull() }
+        ?.coerceIn(1, 24)
+}
+
+private fun formatMs(value: Long): String {
+    if (value <= 0L) return "00:00"
+    val totalSeconds = value / 1_000L
+    val minutes = totalSeconds / 60
+    val seconds = totalSeconds % 60
+    return "%02d:%02d".format(minutes, seconds)
 }
 
 private fun shortUser(userId: String): String {
@@ -598,43 +978,45 @@ internal fun viewerSlotDisplayName(
 private fun RoomTheaterPagePreview() {
     Watch_togetherTheme {
         RoomTheaterPage(
-            uiState = RoomPlayerUiState(
-                joinRoomInput = "A7K2M9",
-                activeUserId = "android_host_xi",
-                currentRoomId = "A7K2M9",
-                roomMembers = listOf(
-                    RoomMember(
-                        userId = "host_user",
-                        nickname = "凛冬透骨",
-                        avatarSeed = "host",
-                        avatarUrl = null,
-                        role = "host"
-                    )
-                ),
-                syncStatus = SyncStatus.Connected,
-                player = PlayerRuntimeUiState(
-                    currentPosition = 9 * 60 * 1000L + 24 * 1000L,
-                    duration = 24 * 60 * 1000L + 18 * 1000L,
-                    isPlaying = true,
-                    playbackState = androidx.media3.common.Player.STATE_READY,
-                    playbackSpeed = 1.25f
-                )
+            playerState = PlayerRuntimeState(
+                currentPosition = 17 * 60 * 1000L + 32 * 1000L,
+                duration = 24 * 60 * 1000L,
+                isPlaying = true,
+                playbackState = Player.STATE_READY,
+                playbackSpeed = 1.25f
             ),
             adapter = PreviewPlayerAdapter,
-            hostUserId = "android_host_xi",
-            mediaTitle = "紫罗兰永恒花园",
-            mediaEpisodeLabel = "第 09 集",
+            roomCode = "A7K2M9",
+            roomRole = "host",
+            roomStatusLabel = "房间 A7K2M9 · host · 同步已连接",
+            roomMembers = listOf(
+                RoomMember(
+                    userId = "host_user",
+                    nickname = "朋也",
+                    avatarSeed = "host",
+                    avatarUrl = null,
+                    role = "host"
+                ),
+                RoomMember(
+                    userId = "viewer_user",
+                    nickname = "渚",
+                    avatarSeed = "viewer",
+                    avatarUrl = null,
+                    role = "member"
+                )
+            ),
+            mediaTitle = "CLANNAD After Story",
+            mediaSeasonLabel = "第 2 季",
+            mediaEpisodeLabel = "EP 14",
             isHostController = true,
+            controlsEnabled = true,
             onPlaybackToggleClick = {},
             onSeekBackwardClick = {},
             onSeekForwardClick = {},
             onProgressSeekCommit = {},
             onPlaybackSpeedChange = {},
             onVideoQualityPreferenceChange = {},
-            onJoinRoomInputChange = {},
-            onCreateAndJoinAsHost = {},
-            onJoinAsViewer = {},
-            onRejoinCurrentUser = {}
+            onInviteClick = {}
         )
     }
 }
@@ -647,10 +1029,12 @@ private object PreviewPlayerAdapter : PlayerAdapter {
     override fun play() = Unit
     override fun pause() = Unit
     override fun seekTo(positionMs: Long) = Unit
-    override fun reset() = Unit
     override fun getCurrentPosition(): Long = 0L
     override fun getDuration(): Long = 0L
+    override fun getBufferedPosition(): Long = 0L
+    override fun getBufferedPercentage(): Int = 0
     override fun isPlaying(): Boolean = false
     override fun setPlaybackSpeed(speed: Float) = Unit
+    override fun setVideoQualityPreference(preference: PlayerVideoQualityPreference) = Unit
     override fun release() = Unit
 }
