@@ -16,6 +16,12 @@ func main() {
 		fmt.Fprintf(os.Stderr, "load server config: %v\n", err)
 		os.Exit(1)
 	}
+	log.Printf(
+		"room server config app_env=%s log_level=%s debug_sync=%t",
+		runtimeConfig.AppEnv,
+		runtimeConfig.LogLevel,
+		runtimeConfig.DebugSync,
+	)
 	server := app.NewServer(app.Config{
 		AppEnv:      runtimeConfig.AppEnv,
 		Host:        runtimeConfig.Host,

@@ -50,6 +50,43 @@ func TestLoadServerRuntimeConfigFallsBackToDefaults(t *testing.T) {
 	}
 }
 
+func TestLoadServerRuntimeConfigSupportsAppEnvSpecificDebugSync(t *testing.T) {
+	configDir := t.TempDir()
+	mustWriteConfigFile(t, filepath.Join(configDir, ".env"), "APP_ENV=prod\nDEBUG_SYNC=true\n")
+	mustWriteConfigFile(t, filepath.Join(configDir, ".env.prod"), "DEBUG_SYNC=false\nLOG_LEVEL=info\n")
+
+	cfg, err := LoadServerRuntimeConfig(configDir)
+	if err != nil {
+		t.Fatalf("load runtime config: %v", err)
+	}
+
+	if cfg.AppEnv != "prod" {
+		t.Fatalf("expected prod app env, got %q", cfg.AppEnv)
+	}
+	if cfg.DebugSync {
+		t.Fatalf("expected .env.prod DEBUG_SYNC=false to disable debug sync")
+	}
+	if cfg.LogLevel != "info" {
+		t.Fatalf("expected .env.prod LOG_LEVEL=info, got %q", cfg.LogLevel)
+	}
+}
+
+func TestLoadServerRuntimeConfigEnvOverridesDebugSyncFiles(t *testing.T) {
+	configDir := t.TempDir()
+	mustWriteConfigFile(t, filepath.Join(configDir, ".env"), "APP_ENV=prod\n")
+	mustWriteConfigFile(t, filepath.Join(configDir, ".env.prod"), "DEBUG_SYNC=false\n")
+	t.Setenv("DEBUG_SYNC", "true")
+
+	cfg, err := LoadServerRuntimeConfig(configDir)
+	if err != nil {
+		t.Fatalf("load runtime config: %v", err)
+	}
+
+	if !cfg.DebugSync {
+		t.Fatalf("expected DEBUG_SYNC=true env to override .env.prod")
+	}
+}
+
 func TestLoadMediactlConfigSupportsAppEnvSpecificFiles(t *testing.T) {
 	configDir := t.TempDir()
 	mustWriteConfigFile(t, filepath.Join(configDir, ".env"), "APP_ENV=prod\nMEDIA_STORAGE_DRIVER=local\nDATABASE_URL=postgres://base\n")
