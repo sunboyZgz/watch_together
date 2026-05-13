@@ -27,6 +27,8 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
@@ -351,11 +353,19 @@ fun PlayerScreen(
         }
     }
 
-    Surface(modifier = modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+    Surface(modifier = modifier.fillMaxSize(), color = Color(0xFF090A12)) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .background(MaterialTheme.colorScheme.background)
+                .background(
+                    Brush.verticalGradient(
+                        listOf(
+                            Color(0xFF18122A),
+                            Color(0xFF0D1020),
+                            Color(0xFF090A12)
+                        )
+                    )
+                )
                 .verticalScroll(rememberScrollState())
                 .padding(18.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp)
@@ -363,7 +373,7 @@ fun PlayerScreen(
             Text(
                 text = "播放器重构 · Phase 3",
                 style = MaterialTheme.typography.titleLarge,
-                color = MaterialTheme.colorScheme.onBackground
+                color = Color(0xFFF9F3FF)
             )
             AssistChip(onClick = {}, label = { Text(roomHint) })
             if (isMediaLoading || mediaLoadError != null) {
@@ -380,6 +390,7 @@ fun PlayerScreen(
                 mediaMeta = listOfNotNull(activeEpisode.seasonLabel, activeEpisode.episodeLabel).joinToString(" · ")
                     .ifBlank { activeEpisode.episodeId },
                 controlHint = roomHint,
+                controlsEnabled = canApplyLocalPlaybackControl,
                 onPlaybackToggleClick = {
                     if (playerState.isPlaying) {
                         if (!currentIsApplyingRemoteEvent && activeRoomRole == "host") {
