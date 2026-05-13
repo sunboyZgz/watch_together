@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/coder/websocket"
@@ -216,6 +217,7 @@ func (h *WebSocketHandler) handlePlay(
 		return err
 	}
 	client.MarkHeartbeatAck(time.Now())
+	h.logControlReceived(protocol.TypePlay, payload.RoomID, payload.UserID, payload.PositionMs, payload.Seq, 0)
 	return h.handleControlEvent(
 		ctx,
 		protocol.TypePlay,
@@ -248,6 +250,7 @@ func (h *WebSocketHandler) handlePause(
 		return err
 	}
 	client.MarkHeartbeatAck(time.Now())
+	h.logControlReceived(protocol.TypePause, payload.RoomID, payload.UserID, payload.PositionMs, payload.Seq, 0)
 	return h.handleControlEvent(
 		ctx,
 		protocol.TypePause,
@@ -280,6 +283,7 @@ func (h *WebSocketHandler) handleSeek(
 		return err
 	}
 	client.MarkHeartbeatAck(time.Now())
+	h.logControlReceived(protocol.TypeSeek, payload.RoomID, payload.UserID, payload.PositionMs, payload.Seq, 0)
 	return h.handleControlEvent(
 		ctx,
 		protocol.TypeSeek,
@@ -312,6 +316,14 @@ func (h *WebSocketHandler) handleSetPlaybackRate(
 		return err
 	}
 	client.MarkHeartbeatAck(time.Now())
+	h.logControlReceived(
+		protocol.TypeSetPlaybackRate,
+		payload.RoomID,
+		payload.UserID,
+		payload.PositionMs,
+		payload.Seq,
+		payload.PlaybackRate,
+	)
 	return h.handleControlEvent(
 		ctx,
 		protocol.TypeSetPlaybackRate,
@@ -345,6 +357,7 @@ func (h *WebSocketHandler) handleEnded(
 		return err
 	}
 	client.MarkHeartbeatAck(time.Now())
+	h.logControlReceived(protocol.TypeEnded, payload.RoomID, payload.UserID, payload.PositionMs, payload.Seq, 0)
 	return h.handleControlEvent(
 		ctx,
 		protocol.TypeEnded,
@@ -393,23 +406,100 @@ func (h *WebSocketHandler) handleControlEvent(
 	}
 
 	envelope := buildEnvelope(state)
-	startedAt := time.Now()
-	err = broadcastEnvelope(ctx, clients, envelope)
+	stats, err := broadcastEnvelopeWithStats(ctx, clients, envelope)
 	if h.debugSync {
 		log.Printf(
-			"sync broadcast type=%s room=%s seq=%d clients=%d pos=%d paused=%t rate=%.2f duration_ms=%d err=%v",
+			"sync broadcast type=%s room=%s seq=%d clients=%d pos=%d paused=%t rate=%.2f duration_us=%d slowest_user=%s slowest_us=%d err=%v",
 			eventType,
 			roomID,
 			state.Seq,
-			len(clients),
+			stats.Clients,
 			state.PositionMs,
 			state.Paused,
 			state.PlaybackRate,
-			time.Since(startedAt).Milliseconds(),
+			stats.Duration.Microseconds(),
+			stats.SlowestUserID,
+			stats.SlowestDuration.Microseconds(),
 			err,
 		)
 	}
 	return err
+}
+
+func (h *WebSocketHandler) logControlReceived(
+	eventType string,
+	roomID string,
+	userID string,
+	positionMs int64,
+	seq int64,
+	playbackRate float64,
+) {
+	if !h.debugSync {
+		return
+	}
+	if playbackRate > 0 {
+		log.Printf(
+			"sync control received type=%s room=%s user=%s pos=%d seq=%d rate=%.2f",
+			eventType,
+			roomID,
+			userID,
+			positionMs,
+			seq,
+			playbackRate,
+		)
+		return
+	}
+	log.Printf(
+		"sync control received type=%s room=%s user=%s pos=%d seq=%d",
+		eventType,
+		roomID,
+		userID,
+		positionMs,
+		seq,
+	)
+}
+
+type broadcastStats struct {
+	Clients         int
+	Duration        time.Duration
+	SlowestUserID   string
+	SlowestDuration time.Duration
+}
+
+func broadcastEnvelopeWithStats(
+	ctx context.Context,
+	clients []*room.ClientConnection,
+	envelope protocol.Envelope,
+) (broadcastStats, error) {
+	stats := broadcastStats{Clients: len(clients)}
+	startedAt := time.Now()
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	var firstErr error
+
+	for _, client := range clients {
+		client := client
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			clientStartedAt := time.Now()
+			err := client.WriteJSON(ctx, envelope)
+			clientDuration := time.Since(clientStartedAt)
+
+			mu.Lock()
+			defer mu.Unlock()
+			if clientDuration > stats.SlowestDuration {
+				stats.SlowestDuration = clientDuration
+				stats.SlowestUserID = client.UserID()
+			}
+			if err != nil && firstErr == nil {
+				firstErr = err
+			}
+		}()
+	}
+	wg.Wait()
+	stats.Duration = time.Since(startedAt)
+	return stats, firstErr
 }
 
 func broadcastEnvelope(
@@ -417,12 +507,8 @@ func broadcastEnvelope(
 	clients []*room.ClientConnection,
 	envelope protocol.Envelope,
 ) error {
-	for _, client := range clients {
-		if err := client.WriteJSON(ctx, envelope); err != nil {
-			return err
-		}
-	}
-	return nil
+	_, err := broadcastEnvelopeWithStats(ctx, clients, envelope)
+	return err
 }
 
 // broadcastRoomState pushes the latest authority snapshot after membership changes such
