@@ -11,6 +11,7 @@ import (
 	"github.com/coder/websocket"
 
 	"watch_together/server/internal/protocol"
+	"watch_together/server/internal/realtime"
 	"watch_together/server/internal/room"
 )
 
@@ -19,6 +20,7 @@ type WebSocketHandler struct {
 	debugSync         bool
 	heartbeatInterval time.Duration
 	heartbeatTimeout  time.Duration
+	clock             realtime.Clock
 }
 
 const (
@@ -47,11 +49,31 @@ func newWebSocketHandler(
 	heartbeatInterval time.Duration,
 	heartbeatTimeout time.Duration,
 ) *WebSocketHandler {
+	return newWebSocketHandlerWithClock(
+		roomManager,
+		debugSync,
+		heartbeatInterval,
+		heartbeatTimeout,
+		realtime.SystemClock{},
+	)
+}
+
+func newWebSocketHandlerWithClock(
+	roomManager *room.Manager,
+	debugSync bool,
+	heartbeatInterval time.Duration,
+	heartbeatTimeout time.Duration,
+	clock realtime.Clock,
+) *WebSocketHandler {
+	if clock == nil {
+		clock = realtime.SystemClock{}
+	}
 	return &WebSocketHandler{
 		roomManager:       roomManager,
 		debugSync:         debugSync,
 		heartbeatInterval: heartbeatInterval,
 		heartbeatTimeout:  heartbeatTimeout,
+		clock:             clock,
 	}
 }
 
@@ -153,7 +175,7 @@ func (h *WebSocketHandler) handleHeartbeatAck(
 	if err != nil {
 		return err
 	}
-	client.MarkHeartbeatAck(time.Now())
+	client.MarkHeartbeatAck(h.clock.Now())
 	return nil
 }
 
@@ -167,10 +189,11 @@ func (h *WebSocketHandler) handleClockSyncPing(
 	if err != nil {
 		return err
 	}
+	serverTimeMs := h.clock.NowUnixMilli()
 	return client.WriteJSON(ctx, protocol.Envelope{
 		Type: protocol.TypeClockSyncPong,
 		Payload: mustJSONRaw(protocol.ClockSyncPongPayload{
-			ServerTimeMs:      time.Now().UnixMilli(),
+			ServerTimeMs:      serverTimeMs,
 			ClientSendMonoMs: payload.ClientSendMonoMs,
 		}),
 	})
@@ -187,7 +210,7 @@ func (h *WebSocketHandler) handleJoinRoom(
 	if err != nil {
 		return err
 	}
-	client.MarkHeartbeatAck(time.Now())
+	client.MarkHeartbeatAck(h.clock.Now())
 
 	existingRoom, ok := h.roomManager.Get(payload.RoomID)
 	if !ok {
@@ -229,7 +252,7 @@ func (h *WebSocketHandler) handlePlay(
 	if err != nil {
 		return err
 	}
-	client.MarkHeartbeatAck(time.Now())
+	client.MarkHeartbeatAck(h.clock.Now())
 	h.logControlReceived(protocol.TypePlay, payload.RoomID, payload.UserID, payload.PositionMs, payload.Seq, 0)
 	return h.handleControlEvent(
 		ctx,
@@ -254,7 +277,7 @@ func (h *WebSocketHandler) handlePause(
 	if err != nil {
 		return err
 	}
-	client.MarkHeartbeatAck(time.Now())
+	client.MarkHeartbeatAck(h.clock.Now())
 	h.logControlReceived(protocol.TypePause, payload.RoomID, payload.UserID, payload.PositionMs, payload.Seq, 0)
 	return h.handleControlEvent(
 		ctx,
@@ -279,7 +302,7 @@ func (h *WebSocketHandler) handleSeek(
 	if err != nil {
 		return err
 	}
-	client.MarkHeartbeatAck(time.Now())
+	client.MarkHeartbeatAck(h.clock.Now())
 	h.logControlReceived(protocol.TypeSeek, payload.RoomID, payload.UserID, payload.PositionMs, payload.Seq, 0)
 	return h.handleControlEvent(
 		ctx,
@@ -304,7 +327,7 @@ func (h *WebSocketHandler) handleSetPlaybackRate(
 	if err != nil {
 		return err
 	}
-	client.MarkHeartbeatAck(time.Now())
+	client.MarkHeartbeatAck(h.clock.Now())
 	h.logControlReceived(
 		protocol.TypeSetPlaybackRate,
 		payload.RoomID,
@@ -336,7 +359,7 @@ func (h *WebSocketHandler) handleEnded(
 	if err != nil {
 		return err
 	}
-	client.MarkHeartbeatAck(time.Now())
+	client.MarkHeartbeatAck(h.clock.Now())
 	h.logControlReceived(protocol.TypeEnded, payload.RoomID, payload.UserID, payload.PositionMs, payload.Seq, 0)
 	return h.handleControlEvent(
 		ctx,
@@ -676,7 +699,7 @@ func (h *WebSocketHandler) runHeartbeatLoop(ctx context.Context, client *room.Cl
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			now := time.Now()
+			now := h.clock.Now()
 			if client.HeartbeatTimedOut(now, h.heartbeatTimeout) {
 				_ = client.Close(websocket.StatusPolicyViolation, "heartbeat timeout")
 				return

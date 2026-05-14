@@ -11,6 +11,7 @@ import (
 	"github.com/coder/websocket"
 
 	"watch_together/server/internal/protocol"
+	"watch_together/server/internal/realtime"
 	"watch_together/server/internal/room"
 )
 
@@ -469,7 +470,19 @@ func TestWebSocketHeartbeatAckKeepsConnectionAlive(t *testing.T) {
 func TestWebSocketClockSyncPingReturnsServerTime(t *testing.T) {
 	roomManager := room.NewManager()
 	mux := http.NewServeMux()
-	mux.Handle("/ws", NewWebSocketHandler(roomManager, true))
+	serverNow := time.UnixMilli(987_654_321)
+	mux.Handle(
+		"/ws",
+		newWebSocketHandlerWithClock(
+			roomManager,
+			true,
+			defaultHeartbeatInterval,
+			defaultHeartbeatTimeout,
+			realtime.ClockFunc(func() time.Time {
+				return serverNow
+			}),
+		),
+	)
 
 	httpServer := httptest.NewServer(mux)
 	defer httpServer.Close()
@@ -482,7 +495,6 @@ func TestWebSocketClockSyncPingReturnsServerTime(t *testing.T) {
 	defer conn.Close(websocket.StatusNormalClosure, "test done")
 
 	clientSendMonoMs := int64(123_456)
-	beforeServerMs := time.Now().UnixMilli()
 	mustSendEnvelope(t, ctx, conn, protocol.Envelope{
 		Type: protocol.TypeClockSyncPing,
 		Payload: mustJSONRaw(protocol.ClockSyncPingPayload{
@@ -491,7 +503,6 @@ func TestWebSocketClockSyncPingReturnsServerTime(t *testing.T) {
 	})
 
 	envelope := mustReadEnvelope(t, ctx, conn)
-	afterServerMs := time.Now().UnixMilli()
 	if envelope.Type != protocol.TypeClockSyncPong {
 		t.Fatalf("expected clock_sync.pong, got %s", envelope.Type)
 	}
@@ -503,13 +514,8 @@ func TestWebSocketClockSyncPingReturnsServerTime(t *testing.T) {
 	if payload.ClientSendMonoMs != clientSendMonoMs {
 		t.Fatalf("expected clientSendMonoMs %d, got %d", clientSendMonoMs, payload.ClientSendMonoMs)
 	}
-	if payload.ServerTimeMs < beforeServerMs || payload.ServerTimeMs > afterServerMs {
-		t.Fatalf(
-			"expected serverTimeMs between %d and %d, got %d",
-			beforeServerMs,
-			afterServerMs,
-			payload.ServerTimeMs,
-		)
+	if payload.ServerTimeMs != serverNow.UnixMilli() {
+		t.Fatalf("expected serverTimeMs %d, got %d", serverNow.UnixMilli(), payload.ServerTimeMs)
 	}
 }
 
