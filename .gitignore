@@ -117,3 +117,6 @@ postman/
 docs/android-player-rebuild-roadmap.md
 docs/sync
 docs/prompts
+docs/refactor/*
+!docs/refactor/
+!docs/refactor/*.md

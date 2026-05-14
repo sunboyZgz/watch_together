@@ -6,15 +6,17 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"gorm.io/gorm"
+
 	"watch_together/server/internal/media"
 )
 
 type PostgresMediaStore struct {
-	db *sql.DB
+	db *gorm.DB
 }
 
 // NewPostgresMediaStore creates the PostgreSQL-backed repository for media catalog data.
-func NewPostgresMediaStore(db *sql.DB) *PostgresMediaStore {
+func NewPostgresMediaStore(db *gorm.DB) *PostgresMediaStore {
 	return &PostgresMediaStore{db: db}
 }
 
@@ -45,10 +47,10 @@ func (s *PostgresMediaStore) listTags(ctx context.Context, featuredOnly bool, li
 	}
 	query += `
 		ORDER BY sort_order ASC, name ASC
-		LIMIT $1
+		LIMIT ?
 	`
 
-	rows, err := s.db.QueryContext(ctx, query, limit)
+	rows, err := s.db.WithContext(ctx).Raw(query, limit).Rows()
 	if err != nil {
 		return nil, fmt.Errorf("list media tags: %w", err)
 	}
@@ -94,34 +96,51 @@ func (s *PostgresMediaStore) SearchItems(ctx context.Context, params media.Store
 		WHERE episode.status = 'active'
 			AND season.status = 'active'
 			AND (
-				$1 = ''
-				OR season.title ILIKE '%' || $1 || '%'
-				OR season.description ILIKE '%' || $1 || '%'
-				OR season.original_title ILIKE '%' || $1 || '%'
-				OR season.production_team ILIKE '%' || $1 || '%'
-				OR season.search_aliases::text ILIKE '%' || $1 || '%'
-				OR episode.title ILIKE '%' || $1 || '%'
-				OR episode.subtitle ILIKE '%' || $1 || '%'
-				OR episode.description ILIKE '%' || $1 || '%'
-				OR episode.episode_label ILIKE '%' || $1 || '%'
+				? = ''
+				OR season.title ILIKE '%' || ? || '%'
+				OR season.description ILIKE '%' || ? || '%'
+				OR season.original_title ILIKE '%' || ? || '%'
+				OR season.production_team ILIKE '%' || ? || '%'
+				OR season.search_aliases::text ILIKE '%' || ? || '%'
+				OR episode.title ILIKE '%' || ? || '%'
+				OR episode.subtitle ILIKE '%' || ? || '%'
+				OR episode.description ILIKE '%' || ? || '%'
+				OR episode.episode_label ILIKE '%' || ? || '%'
 			)
 			AND (
-				$2 = ''
+				? = ''
 				OR EXISTS (
 					SELECT 1
 					FROM media_season_tags AS filter_season_tag
 					INNER JOIN media_tags AS filter_tag ON filter_tag.id = filter_season_tag.media_tag_id
 					WHERE filter_season_tag.season_id = season.id
-						AND filter_tag.slug = $2
+						AND filter_tag.slug = ?
 						AND filter_tag.is_active = true
 				)
 			)
 		GROUP BY episode.id, season.id
 		ORDER BY season.sort_order ASC, episode.sort_order ASC, season.title ASC, episode.episode_number ASC NULLS LAST
-		LIMIT $3 OFFSET $4
+		LIMIT ? OFFSET ?
 	`
 
-	rows, err := s.db.QueryContext(ctx, query, params.Query, params.Tag, params.Limit, params.Offset)
+	queryArg := params.Query
+	rows, err := s.db.WithContext(ctx).Raw(
+		query,
+		queryArg,
+		queryArg,
+		queryArg,
+		queryArg,
+		queryArg,
+		queryArg,
+		queryArg,
+		queryArg,
+		queryArg,
+		queryArg,
+		params.Tag,
+		params.Tag,
+		params.Limit,
+		params.Offset,
+	).Rows()
 	if err != nil {
 		return nil, fmt.Errorf("search media items: %w", err)
 	}

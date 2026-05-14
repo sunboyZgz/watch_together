@@ -29,6 +29,14 @@ func main() {
 		LogLevel:    runtimeConfig.LogLevel,
 		DatabaseURL: runtimeConfig.DatabaseURL,
 		DebugSync:   runtimeConfig.DebugSync,
+		Redis: app.RedisConfig{
+			Addr:       runtimeConfig.Redis.Addr,
+			Username:   runtimeConfig.Redis.Username,
+			Password:   runtimeConfig.Redis.Password,
+			DB:         runtimeConfig.Redis.DB,
+			TLSEnabled: runtimeConfig.Redis.TLSEnabled,
+			Required:   runtimeConfig.Redis.Required,
+		},
 	})
 
 	log.Printf("room server listening on %s", server.Address())

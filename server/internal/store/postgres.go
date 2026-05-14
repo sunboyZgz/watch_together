@@ -2,110 +2,89 @@ package store
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 
 	"github.com/jackc/pgx/v5/pgconn"
-	_ "github.com/jackc/pgx/v5/stdlib"
+	"gorm.io/driver/postgres"
+	"gorm.io/gorm"
 
 	"watch_together/server/internal/auth"
+	"watch_together/server/internal/model"
 )
 
 type PostgresUserStore struct {
-	db *sql.DB
+	db *gorm.DB
 }
 
-// OpenPostgres opens and verifies a PostgreSQL connection for API handlers.
-func OpenPostgres(ctx context.Context, databaseURL string) (*sql.DB, error) {
-	db, err := sql.Open("pgx", databaseURL)
+// OpenPostgres opens and verifies a GORM-backed PostgreSQL connection for API handlers.
+func OpenPostgres(ctx context.Context, databaseURL string) (*gorm.DB, error) {
+	db, err := gorm.Open(postgres.Open(databaseURL), &gorm.Config{
+		TranslateError: true,
+	})
 	if err != nil {
 		return nil, err
 	}
-	if err := db.PingContext(ctx); err != nil {
-		_ = db.Close()
+	sqlDB, err := db.DB()
+	if err != nil {
+		return nil, err
+	}
+	if err := sqlDB.PingContext(ctx); err != nil {
+		_ = sqlDB.Close()
 		return nil, err
 	}
 	return db, nil
 }
 
 // NewPostgresUserStore creates the PostgreSQL-backed user repository.
-func NewPostgresUserStore(db *sql.DB) *PostgresUserStore {
+func NewPostgresUserStore(db *gorm.DB) *PostgresUserStore {
 	return &PostgresUserStore{db: db}
 }
 
 // CreateUser inserts a new account and returns the persisted public user data.
 func (s *PostgresUserStore) CreateUser(ctx context.Context, params auth.CreateUserParams) (auth.User, error) {
-	const query = `
-		INSERT INTO users (account, password_hash, nickname, avatar_seed)
-		VALUES ($1, $2, $3, $4)
-		RETURNING id::text, account, password_hash, nickname, avatar_seed, avatar_url, bio
-	`
-
-	user, err := scanUser(
-		s.db.QueryRowContext(
-			ctx,
-			query,
-			params.Account,
-			params.PasswordHash,
-			params.Nickname,
-			params.AvatarSeed,
-		),
-	)
-	if err != nil {
-		if isUniqueViolation(err) {
+	dbUser := model.User{
+		Account:      params.Account,
+		PasswordHash: params.PasswordHash,
+		Nickname:     params.Nickname,
+		AvatarSeed:   params.AvatarSeed,
+	}
+	if err := s.db.WithContext(ctx).Create(&dbUser).Error; err != nil {
+		if isUniqueViolation(err) || errors.Is(err, gorm.ErrDuplicatedKey) {
 			return auth.User{}, auth.ErrAccountExists
 		}
 		return auth.User{}, fmt.Errorf("create user: %w", err)
 	}
-	return user, nil
+	return userFromModel(dbUser), nil
 }
 
 // FindUserByAccount loads a user by account for login verification.
 func (s *PostgresUserStore) FindUserByAccount(ctx context.Context, account string) (auth.User, error) {
-	const query = `
-		SELECT id::text, account, password_hash, nickname, avatar_seed, avatar_url, bio
-		FROM users
-		WHERE account = $1
-	`
-
-	user, err := scanUser(s.db.QueryRowContext(ctx, query, account))
+	var dbUser model.User
+	err := s.db.WithContext(ctx).Where("account = ?", account).First(&dbUser).Error
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return auth.User{}, auth.ErrUserNotFound
 		}
 		return auth.User{}, fmt.Errorf("find user by account: %w", err)
 	}
-	return user, nil
+	return userFromModel(dbUser), nil
 }
 
 type rowScanner interface {
 	Scan(dest ...any) error
 }
 
-func scanUser(row rowScanner) (auth.User, error) {
-	var user auth.User
-	var avatarURL sql.NullString
-	var bio sql.NullString
-
-	if err := row.Scan(
-		&user.ID,
-		&user.Account,
-		&user.PasswordHash,
-		&user.Nickname,
-		&user.AvatarSeed,
-		&avatarURL,
-		&bio,
-	); err != nil {
-		return auth.User{}, err
+func userFromModel(dbUser model.User) auth.User {
+	return auth.User{
+		ID:           dbUser.ID,
+		Account:      dbUser.Account,
+		PasswordHash: dbUser.PasswordHash,
+		Nickname:     dbUser.Nickname,
+		AvatarSeed:   dbUser.AvatarSeed,
+		AvatarURL:    dbUser.AvatarURL,
+		Bio:          dbUser.Bio,
 	}
-	if avatarURL.Valid {
-		user.AvatarURL = &avatarURL.String
-	}
-	if bio.Valid {
-		user.Bio = &bio.String
-	}
-	return user, nil
 }
 
 func isUniqueViolation(err error) bool {

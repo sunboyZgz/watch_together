@@ -87,6 +87,39 @@ func TestLoadServerRuntimeConfigEnvOverridesDebugSyncFiles(t *testing.T) {
 	}
 }
 
+func TestLoadServerRuntimeConfigLoadsRedisSettings(t *testing.T) {
+	configDir := t.TempDir()
+	mustWriteConfigFile(
+		t,
+		filepath.Join(configDir, ".env"),
+		"REDIS_ADDR=127.0.0.1:6379\nREDIS_USERNAME=default\nREDIS_PASSWORD=secret\nREDIS_DB=2\nREDIS_TLS_ENABLED=true\nREDIS_REQUIRED=true\n",
+	)
+
+	cfg, err := LoadServerRuntimeConfig(configDir)
+	if err != nil {
+		t.Fatalf("load runtime config: %v", err)
+	}
+
+	if cfg.Redis.Addr != "127.0.0.1:6379" {
+		t.Fatalf("expected redis addr, got %q", cfg.Redis.Addr)
+	}
+	if cfg.Redis.Username != "default" {
+		t.Fatalf("expected redis username default, got %q", cfg.Redis.Username)
+	}
+	if cfg.Redis.Password != "secret" {
+		t.Fatalf("expected redis password secret, got %q", cfg.Redis.Password)
+	}
+	if cfg.Redis.DB != 2 {
+		t.Fatalf("expected redis db 2, got %d", cfg.Redis.DB)
+	}
+	if !cfg.Redis.TLSEnabled {
+		t.Fatalf("expected redis tls enabled")
+	}
+	if !cfg.Redis.Required {
+		t.Fatalf("expected redis required")
+	}
+}
+
 func TestLoadMediactlConfigSupportsAppEnvSpecificFiles(t *testing.T) {
 	configDir := t.TempDir()
 	mustWriteConfigFile(t, filepath.Join(configDir, ".env"), "APP_ENV=prod\nMEDIA_STORAGE_DRIVER=local\nDATABASE_URL=postgres://base\n")

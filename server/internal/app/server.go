@@ -8,7 +8,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gin-gonic/gin"
+
 	"watch_together/server/internal/auth"
+	"watch_together/server/internal/cache"
 	"watch_together/server/internal/home"
 	"watch_together/server/internal/media"
 	"watch_together/server/internal/progress"
@@ -25,17 +28,22 @@ type Config struct {
 	LogLevel    string
 	DatabaseURL string
 	DebugSync   bool
+	Redis       cache.RedisConfig
 }
+
+type RedisConfig = cache.RedisConfig
 
 type Server struct {
 	config      Config
 	httpServer  *http.Server
 	roomManager *room.Manager
+	redis       *cache.RedisClient
 }
 
 // NewServer assembles the in-memory room manager and the HTTP routes around it.
 func NewServer(config Config) *Server {
 	roomManager := room.NewManager()
+	redisClient := newRedisClient(config.Redis)
 	roomService, roomStore := newRoomService(config.DatabaseURL)
 	if roomStore != nil {
 		now := time.Now()
@@ -71,37 +79,79 @@ func NewServer(config Config) *Server {
 	if roomStore != nil {
 		go startPersistentRoomCleanupLoop(context.Background(), room.DefaultCleanupInterval(), roomStore)
 	}
-	mux := http.NewServeMux()
 	roomHTTPHandler := transport.NewRoomHTTPHandler(roomManager, roomService)
 	authHTTPHandler := transport.NewAuthHTTPHandler(newAuthService(config.DatabaseURL))
 	homeHTTPHandler := transport.NewHomeHTTPHandler(newHomeService(config.DatabaseURL))
 	mediaHTTPHandler := transport.NewMediaHTTPHandler(newMediaService(config.DatabaseURL))
 	progressHTTPHandler := transport.NewProgressHTTPHandler(newProgressService(config.DatabaseURL))
-
-	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("ok"))
-	})
-	mux.HandleFunc("/auth/login", authHTTPHandler.Login)
-	mux.HandleFunc("/auth/register", authHTTPHandler.Register)
-	mux.HandleFunc("/home/summary", homeHTTPHandler.Summary)
-	mux.HandleFunc("/media/tags", mediaHTTPHandler.Tags)
-	mux.HandleFunc("/media/items", mediaHTTPHandler.Items)
-	mux.HandleFunc("/me/media-progress/", progressHTTPHandler.Update)
-	mux.HandleFunc("/rooms", roomHTTPHandler.CreateRoom)
-	mux.HandleFunc("/rooms/", roomHTTPHandler.RoomRoute)
-	mux.Handle("/ws", transport.NewWebSocketHandler(roomManager, config.DebugSync))
+	router := newGinRouter(
+		roomManager,
+		config.DebugSync,
+		roomHTTPHandler,
+		authHTTPHandler,
+		homeHTTPHandler,
+		mediaHTTPHandler,
+		progressHTTPHandler,
+	)
 
 	httpServer := &http.Server{
 		Addr:    fmt.Sprintf("%s:%s", config.Host, config.Port),
-		Handler: mux,
+		Handler: router,
 	}
 
 	return &Server{
 		config:      config,
 		httpServer:  httpServer,
 		roomManager: roomManager,
+		redis:       redisClient,
 	}
+}
+
+func newRedisClient(config cache.RedisConfig) *cache.RedisClient {
+	if !config.Enabled() {
+		log.Print("REDIS_ADDR is not set; redis-backed caches and runtime metadata are disabled")
+		return nil
+	}
+
+	client, err := cache.OpenRedis(context.Background(), config)
+	if err != nil {
+		if config.Required {
+			log.Fatalf("failed to connect required redis: %v", err)
+		}
+		log.Printf("failed to connect redis; redis-backed features disabled: %v", err)
+		return nil
+	}
+	log.Printf("connected redis addr=%s db=%d tls=%t", config.Addr, config.DB, config.TLSEnabled)
+	return client
+}
+
+func newGinRouter(
+	roomManager *room.Manager,
+	debugSync bool,
+	roomHTTPHandler *transport.RoomHTTPHandler,
+	authHTTPHandler *transport.AuthHTTPHandler,
+	homeHTTPHandler *transport.HomeHTTPHandler,
+	mediaHTTPHandler *transport.MediaHTTPHandler,
+	progressHTTPHandler *transport.ProgressHTTPHandler,
+) *gin.Engine {
+	gin.SetMode(gin.ReleaseMode)
+	router := gin.New()
+	router.Use(gin.Recovery())
+
+	router.GET("/healthz", func(c *gin.Context) {
+		c.String(http.StatusOK, "ok")
+	})
+	router.Any("/auth/login", gin.WrapF(authHTTPHandler.Login))
+	router.Any("/auth/register", gin.WrapF(authHTTPHandler.Register))
+	router.Any("/home/summary", gin.WrapF(homeHTTPHandler.Summary))
+	router.Any("/media/tags", gin.WrapF(mediaHTTPHandler.Tags))
+	router.Any("/media/items", gin.WrapF(mediaHTTPHandler.Items))
+	router.Any("/me/media-progress/*mediaPath", gin.WrapF(progressHTTPHandler.Update))
+	router.Any("/rooms", gin.WrapF(roomHTTPHandler.CreateRoom))
+	router.Any("/rooms/*roomPath", gin.WrapF(roomHTTPHandler.RoomRoute))
+	router.Any("/ws", gin.WrapH(transport.NewWebSocketHandler(roomManager, debugSync)))
+
+	return router
 }
 
 // newAuthService connects the auth API to PostgreSQL when DATABASE_URL is available.
@@ -213,4 +263,8 @@ func (s *Server) ListenAndServe() error {
 // RoomManager returns the shared in-memory manager used by transport handlers.
 func (s *Server) RoomManager() *room.Manager {
 	return s.roomManager
+}
+
+func (s *Server) RedisClient() *cache.RedisClient {
+	return s.redis
 }

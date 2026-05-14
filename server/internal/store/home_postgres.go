@@ -6,15 +6,17 @@ import (
 	"errors"
 	"fmt"
 
+	"gorm.io/gorm"
+
 	"watch_together/server/internal/home"
 )
 
 type PostgresHomeStore struct {
-	db *sql.DB
+	db *gorm.DB
 }
 
 // NewPostgresHomeStore creates the PostgreSQL-backed repository for home data.
-func NewPostgresHomeStore(db *sql.DB) *PostgresHomeStore {
+func NewPostgresHomeStore(db *gorm.DB) *PostgresHomeStore {
 	return &PostgresHomeStore{db: db}
 }
 
@@ -46,12 +48,12 @@ func (s *PostgresHomeStore) findHomeUser(ctx context.Context, userID string) (ho
 	const query = `
 		SELECT nickname, avatar_seed, avatar_url
 		FROM users
-		WHERE id = $1
+		WHERE id = ?
 	`
 
 	var user home.UserSummary
 	var avatarURL sql.NullString
-	if err := s.db.QueryRowContext(ctx, query, userID).Scan(
+	if err := s.db.WithContext(ctx).Raw(query, userID).Row().Scan(
 		&user.Nickname,
 		&user.AvatarSeed,
 		&avatarURL,
@@ -78,12 +80,12 @@ func (s *PostgresHomeStore) findLastWatched(ctx context.Context, userID string) 
 		FROM user_media_progress AS progress
 		INNER JOIN media_episodes AS episode ON episode.id = progress.media_episode_id
 		INNER JOIN media_seasons AS season ON season.id = episode.season_id
-		WHERE progress.user_id = $1
+		WHERE progress.user_id = ?
 		ORDER BY progress.last_watched_at DESC
 		LIMIT 1
 	`
 
-	item, err := scanWatchProgress(s.db.QueryRowContext(ctx, query, userID))
+	item, err := scanWatchProgress(s.db.WithContext(ctx).Raw(query, userID).Row())
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil
@@ -104,12 +106,12 @@ func (s *PostgresHomeStore) findContinueWatching(ctx context.Context, userID str
 		FROM user_media_progress AS progress
 		INNER JOIN media_episodes AS episode ON episode.id = progress.media_episode_id
 		INNER JOIN media_seasons AS season ON season.id = episode.season_id
-		WHERE progress.user_id = $1 AND progress.completed = false
+		WHERE progress.user_id = ? AND progress.completed = false
 		ORDER BY progress.last_watched_at DESC
-		LIMIT $2
+		LIMIT ?
 	`
 
-	rows, err := s.db.QueryContext(ctx, query, userID, limit)
+	rows, err := s.db.WithContext(ctx).Raw(query, userID, limit).Rows()
 	if err != nil {
 		return nil, fmt.Errorf("find continue watching: %w", err)
 	}
