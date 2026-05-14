@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 )
 
 var ErrUnsupportedMessageType = errors.New("unsupported message type")
@@ -72,7 +73,10 @@ func DecodeSetPlaybackRate(envelope Envelope) (SetPlaybackRatePayload, error) {
 	if err != nil {
 		return SetPlaybackRatePayload{}, err
 	}
-	if payload.PlaybackRate <= 0 {
+	if payload.PlaybackRate < 0.25 ||
+		payload.PlaybackRate > 2.0 ||
+		math.IsNaN(payload.PlaybackRate) ||
+		math.IsInf(payload.PlaybackRate, 0) {
 		return SetPlaybackRatePayload{}, errors.New("invalid playbackRate")
 	}
 	return payload, nil

@@ -267,16 +267,23 @@ server/internal/realtime/sync_protocol.go
 Core state:
 
 ```text
-roomCode
-mediaId
 positionMs
 velocity
 serverTimeMs
 seq
 reason
-mediaDurationMs optional
+startBoundMs optional
+endBoundMs optional
+```
+
+Room/media binding belongs outside the reusable timeline vector:
+
+```text
+roomCode
+mediaId
 hostUserId
-ended derived or explicit view field
+ended derived or explicit compatibility view field
+playbackRate compatibility/intended-rate metadata
 ```
 
 Transition rules:
@@ -286,17 +293,17 @@ play: derive current position, set velocity > 0, increment seq
 pause: derive current position, set velocity = 0, increment seq
 seek: validate target, preserve velocity unless request explicitly says otherwise, increment seq
 rate_change: derive current position, validate rate, set velocity, increment seq
-media_change: reset position to 0, velocity = 0, increment seq
-ended: clamp to duration or reported end policy, velocity = 0, increment seq
+media_change: room layer binds a new mediaId and creates a fresh vector
+ended: room/media policy stops the vector at a validated target, velocity = 0, increment seq
 ```
 
 Compatibility rule:
 
 ```text
 The server may still expose `paused` and `playbackRate` while Android is migrating.
-They must be derived from the timeline vector:
+`paused` must be derived from the timeline vector:
 paused = velocity == 0
-playbackRate = velocity
+`playbackRate` may remain room-layer intended-rate metadata while a paused vector has velocity = 0
 ```
 
 Acceptance:
@@ -409,4 +416,3 @@ server/internal/transport/websocket_handler.go
 server/internal/room/room.go
 server/internal/room/manager.go
 ```
-

@@ -123,8 +123,8 @@ func TestRoomStateSnapshotExtrapolatesCurrentPositionWhilePlaying(t *testing.T) 
 
 	currentTime = currentTime.Add(3 * time.Second)
 	state := room.StateSnapshot()
-	if state.PositionMs != 8_000 {
-		t.Fatalf("expected extrapolated position 8000, got %d", state.PositionMs)
+	if state.PositionMs != 3_000 {
+		t.Fatalf("expected extrapolated position 3000, got %d", state.PositionMs)
 	}
 	if state.Seq != 2 {
 		t.Fatalf("expected seq 2 after play, got %d", state.Seq)

@@ -40,6 +40,9 @@ type roomMediaResponse struct {
 type roomStateResponse struct {
 	Paused       bool    `json:"paused"`
 	PositionMs   int64   `json:"positionMs"`
+	Velocity     float64 `json:"velocity"`
+	ServerTimeMs int64   `json:"serverTimeMs"`
+	Reason       string  `json:"reason"`
 	PlaybackRate float64 `json:"playbackRate"`
 	Ended        bool    `json:"ended"`
 	Seq          int64   `json:"seq"`
@@ -264,6 +267,9 @@ func roomStateToResponse(state room.State) roomStateResponse {
 	return roomStateResponse{
 		Paused:       state.Paused,
 		PositionMs:   state.PositionMs,
+		Velocity:     state.Velocity,
+		ServerTimeMs: state.ServerTimeMs,
+		Reason:       state.Reason,
 		PlaybackRate: state.PlaybackRate,
 		Ended:        state.Ended,
 		Seq:          state.Seq,

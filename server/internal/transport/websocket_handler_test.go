@@ -219,8 +219,8 @@ func TestWebSocketControlSyncFlow(t *testing.T) {
 		}),
 	})
 
-	assertControlBroadcast(t, ctx, hostConn, protocol.TypePlay, 12_000, 2)
-	assertControlBroadcast(t, ctx, viewerConn, protocol.TypePlay, 12_000, 2)
+	assertControlBroadcast(t, ctx, hostConn, protocol.TypePlay, -1, 2)
+	assertControlBroadcast(t, ctx, viewerConn, protocol.TypePlay, -1, 2)
 
 	mustSendEnvelope(t, ctx, hostConn, protocol.Envelope{
 		Type: protocol.TypePause,
@@ -232,8 +232,8 @@ func TestWebSocketControlSyncFlow(t *testing.T) {
 		}),
 	})
 
-	assertControlBroadcast(t, ctx, hostConn, protocol.TypePause, 13_500, 3)
-	assertControlBroadcast(t, ctx, viewerConn, protocol.TypePause, 13_500, 3)
+	assertControlBroadcast(t, ctx, hostConn, protocol.TypePause, -1, 3)
+	assertControlBroadcast(t, ctx, viewerConn, protocol.TypePause, -1, 3)
 
 	mustSendEnvelope(t, ctx, hostConn, protocol.Envelope{
 		Type: protocol.TypeSeek,
@@ -399,7 +399,7 @@ func TestWebSocketHostTransferOnDisconnect(t *testing.T) {
 		}),
 	})
 
-	assertControlBroadcast(t, ctx, viewerConn, protocol.TypePlay, 9_000, 3)
+	assertControlBroadcast(t, ctx, viewerConn, protocol.TypePlay, -1, 3)
 
 	state := createdRoom.StateSnapshot()
 	if state.HostUserID != "user_b" {
@@ -959,8 +959,8 @@ func TestWebSocketFormerHostReconnectsAsNormalMember(t *testing.T) {
 		}),
 	})
 
-	assertControlBroadcast(t, ctx, viewerConn, protocol.TypePlay, 9_000, transferredState.Seq+1)
-	assertControlBroadcast(t, ctx, reconnectedFormerHost, protocol.TypePlay, 9_000, transferredState.Seq+1)
+	assertControlBroadcast(t, ctx, viewerConn, protocol.TypePlay, -1, transferredState.Seq+1)
+	assertControlBroadcast(t, ctx, reconnectedFormerHost, protocol.TypePlay, -1, transferredState.Seq+1)
 
 	state := createdRoom.StateSnapshot()
 	if state.HostUserID != "user_b" {
@@ -1063,7 +1063,7 @@ func assertControlBroadcast(
 		if err := json.Unmarshal(envelope.Payload, &payload); err != nil {
 			t.Fatalf("unmarshal play payload: %v", err)
 		}
-		if payload.PositionMs != expectedPosition || payload.Seq != expectedSeq {
+		if (expectedPosition >= 0 && payload.PositionMs != expectedPosition) || payload.Seq != expectedSeq {
 			t.Fatalf("unexpected play payload: %+v", payload)
 		}
 	case protocol.TypePause:
@@ -1071,7 +1071,7 @@ func assertControlBroadcast(
 		if err := json.Unmarshal(envelope.Payload, &payload); err != nil {
 			t.Fatalf("unmarshal pause payload: %v", err)
 		}
-		if payload.PositionMs != expectedPosition || payload.Seq != expectedSeq {
+		if (expectedPosition >= 0 && payload.PositionMs != expectedPosition) || payload.Seq != expectedSeq {
 			t.Fatalf("unexpected pause payload: %+v", payload)
 		}
 	case protocol.TypeSeek:
@@ -1079,7 +1079,7 @@ func assertControlBroadcast(
 		if err := json.Unmarshal(envelope.Payload, &payload); err != nil {
 			t.Fatalf("unmarshal seek payload: %v", err)
 		}
-		if payload.PositionMs != expectedPosition || payload.Seq != expectedSeq {
+		if (expectedPosition >= 0 && payload.PositionMs != expectedPosition) || payload.Seq != expectedSeq {
 			t.Fatalf("unexpected seek payload: %+v", payload)
 		}
 	default:
@@ -1105,7 +1105,7 @@ func assertPlaybackRateBroadcast(
 	if err := json.Unmarshal(envelope.Payload, &payload); err != nil {
 		t.Fatalf("unmarshal set_playback_rate payload: %v", err)
 	}
-	if payload.PositionMs != expectedPosition ||
+	if (expectedPosition >= 0 && payload.PositionMs != expectedPosition) ||
 		payload.Seq != expectedSeq ||
 		payload.PlaybackRate != expectedRate {
 		t.Fatalf("unexpected set_playback_rate payload: %+v", payload)

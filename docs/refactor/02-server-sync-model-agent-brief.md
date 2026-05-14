@@ -33,19 +33,21 @@ The refactor should preserve current business behavior while replacing these sem
 
 ## Target Runtime State
 
-Use a state shape equivalent to:
+Use a reusable vector shape equivalent to:
 
 ```go
-type RoomTimelineState struct {
-    RoomCode      string
-    MediaID       string
-    PositionMs    int64
-    Velocity      float64
-    ServerTimeMs  int64
-    Seq           int64
-    Reason        string
-    HostUserID    string
-    MediaDurationMs *int64
+type TimelineVector struct {
+    PositionMs   int64
+    Velocity     float64
+    ServerTimeMs int64
+    Seq          int64
+    Reason       string
+    Bounds       *TimelineBounds
+}
+
+type TimelineBounds struct {
+    StartMs int64
+    EndMs   *int64
 }
 ```
 
@@ -58,6 +60,8 @@ serverTimeMs
 seq
 reason
 ```
+
+Room code, media ID, host user ID, ended flags, and Android compatibility fields belong in the room/protocol layer around the vector. Do not put product-specific identity fields inside the generic realtime vector.
 
 ## Central Query Function
 
@@ -100,7 +104,7 @@ pause         -> derive current position, velocity = 0.0, reason = pause
 seek          -> position = validated target, preserve current velocity unless explicit policy says otherwise, reason = seek
 rate_change   -> derive current position, velocity = requested rate, reason = rate_change
 media_change  -> mediaId changes, position = 0, velocity = 0.0, reason = media_change
-ended         -> position = media end or clamped value, velocity = 0.0, reason = media_end
+ended         -> room/media policy stops the vector at media end or clamped value, velocity = 0.0, reason = media_end
 ```
 
 ## Client Payload Semantics
@@ -194,9 +198,9 @@ Recommended split:
 realtime/timeline_state.go       -> state structs and derived view helpers
 realtime/timeline_transition.go  -> play/pause/seek/rate transition logic
 realtime/clock.go                -> centralized server timestamp source
-realtime/room_runtime.go         -> per-room serialization and clients snapshot
-realtime/room_hub.go             -> room registry and lifecycle
-realtime/sync_protocol.go        -> realtime DTO conversion helpers
+room/room.go                     -> room/media binding, host policy, clients snapshot
+room/manager.go                  -> room registry and lifecycle
+transport/websocket_handler.go   -> realtime DTO conversion helpers
 realtime/clock_sync.go           -> clock sync handling
 ```
 
@@ -242,4 +246,3 @@ Before marking sync refactor work complete:
 [ ] Clock sync pong exists.
 [ ] Tests cover transition math and seq behavior.
 ```
-

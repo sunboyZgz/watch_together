@@ -186,16 +186,7 @@ func (h *WebSocketHandler) handleJoinRoom(
 
 	if err := client.WriteJSON(ctx, protocol.Envelope{
 		Type: protocol.TypeRoomState,
-		Payload: mustJSONRaw(protocol.RoomStatePayload{
-			RoomID:       payload.RoomID,
-			MediaID:      joinResult.State.MediaID,
-			HostUserID:   joinResult.State.HostUserID,
-			Paused:       joinResult.State.Paused,
-			Ended:        joinResult.State.Ended,
-			PositionMs:   joinResult.State.PositionMs,
-			PlaybackRate: joinResult.State.PlaybackRate,
-			Seq:          joinResult.State.Seq,
-		}),
+		Payload: mustJSONRaw(roomStatePayload(joinResult.State)),
 	}); err != nil {
 		return err
 	}
@@ -232,6 +223,9 @@ func (h *WebSocketHandler) handlePlay(
 					RoomID:     state.RoomID,
 					UserID:     state.HostUserID,
 					PositionMs: state.PositionMs,
+					Velocity:   state.Velocity,
+					ServerTimeMs: state.ServerTimeMs,
+					Reason:     state.Reason,
 					Seq:        state.Seq,
 				}),
 			}
@@ -265,6 +259,9 @@ func (h *WebSocketHandler) handlePause(
 					RoomID:     state.RoomID,
 					UserID:     state.HostUserID,
 					PositionMs: state.PositionMs,
+					Velocity:   state.Velocity,
+					ServerTimeMs: state.ServerTimeMs,
+					Reason:     state.Reason,
 					Seq:        state.Seq,
 				}),
 			}
@@ -298,6 +295,9 @@ func (h *WebSocketHandler) handleSeek(
 					RoomID:     state.RoomID,
 					UserID:     state.HostUserID,
 					PositionMs: state.PositionMs,
+					Velocity:   state.Velocity,
+					ServerTimeMs: state.ServerTimeMs,
+					Reason:     state.Reason,
 					Seq:        state.Seq,
 				}),
 			}
@@ -338,6 +338,9 @@ func (h *WebSocketHandler) handleSetPlaybackRate(
 					RoomID:       state.RoomID,
 					UserID:       state.HostUserID,
 					PositionMs:   state.PositionMs,
+					Velocity:     state.Velocity,
+					ServerTimeMs:  state.ServerTimeMs,
+					Reason:       state.Reason,
 					PlaybackRate: state.PlaybackRate,
 					Seq:          state.Seq,
 				}),
@@ -372,6 +375,9 @@ func (h *WebSocketHandler) handleEnded(
 					RoomID:     state.RoomID,
 					UserID:     state.HostUserID,
 					PositionMs: state.PositionMs,
+					Velocity:   state.Velocity,
+					ServerTimeMs: state.ServerTimeMs,
+					Reason:     state.Reason,
 					Seq:        state.Seq,
 				}),
 			}
@@ -520,17 +526,24 @@ func (h *WebSocketHandler) broadcastRoomState(result room.RemoveClientResult) {
 
 	_ = broadcastEnvelope(ctx, result.Remaining, protocol.Envelope{
 		Type: protocol.TypeRoomState,
-		Payload: mustJSONRaw(protocol.RoomStatePayload{
-			RoomID:       result.State.RoomID,
-			MediaID:      result.State.MediaID,
-			HostUserID:   result.State.HostUserID,
-			Paused:       result.State.Paused,
-			Ended:        result.State.Ended,
-			PositionMs:   result.State.PositionMs,
-			PlaybackRate: result.State.PlaybackRate,
-			Seq:          result.State.Seq,
-		}),
+		Payload: mustJSONRaw(roomStatePayload(result.State)),
 	})
+}
+
+func roomStatePayload(state room.State) protocol.RoomStatePayload {
+	return protocol.RoomStatePayload{
+		RoomID:       state.RoomID,
+		MediaID:      state.MediaID,
+		HostUserID:   state.HostUserID,
+		Paused:       state.Paused,
+		Ended:        state.Ended,
+		PositionMs:   state.PositionMs,
+		Velocity:     state.Velocity,
+		ServerTimeMs: state.ServerTimeMs,
+		Reason:       state.Reason,
+		PlaybackRate: state.PlaybackRate,
+		Seq:          state.Seq,
+	}
 }
 
 func (h *WebSocketHandler) broadcastRoomMembersChangedToOthers(

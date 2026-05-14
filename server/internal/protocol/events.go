@@ -16,39 +16,54 @@ type JoinRoomPayload struct {
 }
 
 type PlayPayload struct {
-	RoomID     string `json:"roomId"`
-	UserID     string `json:"userId"`
-	PositionMs int64  `json:"positionMs"`
-	Seq        int64  `json:"seq"`
+	RoomID       string  `json:"roomId"`
+	UserID       string  `json:"userId"`
+	PositionMs   int64   `json:"positionMs"`
+	Velocity     float64 `json:"velocity,omitempty"`
+	ServerTimeMs int64   `json:"serverTimeMs,omitempty"`
+	Reason       string  `json:"reason,omitempty"`
+	Seq          int64   `json:"seq"`
 }
 
 type PausePayload struct {
-	RoomID     string `json:"roomId"`
-	UserID     string `json:"userId"`
-	PositionMs int64  `json:"positionMs"`
-	Seq        int64  `json:"seq"`
+	RoomID       string  `json:"roomId"`
+	UserID       string  `json:"userId"`
+	PositionMs   int64   `json:"positionMs"`
+	Velocity     float64 `json:"velocity,omitempty"`
+	ServerTimeMs int64   `json:"serverTimeMs,omitempty"`
+	Reason       string  `json:"reason,omitempty"`
+	Seq          int64   `json:"seq"`
 }
 
 type SeekPayload struct {
-	RoomID     string `json:"roomId"`
-	UserID     string `json:"userId"`
-	PositionMs int64  `json:"positionMs"`
-	Seq        int64  `json:"seq"`
+	RoomID       string  `json:"roomId"`
+	UserID       string  `json:"userId"`
+	PositionMs   int64   `json:"positionMs"`
+	Velocity     float64 `json:"velocity,omitempty"`
+	ServerTimeMs int64   `json:"serverTimeMs,omitempty"`
+	Reason       string  `json:"reason,omitempty"`
+	Seq          int64   `json:"seq"`
 }
 
 type SetPlaybackRatePayload struct {
 	RoomID       string  `json:"roomId"`
 	UserID       string  `json:"userId"`
 	PositionMs   int64   `json:"positionMs"`
+	Velocity     float64 `json:"velocity,omitempty"`
+	ServerTimeMs int64   `json:"serverTimeMs,omitempty"`
+	Reason       string  `json:"reason,omitempty"`
 	PlaybackRate float64 `json:"playbackRate"`
 	Seq          int64   `json:"seq"`
 }
 
 type EndedPayload struct {
-	RoomID     string `json:"roomId"`
-	UserID     string `json:"userId"`
-	PositionMs int64  `json:"positionMs"`
-	Seq        int64  `json:"seq"`
+	RoomID       string  `json:"roomId"`
+	UserID       string  `json:"userId"`
+	PositionMs   int64   `json:"positionMs"`
+	Velocity     float64 `json:"velocity,omitempty"`
+	ServerTimeMs int64   `json:"serverTimeMs,omitempty"`
+	Reason       string  `json:"reason,omitempty"`
+	Seq          int64   `json:"seq"`
 }
 
 type HeartbeatPayload struct {
@@ -67,6 +82,9 @@ type RoomStatePayload struct {
 	Paused       bool    `json:"paused"`
 	Ended        bool    `json:"ended"`
 	PositionMs   int64   `json:"positionMs"`
+	Velocity     float64 `json:"velocity"`
+	ServerTimeMs int64   `json:"serverTimeMs"`
+	Reason       string  `json:"reason"`
 	PlaybackRate float64 `json:"playbackRate"`
 	Seq          int64   `json:"seq"`
 }

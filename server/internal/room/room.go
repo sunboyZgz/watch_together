@@ -2,12 +2,15 @@ package room
 
 import (
 	"errors"
-	"math"
 	"sync"
 	"time"
+
+	"watch_together/server/internal/realtime"
 )
 
 var ErrNotHost = errors.New("only host can control playback")
+
+const reasonMediaEnd = "media_end"
 
 type State struct {
 	RoomID       string
@@ -16,8 +19,11 @@ type State struct {
 	Paused       bool
 	Ended        bool
 	PositionMs   int64
+	Velocity     float64
+	ServerTimeMs int64
 	PlaybackRate float64
 	Seq          int64
+	Reason       string
 }
 
 type Room struct {
@@ -26,7 +32,6 @@ type Room struct {
 	clients       map[*ClientConnection]struct{}
 	clientsByUser map[string]*ClientConnection
 	state         State
-	authorityAt   time.Time
 	now           func() time.Time
 }
 
@@ -50,6 +55,7 @@ func New(id string) *Room {
 }
 
 func newWithClock(id string, now func() time.Time) *Room {
+	vector := realtime.NewTimelineVector(now())
 	return &Room{
 		id:            id,
 		clients:       make(map[*ClientConnection]struct{}),
@@ -60,12 +66,14 @@ func newWithClock(id string, now func() time.Time) *Room {
 			HostUserID:   "",
 			Paused:       true,
 			Ended:        false,
-			PositionMs:   0,
+			PositionMs:   vector.PositionMs,
+			Velocity:     vector.Velocity,
+			ServerTimeMs: vector.ServerTimeMs,
 			PlaybackRate: 1.0,
-			Seq:          1,
+			Seq:          vector.Seq,
+			Reason:       vector.Reason,
 		},
-		authorityAt: now(),
-		now:         now,
+		now: now,
 	}
 }
 
@@ -73,6 +81,7 @@ func newWithClock(id string, now func() time.Time) *Room {
 func NewCreatedRoom(id string, hostUserID string, mediaID string) *Room {
 	room := New(id)
 	room.state.MediaID = mediaID
+	room.stateFromVectorLocked(realtime.NewTimelineVector(room.now()), room.state.PlaybackRate, room.state.Ended)
 	room.state.HostUserID = hostUserID
 	return room
 }
@@ -159,12 +168,36 @@ func (r *Room) ClientCount() int {
 // ApplyPlay updates the room's authority state for a play action and snapshots the
 // active clients so the transport layer can broadcast without holding the room lock.
 func (r *Room) ApplyPlay(userID string, positionMs int64) (State, []*ClientConnection, error) {
-	return r.applyControl(userID, positionMs, false)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.state.HostUserID != userID {
+		return State{}, nil, ErrNotHost
+	}
+
+	now := r.now()
+	playbackRate := r.state.PlaybackRate
+	if playbackRate <= 0 {
+		playbackRate = 1.0
+	}
+	next := realtime.Play(r.vectorLocked(), now, playbackRate)
+	r.stateFromVectorLocked(next, playbackRate, false)
+	return r.currentStateLocked(now), r.clientsSnapshotLocked(), nil
 }
 
 // ApplyPause updates the room's authority state for a pause action.
 func (r *Room) ApplyPause(userID string, positionMs int64) (State, []*ClientConnection, error) {
-	return r.applyControl(userID, positionMs, true)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.state.HostUserID != userID {
+		return State{}, nil, ErrNotHost
+	}
+
+	now := r.now()
+	next := realtime.Pause(r.vectorLocked(), now)
+	r.stateFromVectorLocked(next, r.state.PlaybackRate, false)
+	return r.currentStateLocked(now), r.clientsSnapshotLocked(), nil
 }
 
 // ApplySeek updates the room position while preserving the current paused flag.
@@ -176,11 +209,10 @@ func (r *Room) ApplySeek(userID string, positionMs int64) (State, []*ClientConne
 		return State{}, nil, ErrNotHost
 	}
 
-	r.state.PositionMs = positionMs
-	r.state.Ended = false
-	r.authorityAt = r.now()
-	r.state.Seq++
-	return r.currentStateLocked(r.authorityAt), r.clientsSnapshotLocked(), nil
+	now := r.now()
+	next := realtime.Seek(r.vectorLocked(), now, positionMs)
+	r.stateFromVectorLocked(next, r.state.PlaybackRate, false)
+	return r.currentStateLocked(now), r.clientsSnapshotLocked(), nil
 }
 
 // ApplyPlaybackRate updates the room playback rate while preserving a continuous authority timeline.
@@ -196,12 +228,14 @@ func (r *Room) ApplyPlaybackRate(
 	}
 
 	now := r.now()
-	currentState := r.currentStateLocked(now)
-	r.state.PositionMs = currentState.PositionMs
+	previous := r.vectorLocked()
+	next := realtime.RateChange(previous, now, playbackRate)
+	if previous.Velocity == 0 {
+		next.Velocity = 0
+	}
 	r.state.PlaybackRate = playbackRate
-	r.authorityAt = now
-	r.state.Seq++
-	return r.currentStateLocked(r.authorityAt), r.clientsSnapshotLocked(), nil
+	r.stateFromVectorLocked(next, playbackRate, r.state.Ended)
+	return r.currentStateLocked(now), r.clientsSnapshotLocked(), nil
 }
 
 // ApplyEnded marks the room authority timeline as completed and freezes the position.
@@ -214,37 +248,9 @@ func (r *Room) ApplyEnded(userID string, positionMs int64) (State, []*ClientConn
 	}
 
 	now := r.now()
-	currentState := r.currentStateLocked(now)
-	frozenPosition := positionMs
-	if currentState.PositionMs > frozenPosition {
-		frozenPosition = currentState.PositionMs
-	}
-	r.state.PositionMs = frozenPosition
-	r.state.Paused = true
-	r.state.Ended = true
-	r.authorityAt = now
-	r.state.Seq++
-	return r.currentStateLocked(r.authorityAt), r.clientsSnapshotLocked(), nil
-}
-
-func (r *Room) applyControl(
-	userID string,
-	positionMs int64,
-	paused bool,
-) (State, []*ClientConnection, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	if r.state.HostUserID != userID {
-		return State{}, nil, ErrNotHost
-	}
-
-	r.state.Paused = paused
-	r.state.Ended = false
-	r.state.PositionMs = positionMs
-	r.authorityAt = r.now()
-	r.state.Seq++
-	return r.currentStateLocked(r.authorityAt), r.clientsSnapshotLocked(), nil
+	next := realtime.StopAt(r.vectorLocked(), now, positionMs, reasonMediaEnd)
+	r.stateFromVectorLocked(next, r.state.PlaybackRate, true)
+	return r.currentStateLocked(now), r.clientsSnapshotLocked(), nil
 }
 
 func (r *Room) clientsSnapshotLocked() []*ClientConnection {
@@ -257,20 +263,33 @@ func (r *Room) clientsSnapshotLocked() []*ClientConnection {
 
 func (r *Room) currentStateLocked(now time.Time) State {
 	snapshot := r.state
-	if snapshot.Paused || snapshot.Ended || r.authorityAt.IsZero() {
-		return snapshot
-	}
-
-	elapsedMs := now.Sub(r.authorityAt).Milliseconds()
-	if elapsedMs <= 0 {
-		return snapshot
-	}
-
-	progressedMs := int64(math.Round(float64(elapsedMs) * snapshot.PlaybackRate))
-	if progressedMs < 0 {
-		return snapshot
-	}
-
-	snapshot.PositionMs += progressedMs
+	vector := r.vectorLocked().SnapshotAt(now)
+	snapshot.PositionMs = vector.PositionMs
+	snapshot.ServerTimeMs = vector.ServerTimeMs
+	snapshot.Paused = vector.Velocity == 0
 	return snapshot
+}
+
+func (r *Room) vectorLocked() realtime.TimelineVector {
+	return realtime.TimelineVector{
+		PositionMs:   r.state.PositionMs,
+		Velocity:     r.state.Velocity,
+		ServerTimeMs: r.state.ServerTimeMs,
+		Seq:          r.state.Seq,
+		Reason:       r.state.Reason,
+	}
+}
+
+func (r *Room) stateFromVectorLocked(vector realtime.TimelineVector, playbackRate float64, ended bool) {
+	r.state.PositionMs = vector.PositionMs
+	r.state.Velocity = vector.Velocity
+	r.state.ServerTimeMs = vector.ServerTimeMs
+	r.state.Seq = vector.Seq
+	r.state.Reason = vector.Reason
+	r.state.Paused = vector.Velocity == 0
+	r.state.Ended = ended
+	if playbackRate <= 0 {
+		playbackRate = 1.0
+	}
+	r.state.PlaybackRate = playbackRate
 }
