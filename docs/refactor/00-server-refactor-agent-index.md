@@ -16,8 +16,10 @@ For any server refactor agent, read these files first:
 3. docs/refactor/02-server-sync-model-agent-brief.md
 4. docs/refactor/03-server-sync-model-phase4-closeout.md
 5. docs/refactor/04-server-clock-sync-phase5.md
-6. docs/sync/00-index.md
-7. docs/sync/07-agent-brief-checklists-and-anti-patterns.md
+6. docs/refactor/05-server-sync-phase6-cleanup.md
+7. docs/refactor/06-websocket-sync-contract.md
+8. docs/sync/00-index.md
+9. docs/sync/07-agent-brief-checklists-and-anti-patterns.md
 ```
 
 When changing timeline structs, transitions, or WebSocket behavior, also read:

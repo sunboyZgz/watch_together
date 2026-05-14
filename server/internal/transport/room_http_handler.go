@@ -264,15 +264,16 @@ func roomMediaToResponse(media roomapi.Media) roomMediaResponse {
 }
 
 func roomStateToResponse(state room.State) roomStateResponse {
+	view := newRoomSyncView(state)
 	return roomStateResponse{
-		Paused:       state.Paused,
-		PositionMs:   state.PositionMs,
-		Velocity:     state.Velocity,
-		ServerTimeMs: state.ServerTimeMs,
-		Reason:       state.Reason,
-		PlaybackRate: state.PlaybackRate,
-		Ended:        state.Ended,
-		Seq:          state.Seq,
+		Paused:       view.Paused,
+		PositionMs:   view.PositionMs,
+		Velocity:     view.Velocity,
+		ServerTimeMs: view.ServerTimeMs,
+		Reason:       view.Reason,
+		PlaybackRate: view.PlaybackRate,
+		Ended:        view.Ended,
+		Seq:          view.Seq,
 	}
 }
 
