@@ -38,14 +38,15 @@ type roomMediaResponse struct {
 }
 
 type roomStateResponse struct {
-	Paused       bool    `json:"paused"`
-	PositionMs   int64   `json:"positionMs"`
-	Velocity     float64 `json:"velocity"`
-	ServerTimeMs int64   `json:"serverTimeMs"`
-	Reason       string  `json:"reason"`
-	PlaybackRate float64 `json:"playbackRate"`
-	Ended        bool    `json:"ended"`
-	Seq          int64   `json:"seq"`
+	MediaDurationMs *int64  `json:"mediaDurationMs,omitempty"`
+	Paused          bool    `json:"paused"`
+	PositionMs      int64   `json:"positionMs"`
+	Velocity        float64 `json:"velocity"`
+	ServerTimeMs    int64   `json:"serverTimeMs"`
+	Reason          string  `json:"reason"`
+	PlaybackRate    float64 `json:"playbackRate"`
+	Ended           bool    `json:"ended"`
+	Seq             int64   `json:"seq"`
 }
 
 type createRoomResponse struct {
@@ -109,7 +110,12 @@ func (h *RoomHTTPHandler) CreateRoom(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	runtimeRoom := h.roomManager.RegisterCreatedRoom(result.Room.RoomCode, result.Room.HostUserID, result.Room.MediaItemID)
+	runtimeRoom := h.roomManager.RegisterCreatedRoomWithMedia(
+		result.Room.RoomCode,
+		result.Room.HostUserID,
+		result.Room.MediaItemID,
+		result.Media.DurationMs,
+	)
 	state := runtimeRoom.StateSnapshot()
 	writeAPISuccess(w, http.StatusCreated, createRoomResponse{
 		Room:      roomToResponse(result.Room),
@@ -147,7 +153,12 @@ func (h *RoomHTTPHandler) JoinRoomByCode(w http.ResponseWriter, r *http.Request)
 	}
 
 	// Keep the runtime room available for the following WebSocket join_room call.
-	h.roomManager.RegisterCreatedRoom(result.Room.RoomCode, result.Room.HostUserID, result.Room.MediaItemID)
+	h.roomManager.RegisterCreatedRoomWithMedia(
+		result.Room.RoomCode,
+		result.Room.HostUserID,
+		result.Room.MediaItemID,
+		result.Media.DurationMs,
+	)
 	writeAPISuccess(w, http.StatusOK, joinRoomResponse{
 		Room:   roomToResponse(result.Room),
 		Member: memberToResponse(result.Member),
@@ -188,7 +199,12 @@ func (h *RoomHTTPHandler) DetailByCode(w http.ResponseWriter, r *http.Request) {
 		h.writeRoomError(w, err)
 		return
 	}
-	h.roomManager.RegisterCreatedRoom(result.Room.RoomCode, result.Room.HostUserID, result.Room.MediaItemID)
+	h.roomManager.RegisterCreatedRoomWithMedia(
+		result.Room.RoomCode,
+		result.Room.HostUserID,
+		result.Room.MediaItemID,
+		result.Media.DurationMs,
+	)
 	writeAPISuccess(w, http.StatusOK, roomDetailResponse{
 		Room:    roomToResponse(result.Room),
 		Media:   roomMediaToResponse(result.Media),
@@ -266,14 +282,15 @@ func roomMediaToResponse(media roomapi.Media) roomMediaResponse {
 func roomStateToResponse(state room.State) roomStateResponse {
 	view := newRoomSyncView(state)
 	return roomStateResponse{
-		Paused:       view.Paused,
-		PositionMs:   view.PositionMs,
-		Velocity:     view.Velocity,
-		ServerTimeMs: view.ServerTimeMs,
-		Reason:       view.Reason,
-		PlaybackRate: view.PlaybackRate,
-		Ended:        view.Ended,
-		Seq:          view.Seq,
+		MediaDurationMs: view.MediaDurationMs,
+		Paused:          view.Paused,
+		PositionMs:      view.PositionMs,
+		Velocity:        view.Velocity,
+		ServerTimeMs:    view.ServerTimeMs,
+		Reason:          view.Reason,
+		PlaybackRate:    view.PlaybackRate,
+		Ended:           view.Ended,
+		Seq:             view.Seq,
 	}
 }
 

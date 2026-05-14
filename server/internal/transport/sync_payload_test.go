@@ -7,17 +7,19 @@ import (
 )
 
 func TestRoomStatePayloadDerivesPausedFromVelocity(t *testing.T) {
+	durationMs := int64(120_000)
 	state := room.State{
-		RoomID:       "ROOM01",
-		MediaID:      "sample_001",
-		HostUserID:   "user_a",
-		Paused:       true,
-		PositionMs:   10_000,
-		Velocity:     1,
-		ServerTimeMs: 1_000,
-		PlaybackRate: 1,
-		Seq:          2,
-		Reason:       "play",
+		RoomID:          "ROOM01",
+		MediaID:         "sample_001",
+		MediaDurationMs: &durationMs,
+		HostUserID:      "user_a",
+		Paused:          true,
+		PositionMs:      10_000,
+		Velocity:        1,
+		ServerTimeMs:    1_000,
+		PlaybackRate:    1,
+		Seq:             2,
+		Reason:          "play",
 	}
 
 	payload := roomStatePayload(state)
@@ -27,6 +29,9 @@ func TestRoomStatePayloadDerivesPausedFromVelocity(t *testing.T) {
 	}
 	if payload.Velocity != 1 {
 		t.Fatalf("expected velocity 1, got %f", payload.Velocity)
+	}
+	if payload.MediaDurationMs == nil || *payload.MediaDurationMs != durationMs {
+		t.Fatalf("expected mediaDurationMs %d, got %v", durationMs, payload.MediaDurationMs)
 	}
 }
 

@@ -61,6 +61,11 @@ func newManagerWithClock(now func() time.Time, emptyRoomGracePeriod time.Duratio
 
 // CreateRoom generates a unique room ID, initializes the room state, and registers it in memory.
 func (m *Manager) CreateRoom(hostUserID string, mediaID string) (*Room, error) {
+	return m.CreateRoomWithMedia(hostUserID, mediaID, nil)
+}
+
+// CreateRoomWithMedia generates a room with optional media timing metadata.
+func (m *Manager) CreateRoomWithMedia(hostUserID string, mediaID string, mediaDurationMs *int64) (*Room, error) {
 	m.mu.Lock()
 	_, _ = m.cleanupExpiredRoomsLocked(m.now())
 
@@ -74,7 +79,7 @@ func (m *Manager) CreateRoom(hostUserID string, mediaID string) (*Room, error) {
 			continue
 		}
 
-		room := NewCreatedRoom(roomID, hostUserID, mediaID)
+		room := NewCreatedRoomWithMedia(roomID, hostUserID, mediaID, mediaDurationMs)
 		m.rooms[roomID] = room
 		emptySince, destroyAfter, shouldTrigger := m.markRoomEmptyLockedIfNeeded(roomID, room)
 		m.mu.Unlock()
@@ -90,14 +95,25 @@ func (m *Manager) CreateRoom(hostUserID string, mediaID string) (*Room, error) {
 
 // RegisterCreatedRoom mirrors a persistent room into the in-memory sync registry.
 func (m *Manager) RegisterCreatedRoom(roomID string, hostUserID string, mediaID string) *Room {
+	return m.RegisterCreatedRoomWithMedia(roomID, hostUserID, mediaID, nil)
+}
+
+// RegisterCreatedRoomWithMedia mirrors a persistent room with media timing metadata into runtime state.
+func (m *Manager) RegisterCreatedRoomWithMedia(
+	roomID string,
+	hostUserID string,
+	mediaID string,
+	mediaDurationMs *int64,
+) *Room {
 	m.mu.Lock()
 	_, _ = m.cleanupExpiredRoomsLocked(m.now())
 
 	if existing, ok := m.rooms[roomID]; ok {
+		existing.BindMedia(mediaID, mediaDurationMs)
 		m.mu.Unlock()
 		return existing
 	}
-	registeredRoom := NewCreatedRoom(roomID, hostUserID, mediaID)
+	registeredRoom := NewCreatedRoomWithMedia(roomID, hostUserID, mediaID, mediaDurationMs)
 	m.rooms[roomID] = registeredRoom
 	emptySince, destroyAfter, shouldTrigger := m.markRoomEmptyLockedIfNeeded(roomID, registeredRoom)
 	m.mu.Unlock()

@@ -548,17 +548,18 @@ func (h *WebSocketHandler) broadcastRoomState(result room.RemoveClientResult) {
 func roomStatePayload(state room.State) protocol.RoomStatePayload {
 	view := newRoomSyncView(state)
 	return protocol.RoomStatePayload{
-		RoomID:       state.RoomID,
-		MediaID:      state.MediaID,
-		HostUserID:   state.HostUserID,
-		Paused:       view.Paused,
-		Ended:        view.Ended,
-		PositionMs:   view.PositionMs,
-		Velocity:     view.Velocity,
-		ServerTimeMs: view.ServerTimeMs,
-		Reason:       view.Reason,
-		PlaybackRate: view.PlaybackRate,
-		Seq:          view.Seq,
+		RoomID:          state.RoomID,
+		MediaID:         state.MediaID,
+		MediaDurationMs: view.MediaDurationMs,
+		HostUserID:      state.HostUserID,
+		Paused:          view.Paused,
+		Ended:           view.Ended,
+		PositionMs:      view.PositionMs,
+		Velocity:        view.Velocity,
+		ServerTimeMs:    view.ServerTimeMs,
+		Reason:          view.Reason,
+		PlaybackRate:    view.PlaybackRate,
+		Seq:             view.Seq,
 	}
 }
 

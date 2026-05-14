@@ -91,6 +91,11 @@ func (s *PostgresRoomStore) JoinRoomByCode(ctx context.Context, params roomapi.J
 			return err
 		}
 
+		mediaItem, err := findRoomMedia(ctx, tx, room.MediaItemID)
+		if err != nil {
+			return err
+		}
+
 		member, err := findActiveMember(ctx, tx, room.ID, params.UserID)
 		if err != nil {
 			return err
@@ -107,6 +112,7 @@ func (s *PostgresRoomStore) JoinRoomByCode(ctx context.Context, params roomapi.J
 
 		result = roomapi.JoinRoomResult{
 			Room:   room,
+			Media:  mediaItem,
 			Member: member,
 		}
 		return nil

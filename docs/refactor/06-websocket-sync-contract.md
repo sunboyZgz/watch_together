@@ -46,6 +46,7 @@ Payload:
 {
   "roomId": "ROOM01",
   "mediaId": "sample_001",
+  "mediaDurationMs": 1458000,
   "hostUserId": "user_a",
   "paused": false,
   "ended": false,
@@ -64,6 +65,7 @@ Compatibility fields:
 paused = velocity == 0
 playbackRate = intended room playback rate
 ended = room/media completion view
+mediaDurationMs = optional media bound used by server timeline policy
 ```
 
 ## Control Events
@@ -90,7 +92,40 @@ seq
 
 `set_playback_rate` also includes `playbackRate`.
 
+Known server reasons in this branch:
+
+```text
+init
+play
+pause
+seek
+rate_change
+media_end
+media_change
+```
+
 Later protocol migration may replace accepted-control broadcasts with `room_state`, but this branch keeps legacy event types stable.
+
+## Replay And Next Episode
+
+The server does not automatically decide replay vs next episode after `ended`.
+
+Replay current media uses existing controls:
+
+```text
+seek(positionMs=0)
+play
+```
+
+Next episode should use a future explicit media-change API:
+
+```text
+change current room media to next mediaId
+server broadcasts a new room_state with reason media_change
+host/client sends play if the product wants auto-start
+```
+
+This keeps UI/product policy on the client side and timeline authority on the server side.
 
 ## Clock Sync
 

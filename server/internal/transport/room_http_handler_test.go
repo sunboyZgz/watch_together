@@ -69,6 +69,9 @@ func TestCreateRoomFlow(t *testing.T) {
 	if response.Data.RoomState.PlaybackRate != 1.0 {
 		t.Fatalf("expected playbackRate 1.0, got %f", response.Data.RoomState.PlaybackRate)
 	}
+	if response.Data.RoomState.MediaDurationMs == nil || *response.Data.RoomState.MediaDurationMs != durationMs {
+		t.Fatalf("expected roomState mediaDurationMs %d, got %v", durationMs, response.Data.RoomState.MediaDurationMs)
+	}
 }
 
 func TestCreateRoomRequiresAccessToken(t *testing.T) {

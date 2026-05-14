@@ -85,17 +85,18 @@ type ClockSyncPongPayload struct {
 }
 
 type RoomStatePayload struct {
-	RoomID       string  `json:"roomId"`
-	MediaID      string  `json:"mediaId"`
-	HostUserID   string  `json:"hostUserId"`
-	Paused       bool    `json:"paused"`
-	Ended        bool    `json:"ended"`
-	PositionMs   int64   `json:"positionMs"`
-	Velocity     float64 `json:"velocity"`
-	ServerTimeMs int64   `json:"serverTimeMs"`
-	Reason       string  `json:"reason"`
-	PlaybackRate float64 `json:"playbackRate"`
-	Seq          int64   `json:"seq"`
+	RoomID          string  `json:"roomId"`
+	MediaID         string  `json:"mediaId"`
+	MediaDurationMs *int64  `json:"mediaDurationMs,omitempty"`
+	HostUserID      string  `json:"hostUserId"`
+	Paused          bool    `json:"paused"`
+	Ended           bool    `json:"ended"`
+	PositionMs      int64   `json:"positionMs"`
+	Velocity        float64 `json:"velocity"`
+	ServerTimeMs    int64   `json:"serverTimeMs"`
+	Reason          string  `json:"reason"`
+	PlaybackRate    float64 `json:"playbackRate"`
+	Seq             int64   `json:"seq"`
 }
 
 type RoomMembersChangedPayload struct {

@@ -10,11 +10,15 @@ import (
 
 var ErrNotHost = errors.New("only host can control playback")
 
-const reasonMediaEnd = "media_end"
+const (
+	reasonMediaChange = "media_change"
+	reasonMediaEnd    = "media_end"
+)
 
 type State struct {
 	RoomID       string
 	MediaID      string
+	MediaDurationMs *int64
 	HostUserID   string
 	Paused       bool
 	Ended        bool
@@ -79,9 +83,19 @@ func newWithClock(id string, now func() time.Time) *Room {
 
 // NewCreatedRoom creates a room that already has an initial host and media binding.
 func NewCreatedRoom(id string, hostUserID string, mediaID string) *Room {
+	return NewCreatedRoomWithMedia(id, hostUserID, mediaID, nil)
+}
+
+// NewCreatedRoomWithMedia creates a room with initial host and media timing metadata.
+func NewCreatedRoomWithMedia(id string, hostUserID string, mediaID string, mediaDurationMs *int64) *Room {
 	room := New(id)
 	room.state.MediaID = mediaID
-	room.stateFromVectorLocked(realtime.NewTimelineVector(room.now()), room.state.PlaybackRate, room.state.Ended)
+	room.state.MediaDurationMs = cloneDurationMs(mediaDurationMs)
+	room.stateFromVectorLocked(
+		realtime.NewTimelineVectorWithBounds(room.now(), room.timelineBoundsLocked()),
+		room.state.PlaybackRate,
+		room.state.Ended,
+	)
 	room.state.HostUserID = hostUserID
 	return room
 }
@@ -89,6 +103,29 @@ func NewCreatedRoom(id string, hostUserID string, mediaID string) *Room {
 // ID returns the stable room identifier.
 func (r *Room) ID() string {
 	return r.id
+}
+
+// BindMedia attaches media metadata without changing the current timeline when the media is unchanged.
+func (r *Room) BindMedia(mediaID string, mediaDurationMs *int64) State {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.state.MediaID != "" && r.state.MediaID != mediaID {
+		nextSeq := r.state.Seq + 1
+		r.state.MediaID = mediaID
+		r.state.MediaDurationMs = cloneDurationMs(mediaDurationMs)
+		next := realtime.NewTimelineVectorWithBounds(r.now(), r.timelineBoundsLocked())
+		next.Seq = nextSeq
+		next.Reason = reasonMediaChange
+		r.stateFromVectorLocked(next, r.state.PlaybackRate, false)
+		return r.currentStateLocked(r.now())
+	}
+
+	r.state.MediaID = mediaID
+	if mediaDurationMs != nil {
+		r.state.MediaDurationMs = cloneDurationMs(mediaDurationMs)
+	}
+	return r.currentStateLocked(r.now())
 }
 
 // StateSnapshot returns the current room state in a read-safe way.
@@ -181,7 +218,10 @@ func (r *Room) ApplyPlay(userID string, positionMs int64) (State, []*ClientConne
 		playbackRate = 1.0
 	}
 	next := realtime.Play(r.vectorLocked(), now, playbackRate)
-	r.stateFromVectorLocked(next, playbackRate, false)
+	if isAtEnd(next) {
+		next.Velocity = 0
+	}
+	r.stateFromVectorLocked(next, playbackRate, isAtEnd(next))
 	return r.currentStateLocked(now), r.clientsSnapshotLocked(), nil
 }
 
@@ -196,7 +236,7 @@ func (r *Room) ApplyPause(userID string, positionMs int64) (State, []*ClientConn
 
 	now := r.now()
 	next := realtime.Pause(r.vectorLocked(), now)
-	r.stateFromVectorLocked(next, r.state.PlaybackRate, false)
+	r.stateFromVectorLocked(next, r.state.PlaybackRate, isAtEnd(next))
 	return r.currentStateLocked(now), r.clientsSnapshotLocked(), nil
 }
 
@@ -211,7 +251,7 @@ func (r *Room) ApplySeek(userID string, positionMs int64) (State, []*ClientConne
 
 	now := r.now()
 	next := realtime.Seek(r.vectorLocked(), now, positionMs)
-	r.stateFromVectorLocked(next, r.state.PlaybackRate, false)
+	r.stateFromVectorLocked(next, r.state.PlaybackRate, isAtEnd(next))
 	return r.currentStateLocked(now), r.clientsSnapshotLocked(), nil
 }
 
@@ -233,8 +273,11 @@ func (r *Room) ApplyPlaybackRate(
 	if previous.Velocity == 0 {
 		next.Velocity = 0
 	}
+	if isAtEnd(next) {
+		next.Velocity = 0
+	}
 	r.state.PlaybackRate = playbackRate
-	r.stateFromVectorLocked(next, playbackRate, r.state.Ended)
+	r.stateFromVectorLocked(next, playbackRate, r.state.Ended || isAtEnd(next))
 	return r.currentStateLocked(now), r.clientsSnapshotLocked(), nil
 }
 
@@ -267,6 +310,11 @@ func (r *Room) currentStateLocked(now time.Time) State {
 	snapshot.PositionMs = vector.PositionMs
 	snapshot.ServerTimeMs = vector.ServerTimeMs
 	snapshot.Paused = vector.Velocity == 0
+	if isAtEnd(vector) {
+		snapshot.Ended = true
+		snapshot.Paused = true
+		snapshot.Velocity = 0
+	}
 	return snapshot
 }
 
@@ -277,6 +325,7 @@ func (r *Room) vectorLocked() realtime.TimelineVector {
 		ServerTimeMs: r.state.ServerTimeMs,
 		Seq:          r.state.Seq,
 		Reason:       r.state.Reason,
+		Bounds:       r.timelineBoundsLocked(),
 	}
 }
 
@@ -292,4 +341,29 @@ func (r *Room) stateFromVectorLocked(vector realtime.TimelineVector, playbackRat
 		playbackRate = 1.0
 	}
 	r.state.PlaybackRate = playbackRate
+}
+
+func (r *Room) timelineBoundsLocked() *realtime.TimelineBounds {
+	if r.state.MediaDurationMs == nil || *r.state.MediaDurationMs < 0 {
+		return nil
+	}
+	return &realtime.TimelineBounds{
+		StartMs: 0,
+		EndMs:   r.state.MediaDurationMs,
+	}
+}
+
+func isAtEnd(vector realtime.TimelineVector) bool {
+	if vector.Bounds == nil || vector.Bounds.EndMs == nil {
+		return false
+	}
+	return vector.PositionMs >= *vector.Bounds.EndMs
+}
+
+func cloneDurationMs(durationMs *int64) *int64 {
+	if durationMs == nil {
+		return nil
+	}
+	cloned := *durationMs
+	return &cloned
 }

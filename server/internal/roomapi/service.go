@@ -49,6 +49,7 @@ type CreateRoomResult struct {
 
 type JoinRoomResult struct {
 	Room   Room
+	Media  Media
 	Member Member
 }
 
