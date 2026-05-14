@@ -137,6 +137,8 @@ func (h *WebSocketHandler) handleMessage(
 		return h.handleEnded(ctx, client, envelope)
 	case protocol.TypeHeartbeatAck:
 		return h.handleHeartbeatAck(client, envelope)
+	case protocol.TypeClockSyncPing:
+		return h.handleClockSyncPing(ctx, client, envelope)
 	default:
 		return protocol.ErrUnsupportedMessageType
 	}
@@ -153,6 +155,25 @@ func (h *WebSocketHandler) handleHeartbeatAck(
 	}
 	client.MarkHeartbeatAck(time.Now())
 	return nil
+}
+
+// handleClockSyncPing replies with server wall time without touching room state or storage.
+func (h *WebSocketHandler) handleClockSyncPing(
+	ctx context.Context,
+	client *room.ClientConnection,
+	envelope protocol.Envelope,
+) error {
+	payload, err := protocol.DecodeClockSyncPing(envelope)
+	if err != nil {
+		return err
+	}
+	return client.WriteJSON(ctx, protocol.Envelope{
+		Type: protocol.TypeClockSyncPong,
+		Payload: mustJSONRaw(protocol.ClockSyncPongPayload{
+			ServerTimeMs:      time.Now().UnixMilli(),
+			ClientSendMonoMs: payload.ClientSendMonoMs,
+		}),
+	})
 }
 
 // handleJoinRoom attaches the client to an existing room and returns the current

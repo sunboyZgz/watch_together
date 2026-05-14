@@ -109,6 +109,22 @@ func DecodeHeartbeatAck(envelope Envelope) (HeartbeatAckPayload, error) {
 	return payload, nil
 }
 
+// DecodeClockSyncPing validates and decodes one clock_sync.ping event.
+func DecodeClockSyncPing(envelope Envelope) (ClockSyncPingPayload, error) {
+	if envelope.Type != TypeClockSyncPing {
+		return ClockSyncPingPayload{}, fmt.Errorf("%w: %s", ErrUnsupportedMessageType, envelope.Type)
+	}
+
+	var payload ClockSyncPingPayload
+	if err := json.Unmarshal(envelope.Payload, &payload); err != nil {
+		return ClockSyncPingPayload{}, err
+	}
+	if payload.ClientSendMonoMs == 0 {
+		return ClockSyncPingPayload{}, errors.New("missing clientSendMonoMs")
+	}
+	return payload, nil
+}
+
 func decodeControlPayload[T interface {
 	GetRoomID() string
 	GetUserID() string

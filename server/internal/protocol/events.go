@@ -75,6 +75,15 @@ type HeartbeatAckPayload struct {
 	ClientTimeMs int64 `json:"clientTimeMs"`
 }
 
+type ClockSyncPingPayload struct {
+	ClientSendMonoMs int64 `json:"clientSendMonoMs"`
+}
+
+type ClockSyncPongPayload struct {
+	ServerTimeMs      int64 `json:"serverTimeMs"`
+	ClientSendMonoMs int64 `json:"clientSendMonoMs"`
+}
+
 type RoomStatePayload struct {
 	RoomID       string  `json:"roomId"`
 	MediaID      string  `json:"mediaId"`

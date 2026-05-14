@@ -466,6 +466,53 @@ func TestWebSocketHeartbeatAckKeepsConnectionAlive(t *testing.T) {
 	}
 }
 
+func TestWebSocketClockSyncPingReturnsServerTime(t *testing.T) {
+	roomManager := room.NewManager()
+	mux := http.NewServeMux()
+	mux.Handle("/ws", NewWebSocketHandler(roomManager, true))
+
+	httpServer := httptest.NewServer(mux)
+	defer httpServer.Close()
+
+	wsURL := "ws" + httpServer.URL[len("http"):] + "/ws"
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	conn := mustDialWebSocket(t, ctx, wsURL)
+	defer conn.Close(websocket.StatusNormalClosure, "test done")
+
+	clientSendMonoMs := int64(123_456)
+	beforeServerMs := time.Now().UnixMilli()
+	mustSendEnvelope(t, ctx, conn, protocol.Envelope{
+		Type: protocol.TypeClockSyncPing,
+		Payload: mustJSONRaw(protocol.ClockSyncPingPayload{
+			ClientSendMonoMs: clientSendMonoMs,
+		}),
+	})
+
+	envelope := mustReadEnvelope(t, ctx, conn)
+	afterServerMs := time.Now().UnixMilli()
+	if envelope.Type != protocol.TypeClockSyncPong {
+		t.Fatalf("expected clock_sync.pong, got %s", envelope.Type)
+	}
+
+	var payload protocol.ClockSyncPongPayload
+	if err := json.Unmarshal(envelope.Payload, &payload); err != nil {
+		t.Fatalf("unmarshal clock_sync.pong payload: %v", err)
+	}
+	if payload.ClientSendMonoMs != clientSendMonoMs {
+		t.Fatalf("expected clientSendMonoMs %d, got %d", clientSendMonoMs, payload.ClientSendMonoMs)
+	}
+	if payload.ServerTimeMs < beforeServerMs || payload.ServerTimeMs > afterServerMs {
+		t.Fatalf(
+			"expected serverTimeMs between %d and %d, got %d",
+			beforeServerMs,
+			afterServerMs,
+			payload.ServerTimeMs,
+		)
+	}
+}
+
 func TestWebSocketHeartbeatTimeoutRemovesSilentClient(t *testing.T) {
 	roomManager := room.NewManager()
 	createdRoom, err := roomManager.CreateRoom("user_a", "sample_001")

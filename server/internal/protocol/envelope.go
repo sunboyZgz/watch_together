@@ -3,17 +3,19 @@ package protocol
 import "encoding/json"
 
 const (
-	TypeJoinRoom        = "join_room"
-	TypeRoomState       = "room_state"
+	TypeJoinRoom           = "join_room"
+	TypeRoomState          = "room_state"
 	TypeRoomMembersChanged = "room_members_changed"
-	TypePlay            = "play"
-	TypePause           = "pause"
-	TypeSeek            = "seek"
-	TypeSetPlaybackRate = "set_playback_rate"
-	TypeEnded           = "ended"
-	TypeHeartbeat       = "heartbeat"
-	TypeHeartbeatAck    = "heartbeat_ack"
-	TypeError           = "error"
+	TypePlay               = "play"
+	TypePause              = "pause"
+	TypeSeek               = "seek"
+	TypeSetPlaybackRate    = "set_playback_rate"
+	TypeEnded              = "ended"
+	TypeHeartbeat          = "heartbeat"
+	TypeHeartbeatAck       = "heartbeat_ack"
+	TypeClockSyncPing      = "clock_sync.ping"
+	TypeClockSyncPong      = "clock_sync.pong"
+	TypeError              = "error"
 )
 
 type Envelope struct {
