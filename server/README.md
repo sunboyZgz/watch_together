@@ -391,7 +391,7 @@ make migration-create name=create_users_table
 
 当前本地 PostgreSQL 和 MinIO 都通过 `docker compose` 启动。
 
-#### Start Local PostgreSQL And MinIO
+#### Start Local PostgreSQL, Redis, And MinIO
 
 ```bash
 cd server
@@ -406,6 +406,9 @@ docker compose up -d
 - user: `app`
 - password: `app`
 - database: `anime_watch_dev`
+- Redis image: `redis:7.2-alpine`
+- Redis host: `127.0.0.1`
+- Redis port: `6379`
 - MinIO API: `http://127.0.0.1:9100`
 - MinIO Console: `http://127.0.0.1:9101`
 - MinIO root user: `minioadmin`
