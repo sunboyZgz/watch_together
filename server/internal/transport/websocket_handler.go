@@ -22,8 +22,9 @@ type WebSocketHandler struct {
 }
 
 const (
-	defaultHeartbeatInterval = 5 * time.Second
-	defaultHeartbeatTimeout  = 15 * time.Second
+	defaultHeartbeatInterval    = 5 * time.Second
+	defaultHeartbeatTimeout     = 15 * time.Second
+	defaultBroadcastWorkerLimit = 64
 )
 
 type protocolMessageError struct {
@@ -217,18 +218,7 @@ func (h *WebSocketHandler) handlePlay(
 			return existingRoom.ApplyPlay(payload.UserID, payload.PositionMs)
 		},
 		func(state room.State) protocol.Envelope {
-			return protocol.Envelope{
-				Type: protocol.TypePlay,
-				Payload: mustJSONRaw(protocol.PlayPayload{
-					RoomID:     state.RoomID,
-					UserID:     state.HostUserID,
-					PositionMs: state.PositionMs,
-					Velocity:   state.Velocity,
-					ServerTimeMs: state.ServerTimeMs,
-					Reason:     state.Reason,
-					Seq:        state.Seq,
-				}),
-			}
+			return controlEnvelopeFromState(protocol.TypePlay, state)
 		},
 	)
 }
@@ -253,18 +243,7 @@ func (h *WebSocketHandler) handlePause(
 			return existingRoom.ApplyPause(payload.UserID, payload.PositionMs)
 		},
 		func(state room.State) protocol.Envelope {
-			return protocol.Envelope{
-				Type: protocol.TypePause,
-				Payload: mustJSONRaw(protocol.PausePayload{
-					RoomID:     state.RoomID,
-					UserID:     state.HostUserID,
-					PositionMs: state.PositionMs,
-					Velocity:   state.Velocity,
-					ServerTimeMs: state.ServerTimeMs,
-					Reason:     state.Reason,
-					Seq:        state.Seq,
-				}),
-			}
+			return controlEnvelopeFromState(protocol.TypePause, state)
 		},
 	)
 }
@@ -289,18 +268,7 @@ func (h *WebSocketHandler) handleSeek(
 			return existingRoom.ApplySeek(payload.UserID, payload.PositionMs)
 		},
 		func(state room.State) protocol.Envelope {
-			return protocol.Envelope{
-				Type: protocol.TypeSeek,
-				Payload: mustJSONRaw(protocol.SeekPayload{
-					RoomID:     state.RoomID,
-					UserID:     state.HostUserID,
-					PositionMs: state.PositionMs,
-					Velocity:   state.Velocity,
-					ServerTimeMs: state.ServerTimeMs,
-					Reason:     state.Reason,
-					Seq:        state.Seq,
-				}),
-			}
+			return controlEnvelopeFromState(protocol.TypeSeek, state)
 		},
 	)
 }
@@ -332,19 +300,7 @@ func (h *WebSocketHandler) handleSetPlaybackRate(
 			return existingRoom.ApplyPlaybackRate(payload.UserID, payload.PlaybackRate)
 		},
 		func(state room.State) protocol.Envelope {
-			return protocol.Envelope{
-				Type: protocol.TypeSetPlaybackRate,
-				Payload: mustJSONRaw(protocol.SetPlaybackRatePayload{
-					RoomID:       state.RoomID,
-					UserID:       state.HostUserID,
-					PositionMs:   state.PositionMs,
-					Velocity:     state.Velocity,
-					ServerTimeMs:  state.ServerTimeMs,
-					Reason:       state.Reason,
-					PlaybackRate: state.PlaybackRate,
-					Seq:          state.Seq,
-				}),
-			}
+			return controlEnvelopeFromState(protocol.TypeSetPlaybackRate, state)
 		},
 	)
 }
@@ -369,18 +325,7 @@ func (h *WebSocketHandler) handleEnded(
 			return existingRoom.ApplyEnded(payload.UserID, payload.PositionMs)
 		},
 		func(state room.State) protocol.Envelope {
-			return protocol.Envelope{
-				Type: protocol.TypeEnded,
-				Payload: mustJSONRaw(protocol.EndedPayload{
-					RoomID:     state.RoomID,
-					UserID:     state.HostUserID,
-					PositionMs: state.PositionMs,
-					Velocity:   state.Velocity,
-					ServerTimeMs: state.ServerTimeMs,
-					Reason:     state.Reason,
-					Seq:        state.Seq,
-				}),
-			}
+			return controlEnvelopeFromState(protocol.TypeEnded, state)
 		},
 	)
 }
@@ -477,32 +422,58 @@ func broadcastEnvelopeWithStats(
 	clients []*room.ClientConnection,
 	envelope protocol.Envelope,
 ) (broadcastStats, error) {
-	stats := broadcastStats{Clients: len(clients)}
 	startedAt := time.Now()
+	stats := broadcastStats{}
+	targets := make([]*room.ClientConnection, 0, len(clients))
+	for _, client := range clients {
+		if client == nil {
+			continue
+		}
+		targets = append(targets, client)
+	}
+	stats.Clients = len(targets)
+	if len(targets) == 0 {
+		stats.Duration = time.Since(startedAt)
+		return stats, nil
+	}
+
+	workerCount := len(targets)
+	if workerCount > defaultBroadcastWorkerLimit {
+		workerCount = defaultBroadcastWorkerLimit
+	}
+
+	jobs := make(chan *room.ClientConnection)
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	var firstErr error
 
-	for _, client := range clients {
-		client := client
+	for i := 0; i < workerCount; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			clientStartedAt := time.Now()
-			err := client.WriteJSON(ctx, envelope)
-			clientDuration := time.Since(clientStartedAt)
+			for client := range jobs {
+				clientStartedAt := time.Now()
+				err := client.WriteJSON(ctx, envelope)
+				clientDuration := time.Since(clientStartedAt)
 
-			mu.Lock()
-			defer mu.Unlock()
-			if clientDuration > stats.SlowestDuration {
-				stats.SlowestDuration = clientDuration
-				stats.SlowestUserID = client.UserID()
-			}
-			if err != nil && firstErr == nil {
-				firstErr = err
+				mu.Lock()
+				if clientDuration > stats.SlowestDuration {
+					stats.SlowestDuration = clientDuration
+					stats.SlowestUserID = client.UserID()
+				}
+				if err != nil && firstErr == nil {
+					firstErr = err
+				}
+				mu.Unlock()
 			}
 		}()
 	}
+
+	for _, client := range targets {
+		jobs <- client
+	}
+	close(jobs)
+
 	wg.Wait()
 	stats.Duration = time.Since(startedAt)
 	return stats, firstErr
@@ -542,6 +513,102 @@ func roomStatePayload(state room.State) protocol.RoomStatePayload {
 		ServerTimeMs: state.ServerTimeMs,
 		Reason:       state.Reason,
 		PlaybackRate: state.PlaybackRate,
+		Seq:          state.Seq,
+	}
+}
+
+func controlEnvelopeFromState(eventType string, state room.State) protocol.Envelope {
+	switch eventType {
+	case protocol.TypePlay:
+		return protocol.Envelope{
+			Type:    protocol.TypePlay,
+			Payload: mustJSONRaw(playPayloadFromState(state)),
+		}
+	case protocol.TypePause:
+		return protocol.Envelope{
+			Type:    protocol.TypePause,
+			Payload: mustJSONRaw(pausePayloadFromState(state)),
+		}
+	case protocol.TypeSeek:
+		return protocol.Envelope{
+			Type:    protocol.TypeSeek,
+			Payload: mustJSONRaw(seekPayloadFromState(state)),
+		}
+	case protocol.TypeSetPlaybackRate:
+		return protocol.Envelope{
+			Type:    protocol.TypeSetPlaybackRate,
+			Payload: mustJSONRaw(setPlaybackRatePayloadFromState(state)),
+		}
+	case protocol.TypeEnded:
+		return protocol.Envelope{
+			Type:    protocol.TypeEnded,
+			Payload: mustJSONRaw(endedPayloadFromState(state)),
+		}
+	default:
+		return protocol.Envelope{
+			Type:    protocol.TypeRoomState,
+			Payload: mustJSONRaw(roomStatePayload(state)),
+		}
+	}
+}
+
+func playPayloadFromState(state room.State) protocol.PlayPayload {
+	return protocol.PlayPayload{
+		RoomID:       state.RoomID,
+		UserID:       state.HostUserID,
+		PositionMs:   state.PositionMs,
+		Velocity:     state.Velocity,
+		ServerTimeMs:  state.ServerTimeMs,
+		Reason:       state.Reason,
+		Seq:          state.Seq,
+	}
+}
+
+func pausePayloadFromState(state room.State) protocol.PausePayload {
+	return protocol.PausePayload{
+		RoomID:       state.RoomID,
+		UserID:       state.HostUserID,
+		PositionMs:   state.PositionMs,
+		Velocity:     state.Velocity,
+		ServerTimeMs:  state.ServerTimeMs,
+		Reason:       state.Reason,
+		Seq:          state.Seq,
+	}
+}
+
+func seekPayloadFromState(state room.State) protocol.SeekPayload {
+	return protocol.SeekPayload{
+		RoomID:       state.RoomID,
+		UserID:       state.HostUserID,
+		PositionMs:   state.PositionMs,
+		Velocity:     state.Velocity,
+		ServerTimeMs:  state.ServerTimeMs,
+		Reason:       state.Reason,
+		Seq:          state.Seq,
+	}
+}
+
+func setPlaybackRatePayloadFromState(state room.State) protocol.SetPlaybackRatePayload {
+	return protocol.SetPlaybackRatePayload{
+		RoomID:       state.RoomID,
+		UserID:       state.HostUserID,
+		PositionMs:   state.PositionMs,
+		Velocity:     state.Velocity,
+		ServerTimeMs:  state.ServerTimeMs,
+		Reason:       state.Reason,
+		PlaybackRate: state.PlaybackRate,
+		Seq:          state.Seq,
+	}
+}
+
+func endedPayloadFromState(state room.State) protocol.EndedPayload {
+	return protocol.EndedPayload{
+		RoomID:       state.RoomID,
+		UserID:       state.HostUserID,
+		PositionMs:   state.PositionMs,
+		Velocity:     state.Velocity,
+		ServerTimeMs:  state.ServerTimeMs,
+		Reason:       state.Reason,
 		Seq:          state.Seq,
 	}
 }

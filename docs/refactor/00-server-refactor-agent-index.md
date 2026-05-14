@@ -14,8 +14,9 @@ For any server refactor agent, read these files first:
 1. docs/refactor/00-server-refactor-agent-index.md
 2. docs/refactor/01-server-gin-gorm-redis-sync-plan.md
 3. docs/refactor/02-server-sync-model-agent-brief.md
-4. docs/sync/00-index.md
-5. docs/sync/07-agent-brief-checklists-and-anti-patterns.md
+4. docs/refactor/03-server-sync-model-phase4-closeout.md
+5. docs/sync/00-index.md
+6. docs/sync/07-agent-brief-checklists-and-anti-patterns.md
 ```
 
 When changing timeline structs, transitions, or WebSocket behavior, also read:
@@ -127,4 +128,3 @@ phase 5: tests and compatibility cleanup
 ```
 
 Each phase should keep the server buildable.
-

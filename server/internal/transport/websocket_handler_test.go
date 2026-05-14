@@ -1063,6 +1063,9 @@ func assertControlBroadcast(
 		if err := json.Unmarshal(envelope.Payload, &payload); err != nil {
 			t.Fatalf("unmarshal play payload: %v", err)
 		}
+		if payload.ServerTimeMs == 0 || payload.Reason == "" {
+			t.Fatalf("expected authoritative timeline fields in play payload: %+v", payload)
+		}
 		if (expectedPosition >= 0 && payload.PositionMs != expectedPosition) || payload.Seq != expectedSeq {
 			t.Fatalf("unexpected play payload: %+v", payload)
 		}
@@ -1071,6 +1074,9 @@ func assertControlBroadcast(
 		if err := json.Unmarshal(envelope.Payload, &payload); err != nil {
 			t.Fatalf("unmarshal pause payload: %v", err)
 		}
+		if payload.ServerTimeMs == 0 || payload.Reason == "" {
+			t.Fatalf("expected authoritative timeline fields in pause payload: %+v", payload)
+		}
 		if (expectedPosition >= 0 && payload.PositionMs != expectedPosition) || payload.Seq != expectedSeq {
 			t.Fatalf("unexpected pause payload: %+v", payload)
 		}
@@ -1078,6 +1084,9 @@ func assertControlBroadcast(
 		var payload protocol.SeekPayload
 		if err := json.Unmarshal(envelope.Payload, &payload); err != nil {
 			t.Fatalf("unmarshal seek payload: %v", err)
+		}
+		if payload.ServerTimeMs == 0 || payload.Reason == "" {
+			t.Fatalf("expected authoritative timeline fields in seek payload: %+v", payload)
 		}
 		if (expectedPosition >= 0 && payload.PositionMs != expectedPosition) || payload.Seq != expectedSeq {
 			t.Fatalf("unexpected seek payload: %+v", payload)
@@ -1105,6 +1114,9 @@ func assertPlaybackRateBroadcast(
 	if err := json.Unmarshal(envelope.Payload, &payload); err != nil {
 		t.Fatalf("unmarshal set_playback_rate payload: %v", err)
 	}
+	if payload.ServerTimeMs == 0 || payload.Reason == "" {
+		t.Fatalf("expected authoritative timeline fields in set_playback_rate payload: %+v", payload)
+	}
 	if (expectedPosition >= 0 && payload.PositionMs != expectedPosition) ||
 		payload.Seq != expectedSeq ||
 		payload.PlaybackRate != expectedRate {
@@ -1128,6 +1140,9 @@ func assertEndedBroadcast(
 	var payload protocol.EndedPayload
 	if err := json.Unmarshal(envelope.Payload, &payload); err != nil {
 		t.Fatalf("unmarshal ended payload: %v", err)
+	}
+	if payload.ServerTimeMs == 0 || payload.Reason == "" {
+		t.Fatalf("expected authoritative timeline fields in ended payload: %+v", payload)
 	}
 	if payload.PositionMs != expectedPosition || payload.Seq != expectedSeq {
 		t.Fatalf("unexpected ended payload: %+v", payload)
