@@ -36,7 +36,7 @@ Client `positionMs` is a hint for `play` and `pause`. It is the requested target
 ```text
 join
 reconnect
-host transfer
+host disconnect / host reconnect
 membership-triggered state refresh
 ```
 
@@ -102,6 +102,8 @@ seek
 rate_change
 media_end
 media_change
+host_left
+host_rejoin
 ```
 
 Later protocol migration may replace accepted-control broadcasts with `room_state`, but this branch keeps legacy event types stable.
@@ -126,6 +128,33 @@ host/client sends play if the product wants auto-start
 ```
 
 This keeps UI/product policy on the client side and timeline authority on the server side.
+
+## Host Availability
+
+The server does not transfer host control when the current host disconnects.
+
+Host disconnect behavior:
+
+```text
+HostUserID becomes empty
+timeline velocity becomes 0
+paused becomes true
+seq increments
+reason becomes host_left
+remaining clients receive room_state
+viewer control events continue to be rejected with only-host errors
+```
+
+Only the original room host can reclaim host control by reconnecting:
+
+```text
+HostUserID becomes the original host user id
+seq increments
+reason becomes host_rejoin
+remaining clients receive room_state
+```
+
+Clients must not continue room playback while `hostUserId` is empty.
 
 ## Clock Sync
 

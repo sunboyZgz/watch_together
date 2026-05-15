@@ -28,6 +28,14 @@ type outboundMessage struct {
 
 const defaultClientOutboxCapacity = 64
 
+func DefaultClientOutboxCapacity() int {
+	return defaultClientOutboxCapacity
+}
+
+type ClientConnectionOptions struct {
+	OutboxCapacity int
+}
+
 type coalescableOutboundMessage interface {
 	OutboxCoalesceKey() string
 }
@@ -132,11 +140,20 @@ func outboxCoalesceKey(message any) string {
 
 // NewClientConnection wraps one WebSocket connection with the server-side identity fields we need.
 func NewClientConnection(conn *websocket.Conn) *ClientConnection {
+	return NewClientConnectionWithOptions(conn, ClientConnectionOptions{})
+}
+
+// NewClientConnectionWithOptions wraps one WebSocket connection with explicit runtime limits.
+func NewClientConnectionWithOptions(conn *websocket.Conn, options ClientConnectionOptions) *ClientConnection {
 	now := time.Now()
+	outboxCapacity := options.OutboxCapacity
+	if outboxCapacity <= 0 {
+		outboxCapacity = defaultClientOutboxCapacity
+	}
 	return &ClientConnection{
 		conn:                conn,
 		writeMu:             semaphore.NewWeighted(1),
-		outbox:              newClientOutbox(defaultClientOutboxCapacity),
+		outbox:              newClientOutbox(outboxCapacity),
 		lastHeartbeatSentAt: now,
 		lastHeartbeatAckAt:  now,
 	}

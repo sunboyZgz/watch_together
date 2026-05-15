@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
+	"golang.org/x/sync/semaphore"
 
 	"watch_together/server/internal/protocol"
 	"watch_together/server/internal/realtime"
@@ -21,6 +22,9 @@ type WebSocketHandler struct {
 	heartbeatTimeout  time.Duration
 	clock             realtime.Clock
 	broadcaster       roomBroadcaster
+	clientOptions     room.ClientConnectionOptions
+	connectionLimit   *semaphore.Weighted
+	maxRoomClients    int
 }
 
 const (
@@ -30,6 +34,15 @@ const (
 	defaultBroadcastTimeout          = 5 * time.Second
 	defaultBroadcastEnqueueTimeout   = 3 * time.Second
 )
+
+type WebSocketRuntimeConfig struct {
+	BroadcastConcurrencyLimit int64
+	BroadcastTimeout          time.Duration
+	BroadcastEnqueueTimeout   time.Duration
+	ClientOutboxCapacity      int
+	MaxConnections            int64
+	MaxRoomClients            int
+}
 
 type protocolMessageError struct {
 	roomID  string
@@ -42,7 +55,15 @@ func (e protocolMessageError) Error() string {
 
 // NewWebSocketHandler builds the /ws entrypoint around the shared room manager.
 func NewWebSocketHandler(roomManager *room.Manager, debugSync bool) *WebSocketHandler {
-	return newWebSocketHandler(roomManager, debugSync, defaultHeartbeatInterval, defaultHeartbeatTimeout)
+	return NewWebSocketHandlerWithConfig(roomManager, debugSync, WebSocketRuntimeConfig{})
+}
+
+func NewWebSocketHandlerWithConfig(
+	roomManager *room.Manager,
+	debugSync bool,
+	config WebSocketRuntimeConfig,
+) *WebSocketHandler {
+	return newWebSocketHandler(roomManager, debugSync, defaultHeartbeatInterval, defaultHeartbeatTimeout, config)
 }
 
 func newWebSocketHandler(
@@ -50,13 +71,19 @@ func newWebSocketHandler(
 	debugSync bool,
 	heartbeatInterval time.Duration,
 	heartbeatTimeout time.Duration,
+	configs ...WebSocketRuntimeConfig,
 ) *WebSocketHandler {
+	config := WebSocketRuntimeConfig{}
+	if len(configs) > 0 {
+		config = configs[0]
+	}
 	return newWebSocketHandlerWithClock(
 		roomManager,
 		debugSync,
 		heartbeatInterval,
 		heartbeatTimeout,
 		realtime.SystemClock{},
+		config,
 	)
 }
 
@@ -66,9 +93,19 @@ func newWebSocketHandlerWithClock(
 	heartbeatInterval time.Duration,
 	heartbeatTimeout time.Duration,
 	clock realtime.Clock,
+	configs ...WebSocketRuntimeConfig,
 ) *WebSocketHandler {
 	if clock == nil {
 		clock = realtime.SystemClock{}
+	}
+	config := WebSocketRuntimeConfig{}
+	if len(configs) > 0 {
+		config = configs[0]
+	}
+	config = normalizeWebSocketRuntimeConfig(config)
+	var connectionLimit *semaphore.Weighted
+	if config.MaxConnections > 0 {
+		connectionLimit = semaphore.NewWeighted(config.MaxConnections)
 	}
 	return &WebSocketHandler{
 		roomManager:       roomManager,
@@ -76,15 +113,36 @@ func newWebSocketHandlerWithClock(
 		heartbeatInterval: heartbeatInterval,
 		heartbeatTimeout:  heartbeatTimeout,
 		clock:             clock,
-		broadcaster:       newBoundedBroadcaster(defaultWebSocketBroadcastConfig()),
+		broadcaster:       newBoundedBroadcaster(broadcastConfigFromWebSocketConfig(config)),
+		clientOptions: room.ClientConnectionOptions{
+			OutboxCapacity: config.ClientOutboxCapacity,
+		},
+		connectionLimit: connectionLimit,
+		maxRoomClients:  config.MaxRoomClients,
 	}
 }
 
-func defaultWebSocketBroadcastConfig() broadcastConfig {
+func normalizeWebSocketRuntimeConfig(config WebSocketRuntimeConfig) WebSocketRuntimeConfig {
+	if config.BroadcastConcurrencyLimit <= 0 {
+		config.BroadcastConcurrencyLimit = defaultBroadcastConcurrencyLimit
+	}
+	if config.BroadcastTimeout <= 0 {
+		config.BroadcastTimeout = defaultBroadcastTimeout
+	}
+	if config.BroadcastEnqueueTimeout <= 0 {
+		config.BroadcastEnqueueTimeout = defaultBroadcastEnqueueTimeout
+	}
+	if config.ClientOutboxCapacity <= 0 {
+		config.ClientOutboxCapacity = room.DefaultClientOutboxCapacity()
+	}
+	return config
+}
+
+func broadcastConfigFromWebSocketConfig(config WebSocketRuntimeConfig) broadcastConfig {
 	return broadcastConfig{
-		ConcurrencyLimit:      defaultBroadcastConcurrencyLimit,
-		BroadcastTimeout:      defaultBroadcastTimeout,
-		EnqueueTimeout:        defaultBroadcastEnqueueTimeout,
+		ConcurrencyLimit:      config.BroadcastConcurrencyLimit,
+		BroadcastTimeout:      config.BroadcastTimeout,
+		EnqueueTimeout:        config.BroadcastEnqueueTimeout,
 		CloseOnEnqueueTimeout: true,
 	}
 }
@@ -92,6 +150,14 @@ func defaultWebSocketBroadcastConfig() broadcastConfig {
 // ServeHTTP upgrades the request to WebSocket and keeps reading protocol messages
 // until the client disconnects or a read error occurs.
 func (h *WebSocketHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if h.connectionLimit != nil {
+		if !h.connectionLimit.TryAcquire(1) {
+			http.Error(w, "websocket connection limit reached", http.StatusServiceUnavailable)
+			return
+		}
+		defer h.connectionLimit.Release(1)
+	}
+
 	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
 		OriginPatterns: []string{"*"},
 	})
@@ -99,7 +165,7 @@ func (h *WebSocketHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	client := room.NewClientConnection(conn)
+	client := room.NewClientConnectionWithOptions(conn, h.clientOptions)
 	ctx, cancel := context.WithCancel(context.Background())
 	writerDone := make(chan struct{})
 	go func() {
@@ -117,7 +183,7 @@ func (h *WebSocketHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		// Connection cleanup always flows through the room manager so empty rooms can be removed.
 		removeResult := h.roomManager.RemoveClient(client)
-		if removeResult.HostTransferred {
+		if removeResult.HostUnavailable {
 			h.broadcastRoomState(removeResult)
 		}
 		_ = client.Close(websocket.StatusNormalClosure, "connection closed")
@@ -246,7 +312,17 @@ func (h *WebSocketHandler) handleJoinRoom(
 
 	// We persist identity on the connection first so disconnect cleanup can find the room later.
 	client.SetIdentity(payload.UserID, payload.RoomID)
-	joinResult := existingRoom.Join(client)
+	joinResult := existingRoom.JoinWithLimit(client, h.maxRoomClients)
+	if joinResult.Err != nil {
+		client.SetIdentity("", "")
+		if errors.Is(joinResult.Err, room.ErrRoomFull) {
+			return protocolMessageError{
+				roomID:  payload.RoomID,
+				message: "room is full",
+			}
+		}
+		return joinResult.Err
+	}
 	h.roomManager.MarkRoomActive(payload.RoomID)
 	if joinResult.ReplacedClient != nil {
 		// Repeated join for the same logical user should leave only one active connection.
@@ -258,6 +334,12 @@ func (h *WebSocketHandler) handleJoinRoom(
 		Payload: mustJSONRaw(roomStatePayload(joinResult.State)),
 	}); err != nil {
 		return err
+	}
+	if joinResult.HostChanged {
+		h.broadcastRoomState(room.RemoveClientResult{
+			State:     joinResult.State,
+			Remaining: clientsWithout(joinResult.Clients, client),
+		})
 	}
 	if joinResult.MembershipChanged {
 		h.broadcastRoomMembersChangedToOthers(payload.RoomID, joinResult.Clients, client, "join")
@@ -490,9 +572,8 @@ func (h *WebSocketHandler) broadcastEnvelope(
 	return err
 }
 
-// broadcastRoomState pushes the latest authority snapshot after membership changes such
-// as host transfer. Disconnect cleanup uses a fresh context because the request context
-// may already be canceled when the websocket loop exits.
+// broadcastRoomState pushes the latest authority snapshot after membership changes.
+// Disconnect cleanup uses a fresh context because the request context may already be canceled.
 func (h *WebSocketHandler) broadcastRoomState(result room.RemoveClientResult) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
@@ -501,6 +582,17 @@ func (h *WebSocketHandler) broadcastRoomState(result room.RemoveClientResult) {
 		Type: protocol.TypeRoomState,
 		Payload: mustJSONRaw(roomStatePayload(result.State)),
 	})
+}
+
+func clientsWithout(clients []*room.ClientConnection, excluded *room.ClientConnection) []*room.ClientConnection {
+	filtered := make([]*room.ClientConnection, 0, len(clients))
+	for _, client := range clients {
+		if client == nil || client == excluded {
+			continue
+		}
+		filtered = append(filtered, client)
+	}
+	return filtered
 }
 
 func roomStatePayload(state room.State) protocol.RoomStatePayload {

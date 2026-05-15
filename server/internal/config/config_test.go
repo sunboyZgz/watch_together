@@ -48,6 +48,24 @@ func TestLoadServerRuntimeConfigFallsBackToDefaults(t *testing.T) {
 	if !cfg.DebugSync {
 		t.Fatalf("expected default debug sync to be true")
 	}
+	if cfg.WebSocket.BroadcastConcurrencyLimit != 64 {
+		t.Fatalf("expected default broadcast concurrency 64, got %d", cfg.WebSocket.BroadcastConcurrencyLimit)
+	}
+	if cfg.WebSocket.BroadcastTimeoutMs != 5000 {
+		t.Fatalf("expected default broadcast timeout 5000ms, got %d", cfg.WebSocket.BroadcastTimeoutMs)
+	}
+	if cfg.WebSocket.BroadcastEnqueueTimeoutMs != 3000 {
+		t.Fatalf("expected default enqueue timeout 3000ms, got %d", cfg.WebSocket.BroadcastEnqueueTimeoutMs)
+	}
+	if cfg.WebSocket.ClientOutboxCapacity != 64 {
+		t.Fatalf("expected default outbox capacity 64, got %d", cfg.WebSocket.ClientOutboxCapacity)
+	}
+	if cfg.WebSocket.MaxConnections != 0 {
+		t.Fatalf("expected default max connections unlimited, got %d", cfg.WebSocket.MaxConnections)
+	}
+	if cfg.WebSocket.MaxRoomClients != 0 {
+		t.Fatalf("expected default room max clients unlimited, got %d", cfg.WebSocket.MaxRoomClients)
+	}
 }
 
 func TestLoadServerRuntimeConfigSupportsAppEnvSpecificDebugSync(t *testing.T) {
@@ -117,6 +135,39 @@ func TestLoadServerRuntimeConfigLoadsRedisSettings(t *testing.T) {
 	}
 	if !cfg.Redis.Required {
 		t.Fatalf("expected redis required")
+	}
+}
+
+func TestLoadServerRuntimeConfigLoadsWebSocketRuntimeSettings(t *testing.T) {
+	configDir := t.TempDir()
+	mustWriteConfigFile(
+		t,
+		filepath.Join(configDir, ".env"),
+		"WS_BROADCAST_CONCURRENCY_LIMIT=128\nWS_BROADCAST_TIMEOUT_MS=7000\nWS_BROADCAST_ENQUEUE_TIMEOUT_MS=1500\nWS_CLIENT_OUTBOX_CAPACITY=32\nWS_MAX_CONNECTIONS=1000\nROOM_MAX_CLIENTS=25\n",
+	)
+
+	cfg, err := LoadServerRuntimeConfig(configDir)
+	if err != nil {
+		t.Fatalf("load runtime config: %v", err)
+	}
+
+	if cfg.WebSocket.BroadcastConcurrencyLimit != 128 {
+		t.Fatalf("expected broadcast concurrency 128, got %d", cfg.WebSocket.BroadcastConcurrencyLimit)
+	}
+	if cfg.WebSocket.BroadcastTimeoutMs != 7000 {
+		t.Fatalf("expected broadcast timeout 7000ms, got %d", cfg.WebSocket.BroadcastTimeoutMs)
+	}
+	if cfg.WebSocket.BroadcastEnqueueTimeoutMs != 1500 {
+		t.Fatalf("expected enqueue timeout 1500ms, got %d", cfg.WebSocket.BroadcastEnqueueTimeoutMs)
+	}
+	if cfg.WebSocket.ClientOutboxCapacity != 32 {
+		t.Fatalf("expected outbox capacity 32, got %d", cfg.WebSocket.ClientOutboxCapacity)
+	}
+	if cfg.WebSocket.MaxConnections != 1000 {
+		t.Fatalf("expected max connections 1000, got %d", cfg.WebSocket.MaxConnections)
+	}
+	if cfg.WebSocket.MaxRoomClients != 25 {
+		t.Fatalf("expected room max clients 25, got %d", cfg.WebSocket.MaxRoomClients)
 	}
 }
 

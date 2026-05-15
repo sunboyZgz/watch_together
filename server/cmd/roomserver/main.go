@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"time"
 
 	"watch_together/server/internal/app"
 	wtconfig "watch_together/server/internal/config"
@@ -36,6 +37,14 @@ func main() {
 			DB:         runtimeConfig.Redis.DB,
 			TLSEnabled: runtimeConfig.Redis.TLSEnabled,
 			Required:   runtimeConfig.Redis.Required,
+		},
+		WebSocket: app.WebSocketRuntimeConfig{
+			BroadcastConcurrencyLimit: runtimeConfig.WebSocket.BroadcastConcurrencyLimit,
+			BroadcastTimeout:          time.Duration(runtimeConfig.WebSocket.BroadcastTimeoutMs) * time.Millisecond,
+			BroadcastEnqueueTimeout:   time.Duration(runtimeConfig.WebSocket.BroadcastEnqueueTimeoutMs) * time.Millisecond,
+			ClientOutboxCapacity:      runtimeConfig.WebSocket.ClientOutboxCapacity,
+			MaxConnections:            runtimeConfig.WebSocket.MaxConnections,
+			MaxRoomClients:            runtimeConfig.WebSocket.MaxRoomClients,
 		},
 	})
 

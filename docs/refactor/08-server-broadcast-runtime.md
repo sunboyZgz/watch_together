@@ -61,6 +61,20 @@ broadcast total timeout: 5s
 client outbox capacity: 64
 enqueue timeout: 3s
 close slow client on broadcast enqueue timeout: true
+single-process max websocket connections: unlimited by default
+per-room max clients: unlimited by default
+0 means unlimited for connection and room-member limits
+```
+
+Environment variables:
+
+```text
+WS_BROADCAST_CONCURRENCY_LIMIT
+WS_BROADCAST_TIMEOUT_MS
+WS_BROADCAST_ENQUEUE_TIMEOUT_MS
+WS_CLIENT_OUTBOX_CAPACITY
+WS_MAX_CONNECTIONS
+ROOM_MAX_CLIENTS
 ```
 
 Timeout policy:
@@ -144,9 +158,6 @@ Treat these as deployment and load-test inputs. Do not assume the per-client out
 When room sizes or multi-instance needs require it, add:
 
 ```text
-single-process max connection limit
-per-room member limit
-configurable outbox capacity
 queue-full close or degradation policy
 broader coalescing policy for future high-frequency state streams
 slow-client backpressure policy

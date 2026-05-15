@@ -109,6 +109,148 @@ func TestRoomJoinReplacesPreviousConnectionForSameUser(t *testing.T) {
 	}
 }
 
+func TestRoomJoinWithLimitRejectsNewUserWhenRoomIsFull(t *testing.T) {
+	room := NewCreatedRoom("ROOM01", "user_a", "sample_001")
+
+	first := NewClientConnection(nil)
+	first.SetIdentity("user_a", "ROOM01")
+	if result := room.JoinWithLimit(first, 1); result.Err != nil {
+		t.Fatalf("join first client: %v", result.Err)
+	}
+
+	second := NewClientConnection(nil)
+	second.SetIdentity("user_b", "ROOM01")
+	result := room.JoinWithLimit(second, 1)
+	if result.Err != ErrRoomFull {
+		t.Fatalf("expected room full, got %v", result.Err)
+	}
+	if got := room.ClientCount(); got != 1 {
+		t.Fatalf("expected one active connection, got %d", got)
+	}
+}
+
+func TestRoomJoinWithLimitAllowsSameUserReplacementWhenRoomIsFull(t *testing.T) {
+	room := NewCreatedRoom("ROOM01", "user_a", "sample_001")
+
+	first := NewClientConnection(nil)
+	first.SetIdentity("user_a", "ROOM01")
+	if result := room.JoinWithLimit(first, 1); result.Err != nil {
+		t.Fatalf("join first client: %v", result.Err)
+	}
+
+	replacement := NewClientConnection(nil)
+	replacement.SetIdentity("user_a", "ROOM01")
+	result := room.JoinWithLimit(replacement, 1)
+	if result.Err != nil {
+		t.Fatalf("replace same user: %v", result.Err)
+	}
+	if result.ReplacedClient != first {
+		t.Fatalf("expected first client to be replaced")
+	}
+	if got := room.ClientCount(); got != 1 {
+		t.Fatalf("expected one active connection, got %d", got)
+	}
+}
+
+func TestRoomHostLeavePausesWithoutTransferringToViewer(t *testing.T) {
+	room := NewCreatedRoom("ROOM01", "user_a", "sample_001")
+	host := NewClientConnection(nil)
+	host.SetIdentity("user_a", "ROOM01")
+	viewer := NewClientConnection(nil)
+	viewer.SetIdentity("user_b", "ROOM01")
+
+	if result := room.Join(host); result.Err != nil {
+		t.Fatalf("join host: %v", result.Err)
+	}
+	if result := room.Join(viewer); result.Err != nil {
+		t.Fatalf("join viewer: %v", result.Err)
+	}
+	if _, _, err := room.ApplyPlay("user_a", 0); err != nil {
+		t.Fatalf("apply play: %v", err)
+	}
+
+	result := room.Leave(host)
+	if !result.HostUnavailable {
+		t.Fatalf("expected host unavailable result")
+	}
+	if result.State.HostUserID != "" {
+		t.Fatalf("expected no online host, got %s", result.State.HostUserID)
+	}
+	if !result.State.Paused || result.State.Velocity != 0 {
+		t.Fatalf("expected playback paused, paused=%t velocity=%f", result.State.Paused, result.State.Velocity)
+	}
+	if result.State.Reason != "host_left" {
+		t.Fatalf("expected host_left reason, got %s", result.State.Reason)
+	}
+	if _, _, err := room.ApplyPlay("user_b", 0); err != ErrNotHost {
+		t.Fatalf("expected viewer control to be rejected, got %v", err)
+	}
+}
+
+func TestRoomOriginalHostCanReclaimAfterHostLeave(t *testing.T) {
+	room := NewCreatedRoom("ROOM01", "user_a", "sample_001")
+	host := NewClientConnection(nil)
+	host.SetIdentity("user_a", "ROOM01")
+	viewer := NewClientConnection(nil)
+	viewer.SetIdentity("user_b", "ROOM01")
+
+	if result := room.Join(host); result.Err != nil {
+		t.Fatalf("join host: %v", result.Err)
+	}
+	if result := room.Join(viewer); result.Err != nil {
+		t.Fatalf("join viewer: %v", result.Err)
+	}
+	room.Leave(host)
+
+	viewerRejoin := NewClientConnection(nil)
+	viewerRejoin.SetIdentity("user_b", "ROOM01")
+	if result := room.Join(viewerRejoin); result.Err != nil {
+		t.Fatalf("viewer rejoin: %v", result.Err)
+	}
+	if state := room.StateSnapshot(); state.HostUserID != "" {
+		t.Fatalf("expected viewer not to claim host, got %s", state.HostUserID)
+	}
+
+	hostRejoin := NewClientConnection(nil)
+	hostRejoin.SetIdentity("user_a", "ROOM01")
+	result := room.Join(hostRejoin)
+	if result.Err != nil {
+		t.Fatalf("host rejoin: %v", result.Err)
+	}
+	if !result.HostChanged {
+		t.Fatalf("expected host changed on original host rejoin")
+	}
+	if result.State.HostUserID != "user_a" {
+		t.Fatalf("expected original host to reclaim control, got %s", result.State.HostUserID)
+	}
+	if result.State.Reason != "host_rejoin" {
+		t.Fatalf("expected host_rejoin reason, got %s", result.State.Reason)
+	}
+}
+
+func TestRoomLeaveIgnoresUnjoinedClientWithHostUserID(t *testing.T) {
+	room := NewCreatedRoom("ROOM01", "user_a", "sample_001")
+	joined := NewClientConnection(nil)
+	joined.SetIdentity("user_a", "ROOM01")
+	if result := room.Join(joined); result.Err != nil {
+		t.Fatalf("join host: %v", result.Err)
+	}
+
+	unjoined := NewClientConnection(nil)
+	unjoined.SetIdentity("user_a", "ROOM01")
+	result := room.Leave(unjoined)
+
+	if result.HostUnavailable {
+		t.Fatalf("expected unjoined client not to mark host unavailable")
+	}
+	if result.State.HostUserID != "user_a" {
+		t.Fatalf("expected host to remain user_a, got %s", result.State.HostUserID)
+	}
+	if got := room.ClientCount(); got != 1 {
+		t.Fatalf("expected joined client to remain, got %d clients", got)
+	}
+}
+
 func TestRoomStateSnapshotExtrapolatesCurrentPositionWhilePlaying(t *testing.T) {
 	currentTime := time.UnixMilli(1_000)
 	room := newWithClock("ROOM01", func() time.Time {

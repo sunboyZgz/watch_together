@@ -44,6 +44,21 @@ func TestClientConnectionEnqueueJSONRespectsContextWhenOutboxIsFull(t *testing.T
 	}
 }
 
+func TestNewClientConnectionWithOptionsAppliesOutboxCapacity(t *testing.T) {
+	client := NewClientConnectionWithOptions(nil, ClientConnectionOptions{OutboxCapacity: 1})
+
+	if err := client.EnqueueJSON(context.Background(), map[string]string{"type": "first"}); err != nil {
+		t.Fatalf("enqueue first message: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := client.EnqueueJSON(ctx, map[string]string{"type": "second"})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context canceled, got %v", err)
+	}
+}
+
 func TestClientConnectionEnqueueJSONCoalescesLatestMessage(t *testing.T) {
 	client := &ClientConnection{
 		writeMu: semaphore.NewWeighted(1),

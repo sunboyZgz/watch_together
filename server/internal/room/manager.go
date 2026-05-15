@@ -41,7 +41,7 @@ type LifecycleHooks struct {
 type RemoveClientResult struct {
 	State           State
 	Remaining       []*ClientConnection
-	HostTransferred bool
+	HostUnavailable bool
 	RoomRemoved     bool
 }
 
@@ -139,7 +139,7 @@ func (m *Manager) GetOrCreate(roomID string) *Room {
 }
 
 // RemoveClient removes a client from its room, prunes empty rooms, and reports
-// whether the disconnect immediately transferred host ownership.
+// whether the disconnect left the room without an online host.
 func (m *Manager) RemoveClient(client *ClientConnection) RemoveClientResult {
 	roomID := client.RoomID()
 	if roomID == "" {
@@ -161,7 +161,7 @@ func (m *Manager) RemoveClient(client *ClientConnection) RemoveClientResult {
 	result := RemoveClientResult{
 		State:           leaveResult.State,
 		Remaining:       leaveResult.Remaining,
-		HostTransferred: leaveResult.HostTransferred,
+		HostUnavailable: leaveResult.HostUnavailable,
 	}
 	if leaveResult.RoomEmpty {
 		if _, existed := m.emptySince[roomID]; !existed {

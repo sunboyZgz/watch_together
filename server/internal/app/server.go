@@ -29,9 +29,11 @@ type Config struct {
 	DatabaseURL string
 	DebugSync   bool
 	Redis       cache.RedisConfig
+	WebSocket   transport.WebSocketRuntimeConfig
 }
 
 type RedisConfig = cache.RedisConfig
+type WebSocketRuntimeConfig = transport.WebSocketRuntimeConfig
 
 type Server struct {
 	config      Config
@@ -87,6 +89,7 @@ func NewServer(config Config) *Server {
 	router := newGinRouter(
 		roomManager,
 		config.DebugSync,
+		config.WebSocket,
 		roomHTTPHandler,
 		authHTTPHandler,
 		homeHTTPHandler,
@@ -128,6 +131,7 @@ func newRedisClient(config cache.RedisConfig) *cache.RedisClient {
 func newGinRouter(
 	roomManager *room.Manager,
 	debugSync bool,
+	webSocketConfig transport.WebSocketRuntimeConfig,
 	roomHTTPHandler *transport.RoomHTTPHandler,
 	authHTTPHandler *transport.AuthHTTPHandler,
 	homeHTTPHandler *transport.HomeHTTPHandler,
@@ -149,7 +153,7 @@ func newGinRouter(
 	router.Any("/me/media-progress/*mediaPath", gin.WrapF(progressHTTPHandler.Update))
 	router.Any("/rooms", gin.WrapF(roomHTTPHandler.CreateRoom))
 	router.Any("/rooms/*roomPath", gin.WrapF(roomHTTPHandler.RoomRoute))
-	router.Any("/ws", gin.WrapH(transport.NewWebSocketHandler(roomManager, debugSync)))
+	router.Any("/ws", gin.WrapH(transport.NewWebSocketHandlerWithConfig(roomManager, debugSync, webSocketConfig)))
 
 	return router
 }

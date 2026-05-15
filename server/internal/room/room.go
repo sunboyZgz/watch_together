@@ -8,11 +8,16 @@ import (
 	"watch_together/server/internal/realtime"
 )
 
-var ErrNotHost = errors.New("only host can control playback")
+var (
+	ErrNotHost  = errors.New("only host can control playback")
+	ErrRoomFull = errors.New("room is full")
+)
 
 const (
 	reasonMediaChange = "media_change"
 	reasonMediaEnd    = "media_end"
+	reasonHostLeft    = "host_left"
+	reasonHostRejoin  = "host_rejoin"
 )
 
 type State struct {
@@ -35,6 +40,7 @@ type Room struct {
 	mu            sync.RWMutex
 	clients       map[*ClientConnection]struct{}
 	clientsByUser map[string]*ClientConnection
+	ownerUserID   string
 	state         State
 	now           func() time.Time
 }
@@ -42,7 +48,7 @@ type Room struct {
 type LeaveResult struct {
 	State           State
 	Remaining       []*ClientConnection
-	HostTransferred bool
+	HostUnavailable bool
 	RoomEmpty       bool
 }
 
@@ -51,6 +57,8 @@ type JoinResult struct {
 	Clients           []*ClientConnection
 	ReplacedClient    *ClientConnection
 	MembershipChanged bool
+	HostChanged       bool
+	Err               error
 }
 
 // New creates a room with a minimal default playback state.
@@ -97,6 +105,7 @@ func NewCreatedRoomWithMedia(id string, hostUserID string, mediaID string, media
 		room.state.Ended,
 	)
 	room.state.HostUserID = hostUserID
+	room.ownerUserID = hostUserID
 	return room
 }
 
@@ -138,23 +147,40 @@ func (r *Room) StateSnapshot() State {
 
 // Join registers a client in the room and replaces any previous connection from the same user.
 func (r *Room) Join(client *ClientConnection) JoinResult {
+	return r.JoinWithLimit(client, 0)
+}
+
+// JoinWithLimit registers a client while enforcing an optional maximum room size.
+func (r *Room) JoinWithLimit(client *ClientConnection, maxClients int) JoinResult {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	var replacedClient *ClientConnection
 	membershipChanged := false
+	previousHostUserID := r.state.HostUserID
 	if existing := r.clientsByUser[client.UserID()]; existing != nil && existing != client {
 		delete(r.clients, existing)
 		replacedClient = existing
 	} else if r.clientsByUser[client.UserID()] == nil {
+		if maxClients > 0 && len(r.clients) >= maxClients {
+			return JoinResult{
+				State: r.currentStateLocked(r.now()),
+				Err:   ErrRoomFull,
+			}
+		}
 		membershipChanged = true
 	}
 
 	r.clients[client] = struct{}{}
 	r.clientsByUser[client.UserID()] = client
-	// The first connected user becomes the initial host. After host transfer has
-	// happened, reconnecting former hosts must not implicitly reclaim host identity.
-	if r.state.HostUserID == "" {
+	if r.state.HostUserID == "" && r.canClaimHostLocked(client.UserID()) {
+		if r.ownerUserID != "" && previousHostUserID != client.UserID() {
+			now := r.now()
+			next := r.vectorLocked().SnapshotAt(now)
+			next.Seq = r.state.Seq + 1
+			next.Reason = reasonHostRejoin
+			r.stateFromVectorLocked(next, r.state.PlaybackRate, r.state.Ended)
+		}
 		r.state.HostUserID = client.UserID()
 	}
 	return JoinResult{
@@ -162,36 +188,44 @@ func (r *Room) Join(client *ClientConnection) JoinResult {
 		Clients:           r.clientsSnapshotLocked(),
 		ReplacedClient:    replacedClient,
 		MembershipChanged: membershipChanged,
+		HostChanged:       previousHostUserID != r.state.HostUserID,
 	}
 }
 
-// Leave removes a client and reports whether the disconnect triggered host transfer.
+// Leave removes a client and pauses playback if the current host disconnects.
 func (r *Room) Leave(client *ClientConnection) LeaveResult {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	_, wasPresent := r.clients[client]
 	delete(r.clients, client)
 	if current := r.clientsByUser[client.UserID()]; current == client {
 		delete(r.clientsByUser, client.UserID())
 	}
 	result := LeaveResult{}
-	if r.state.HostUserID == client.UserID() {
-		previousHost := r.state.HostUserID
+	if wasPresent && r.state.HostUserID == client.UserID() {
+		now := r.now()
+		next := realtime.Pause(r.vectorLocked(), now)
+		next.Reason = reasonHostLeft
+		r.stateFromVectorLocked(next, r.state.PlaybackRate, r.state.Ended)
 		r.state.HostUserID = ""
-		for candidate := range r.clients {
-			r.state.HostUserID = candidate.UserID()
-			break
-		}
-		if r.state.HostUserID != "" && r.state.HostUserID != previousHost {
-			r.state.Seq++
-			result.HostTransferred = true
-		}
+		result.HostUnavailable = true
 	}
 
 	result.State = r.currentStateLocked(r.now())
 	result.Remaining = r.clientsSnapshotLocked()
 	result.RoomEmpty = len(r.clients) == 0
 	return result
+}
+
+func (r *Room) canClaimHostLocked(userID string) bool {
+	if userID == "" {
+		return false
+	}
+	if r.ownerUserID == "" {
+		return true
+	}
+	return userID == r.ownerUserID
 }
 
 // ClientCount reports how many active connections the room currently holds.

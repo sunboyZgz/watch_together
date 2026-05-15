@@ -68,6 +68,7 @@ func newTestGinRouter() http.Handler {
 	return newGinRouter(
 		roomManager,
 		false,
+		WebSocketRuntimeConfig{},
 		transport.NewRoomHTTPHandler(roomManager, nil),
 		transport.NewAuthHTTPHandler(nil),
 		transport.NewHomeHTTPHandler(nil),
