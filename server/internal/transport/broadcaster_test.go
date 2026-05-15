@@ -10,6 +10,7 @@ import (
 	"github.com/coder/websocket"
 
 	"watch_together/server/internal/protocol"
+	"watch_together/server/internal/room"
 )
 
 func TestBoundedBroadcasterSkipsNilClients(t *testing.T) {
@@ -32,6 +33,9 @@ func TestBoundedBroadcasterSkipsNilClients(t *testing.T) {
 	}
 	if enqueues := client.enqueueCount(); enqueues != 1 {
 		t.Fatalf("expected 1 enqueue, got %d", enqueues)
+	}
+	if stats.MaxQueueDepth != 1 {
+		t.Fatalf("expected max queue depth 1, got %d", stats.MaxQueueDepth)
 	}
 }
 
@@ -85,6 +89,43 @@ func TestBoundedBroadcasterClosesTimedOutClient(t *testing.T) {
 	}
 	if !client.isClosed() {
 		t.Fatalf("expected client to be closed")
+	}
+}
+
+func TestBoundedBroadcasterReportsCoalescedClientsAndMaxQueueDepth(t *testing.T) {
+	broadcaster := newBoundedBroadcaster(broadcastConfig{
+		ConcurrencyLimit:      2,
+		EnqueueTimeout:        time.Second,
+		CloseOnEnqueueTimeout: true,
+	})
+	clients := []clientWriter{
+		&fakeBroadcastClient{
+			userID: "user_a",
+			enqueueResult: room.EnqueueResult{
+				QueueDepth: 3,
+				Coalesced:  true,
+			},
+		},
+		&fakeBroadcastClient{
+			userID: "user_b",
+			enqueueResult: room.EnqueueResult{
+				QueueDepth: 5,
+			},
+		},
+	}
+
+	stats, err := broadcaster.Broadcast(context.Background(), clients, protocol.Envelope{
+		Type: protocol.TypeRoomState,
+	})
+
+	if err != nil {
+		t.Fatalf("broadcast: %v", err)
+	}
+	if stats.CoalescedClients != 1 {
+		t.Fatalf("expected 1 coalesced client, got %d", stats.CoalescedClients)
+	}
+	if stats.MaxQueueDepth != 5 {
+		t.Fatalf("expected max queue depth 5, got %d", stats.MaxQueueDepth)
 	}
 }
 
@@ -192,6 +233,7 @@ func TestBoundedBroadcasterHonorsConcurrencyLimit(t *testing.T) {
 type fakeBroadcastClient struct {
 	userID        string
 	enqueues      int
+	enqueueResult room.EnqueueResult
 	enqueueErr    error
 	blockUntilCtx bool
 	blockUntil    <-chan struct{}
@@ -205,9 +247,11 @@ func (c *fakeBroadcastClient) UserID() string {
 	return c.userID
 }
 
-func (c *fakeBroadcastClient) EnqueueJSON(ctx context.Context, message any) error {
+func (c *fakeBroadcastClient) EnqueueJSON(ctx context.Context, message any) (room.EnqueueResult, error) {
 	c.mu.Lock()
 	c.enqueues++
+	enqueues := c.enqueues
+	enqueueResult := c.enqueueResult
 	c.mu.Unlock()
 
 	if c.onEnqueue != nil {
@@ -218,16 +262,22 @@ func (c *fakeBroadcastClient) EnqueueJSON(ctx context.Context, message any) erro
 	}
 	if c.blockUntilCtx {
 		<-ctx.Done()
-		return ctx.Err()
+		return room.EnqueueResult{}, ctx.Err()
 	}
 	if c.blockUntil != nil {
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return room.EnqueueResult{}, ctx.Err()
 		case <-c.blockUntil:
 		}
 	}
-	return c.enqueueErr
+	if c.enqueueErr != nil {
+		return room.EnqueueResult{}, c.enqueueErr
+	}
+	if enqueueResult.QueueDepth == 0 {
+		enqueueResult.QueueDepth = enqueues
+	}
+	return enqueueResult, nil
 }
 
 func (c *fakeBroadcastClient) Close(status websocket.StatusCode, reason string) error {

@@ -15,7 +15,7 @@ import (
 
 type clientWriter interface {
 	UserID() string
-	EnqueueJSON(ctx context.Context, message any) error
+	EnqueueJSON(ctx context.Context, message any) (room.EnqueueResult, error)
 	Close(status websocket.StatusCode, reason string) error
 }
 
@@ -28,6 +28,8 @@ type broadcastStats struct {
 	FailedClients   int
 	TimedOutClients int
 	ClosedClients   int
+	CoalescedClients int
+	MaxQueueDepth    int
 	Duration        time.Duration
 	SlowestUserID   string
 	SlowestDuration time.Duration
@@ -110,7 +112,7 @@ func (b *boundedBroadcaster) Broadcast(
 			}
 			defer cancel()
 
-			err := client.EnqueueJSON(enqueueCtx, envelope)
+			enqueueResult, err := client.EnqueueJSON(enqueueCtx, envelope)
 			clientDuration := time.Since(clientStartedAt)
 			enqueueTimedOut := err != nil && isEnqueueTimeout(ctx, enqueueCtx)
 			closed := false
@@ -126,6 +128,12 @@ func (b *boundedBroadcaster) Broadcast(
 				stats.SlowestUserID = client.UserID()
 			}
 			if err == nil {
+				if enqueueResult.Coalesced {
+					stats.CoalescedClients++
+				}
+				if enqueueResult.QueueDepth > stats.MaxQueueDepth {
+					stats.MaxQueueDepth = enqueueResult.QueueDepth
+				}
 				return
 			}
 

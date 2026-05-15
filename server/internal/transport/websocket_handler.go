@@ -510,7 +510,7 @@ func (h *WebSocketHandler) handleControlEvent(
 	stats, err := h.broadcaster.Broadcast(ctx, roomClientWriters(clients), envelope)
 	if h.debugSync {
 		log.Printf(
-			"sync broadcast type=%s room=%s seq=%d clients=%d failed=%d timed_out=%d closed=%d pos=%d paused=%t rate=%.2f duration_us=%d slowest_user=%s slowest_us=%d err=%v",
+			"sync broadcast type=%s room=%s seq=%d clients=%d failed=%d timed_out=%d closed=%d coalesced=%d max_queue_depth=%d pos=%d paused=%t rate=%.2f duration_us=%d slowest_user=%s slowest_us=%d err=%v",
 			eventType,
 			roomID,
 			state.Seq,
@@ -518,6 +518,8 @@ func (h *WebSocketHandler) handleControlEvent(
 			stats.FailedClients,
 			stats.TimedOutClients,
 			stats.ClosedClients,
+			stats.CoalescedClients,
+			stats.MaxQueueDepth,
 			state.PositionMs,
 			state.Paused,
 			state.PlaybackRate,

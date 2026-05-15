@@ -31,14 +31,14 @@ func TestClientConnectionEnqueueJSONRespectsContextWhenOutboxIsFull(t *testing.T
 		writeMu: semaphore.NewWeighted(1),
 		outbox:  newClientOutbox(1),
 	}
-	if err := client.EnqueueJSON(context.Background(), map[string]string{"type": "room_state"}); err != nil {
+	if _, err := client.EnqueueJSON(context.Background(), map[string]string{"type": "room_state"}); err != nil {
 		t.Fatalf("fill outbox: %v", err)
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	err := client.EnqueueJSON(ctx, map[string]string{"type": "room_state"})
+	_, err := client.EnqueueJSON(ctx, map[string]string{"type": "room_state"})
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected context canceled, got %v", err)
 	}
@@ -47,13 +47,13 @@ func TestClientConnectionEnqueueJSONRespectsContextWhenOutboxIsFull(t *testing.T
 func TestNewClientConnectionWithOptionsAppliesOutboxCapacity(t *testing.T) {
 	client := NewClientConnectionWithOptions(nil, ClientConnectionOptions{OutboxCapacity: 1})
 
-	if err := client.EnqueueJSON(context.Background(), map[string]string{"type": "first"}); err != nil {
+	if _, err := client.EnqueueJSON(context.Background(), map[string]string{"type": "first"}); err != nil {
 		t.Fatalf("enqueue first message: %v", err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	err := client.EnqueueJSON(ctx, map[string]string{"type": "second"})
+	_, err := client.EnqueueJSON(ctx, map[string]string{"type": "second"})
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected context canceled, got %v", err)
 	}
@@ -65,14 +65,25 @@ func TestClientConnectionEnqueueJSONCoalescesLatestMessage(t *testing.T) {
 		outbox:  newClientOutbox(2),
 	}
 
-	if err := client.EnqueueJSON(context.Background(), testCoalescableMessage{key: "room_state", value: "old"}); err != nil {
+	firstResult, err := client.EnqueueJSON(context.Background(), testCoalescableMessage{key: "room_state", value: "old"})
+	if err != nil {
 		t.Fatalf("enqueue old state: %v", err)
 	}
-	if err := client.EnqueueJSON(context.Background(), map[string]string{"type": "room_members_changed"}); err != nil {
+	if firstResult.QueueDepth != 1 || firstResult.Coalesced {
+		t.Fatalf("expected first enqueue depth 1 without coalescing, got %+v", firstResult)
+	}
+	if _, err := client.EnqueueJSON(context.Background(), map[string]string{"type": "room_members_changed"}); err != nil {
 		t.Fatalf("enqueue non-coalescable message: %v", err)
 	}
-	if err := client.EnqueueJSON(context.Background(), testCoalescableMessage{key: "room_state", value: "new"}); err != nil {
+	coalescedResult, err := client.EnqueueJSON(context.Background(), testCoalescableMessage{key: "room_state", value: "new"})
+	if err != nil {
 		t.Fatalf("enqueue new state: %v", err)
+	}
+	if !coalescedResult.Coalesced {
+		t.Fatalf("expected new state to coalesce")
+	}
+	if coalescedResult.QueueDepth != 2 {
+		t.Fatalf("expected coalesced queue depth 2, got %d", coalescedResult.QueueDepth)
 	}
 
 	if size := client.outboxSize(); size != 2 {

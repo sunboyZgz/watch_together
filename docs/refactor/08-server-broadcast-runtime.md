@@ -94,6 +94,8 @@ clients
 failed clients
 timed out clients
 closed clients
+coalesced clients
+max queue depth
 duration
 slowest user
 slowest enqueue duration
@@ -163,7 +165,7 @@ broader coalescing policy for future high-frequency state streams
 slow-client backpressure policy
 room-scoped broadcaster interface
 Redis pub/sub or stream fan-out for multi-instance delivery
-metrics for queue depth and dropped/coalesced messages
+metrics export for queue depth and dropped/coalesced messages
 ```
 
 ## Redis Boundary

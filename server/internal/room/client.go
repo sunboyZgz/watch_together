@@ -32,6 +32,11 @@ func DefaultClientOutboxCapacity() int {
 	return defaultClientOutboxCapacity
 }
 
+type EnqueueResult struct {
+	QueueDepth int
+	Coalesced  bool
+}
+
 type ClientConnectionOptions struct {
 	OutboxCapacity int
 }
@@ -58,7 +63,7 @@ func newClientOutbox(capacity int) *clientOutbox {
 	}
 }
 
-func (o *clientOutbox) enqueue(ctx context.Context, message any) error {
+func (o *clientOutbox) enqueue(ctx context.Context, message any) (EnqueueResult, error) {
 	queued := outboundMessage{
 		message:     message,
 		coalesceKey: outboxCoalesceKey(message),
@@ -68,23 +73,28 @@ func (o *clientOutbox) enqueue(ctx context.Context, message any) error {
 		o.mu.Lock()
 		if queued.coalesceKey != "" {
 			if o.coalesceLatestLocked(queued) {
+				result := EnqueueResult{
+					QueueDepth: len(o.queue),
+					Coalesced:  true,
+				}
 				o.signalLocked()
 				o.mu.Unlock()
-				return nil
+				return result, nil
 			}
 		}
 		if len(o.queue) < o.capacity {
 			o.queue = append(o.queue, queued)
+			result := EnqueueResult{QueueDepth: len(o.queue)}
 			o.signalLocked()
 			o.mu.Unlock()
-			return nil
+			return result, nil
 		}
 		notify := o.notify
 		o.mu.Unlock()
 
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return EnqueueResult{}, ctx.Err()
 		case <-notify:
 		}
 	}
@@ -205,12 +215,12 @@ func (c *ClientConnection) WriteJSON(ctx context.Context, message any) error {
 }
 
 // EnqueueJSON adds one message to this connection's outbound queue.
-func (c *ClientConnection) EnqueueJSON(ctx context.Context, message any) error {
+func (c *ClientConnection) EnqueueJSON(ctx context.Context, message any) (EnqueueResult, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	if c.outbox == nil {
-		return c.WriteJSON(ctx, message)
+		return EnqueueResult{}, c.WriteJSON(ctx, message)
 	}
 
 	return c.outbox.enqueue(ctx, message)
