@@ -19,8 +19,9 @@ For any server refactor agent, read these files first:
 6. docs/refactor/05-server-sync-phase6-cleanup.md
 7. docs/refactor/06-websocket-sync-contract.md
 8. docs/refactor/07-server-timeline-business-integration.md
-9. docs/sync/00-index.md
-10. docs/sync/07-agent-brief-checklists-and-anti-patterns.md
+9. docs/refactor/08-server-broadcast-runtime.md
+10. docs/sync/00-index.md
+11. docs/sync/07-agent-brief-checklists-and-anti-patterns.md
 ```
 
 When changing timeline structs, transitions, or WebSocket behavior, also read:
@@ -129,6 +130,8 @@ phase 2: GORM models and stores
 phase 3: Redis client and cache boundary
 phase 4: timeline model and WebSocket protocol
 phase 5: tests and compatibility cleanup
+phase 6: timeline business integration
+phase 7: broadcast runtime and high-concurrency boundary
 ```
 
 Each phase should keep the server buildable.

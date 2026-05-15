@@ -5,7 +5,6 @@ import (
 	"errors"
 	"log"
 	"net/http"
-	"sync"
 	"time"
 
 	"github.com/coder/websocket"
@@ -21,12 +20,14 @@ type WebSocketHandler struct {
 	heartbeatInterval time.Duration
 	heartbeatTimeout  time.Duration
 	clock             realtime.Clock
+	broadcaster       roomBroadcaster
 }
 
 const (
-	defaultHeartbeatInterval    = 5 * time.Second
-	defaultHeartbeatTimeout     = 15 * time.Second
-	defaultBroadcastWorkerLimit = 64
+	defaultHeartbeatInterval         = 5 * time.Second
+	defaultHeartbeatTimeout          = 15 * time.Second
+	defaultBroadcastConcurrencyLimit = int64(64)
+	defaultBroadcastWriteTimeout     = 3 * time.Second
 )
 
 type protocolMessageError struct {
@@ -74,6 +75,15 @@ func newWebSocketHandlerWithClock(
 		heartbeatInterval: heartbeatInterval,
 		heartbeatTimeout:  heartbeatTimeout,
 		clock:             clock,
+		broadcaster:       newBoundedBroadcaster(defaultWebSocketBroadcastConfig()),
+	}
+}
+
+func defaultWebSocketBroadcastConfig() broadcastConfig {
+	return broadcastConfig{
+		ConcurrencyLimit:    defaultBroadcastConcurrencyLimit,
+		WriteTimeout:        defaultBroadcastWriteTimeout,
+		CloseOnWriteTimeout: true,
 	}
 }
 
@@ -401,14 +411,17 @@ func (h *WebSocketHandler) handleControlEvent(
 	}
 
 	envelope := buildEnvelope(state)
-	stats, err := broadcastEnvelopeWithStats(ctx, clients, envelope)
+	stats, err := h.broadcaster.Broadcast(ctx, roomClientWriters(clients), envelope)
 	if h.debugSync {
 		log.Printf(
-			"sync broadcast type=%s room=%s seq=%d clients=%d pos=%d paused=%t rate=%.2f duration_us=%d slowest_user=%s slowest_us=%d err=%v",
+			"sync broadcast type=%s room=%s seq=%d clients=%d failed=%d timed_out=%d closed=%d pos=%d paused=%t rate=%.2f duration_us=%d slowest_user=%s slowest_us=%d err=%v",
 			eventType,
 			roomID,
 			state.Seq,
 			stats.Clients,
+			stats.FailedClients,
+			stats.TimedOutClients,
+			stats.ClosedClients,
 			state.PositionMs,
 			state.Paused,
 			state.PlaybackRate,
@@ -454,81 +467,12 @@ func (h *WebSocketHandler) logControlReceived(
 	)
 }
 
-type broadcastStats struct {
-	Clients         int
-	Duration        time.Duration
-	SlowestUserID   string
-	SlowestDuration time.Duration
-}
-
-func broadcastEnvelopeWithStats(
-	ctx context.Context,
-	clients []*room.ClientConnection,
-	envelope protocol.Envelope,
-) (broadcastStats, error) {
-	startedAt := time.Now()
-	stats := broadcastStats{}
-	targets := make([]*room.ClientConnection, 0, len(clients))
-	for _, client := range clients {
-		if client == nil {
-			continue
-		}
-		targets = append(targets, client)
-	}
-	stats.Clients = len(targets)
-	if len(targets) == 0 {
-		stats.Duration = time.Since(startedAt)
-		return stats, nil
-	}
-
-	workerCount := len(targets)
-	if workerCount > defaultBroadcastWorkerLimit {
-		workerCount = defaultBroadcastWorkerLimit
-	}
-
-	jobs := make(chan *room.ClientConnection)
-	var wg sync.WaitGroup
-	var mu sync.Mutex
-	var firstErr error
-
-	for i := 0; i < workerCount; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for client := range jobs {
-				clientStartedAt := time.Now()
-				err := client.WriteJSON(ctx, envelope)
-				clientDuration := time.Since(clientStartedAt)
-
-				mu.Lock()
-				if clientDuration > stats.SlowestDuration {
-					stats.SlowestDuration = clientDuration
-					stats.SlowestUserID = client.UserID()
-				}
-				if err != nil && firstErr == nil {
-					firstErr = err
-				}
-				mu.Unlock()
-			}
-		}()
-	}
-
-	for _, client := range targets {
-		jobs <- client
-	}
-	close(jobs)
-
-	wg.Wait()
-	stats.Duration = time.Since(startedAt)
-	return stats, firstErr
-}
-
-func broadcastEnvelope(
+func (h *WebSocketHandler) broadcastEnvelope(
 	ctx context.Context,
 	clients []*room.ClientConnection,
 	envelope protocol.Envelope,
 ) error {
-	_, err := broadcastEnvelopeWithStats(ctx, clients, envelope)
+	_, err := h.broadcaster.Broadcast(ctx, roomClientWriters(clients), envelope)
 	return err
 }
 
@@ -539,7 +483,7 @@ func (h *WebSocketHandler) broadcastRoomState(result room.RemoveClientResult) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
-	_ = broadcastEnvelope(ctx, result.Remaining, protocol.Envelope{
+	_ = h.broadcastEnvelope(ctx, result.Remaining, protocol.Envelope{
 		Type: protocol.TypeRoomState,
 		Payload: mustJSONRaw(roomStatePayload(result.State)),
 	})
@@ -681,7 +625,7 @@ func (h *WebSocketHandler) broadcastRoomMembersChangedToOthers(
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
-	_ = broadcastEnvelope(ctx, targets, protocol.Envelope{
+	_ = h.broadcastEnvelope(ctx, targets, protocol.Envelope{
 		Type: protocol.TypeRoomMembersChanged,
 		Payload: mustJSONRaw(protocol.RoomMembersChangedPayload{
 			RoomID: roomID,
