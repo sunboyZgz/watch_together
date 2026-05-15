@@ -13,6 +13,7 @@ import (
 type ClientConnection struct {
 	conn                *websocket.Conn
 	writeMu             *semaphore.Weighted
+	outbox              chan outboundMessage
 	stateMu             sync.RWMutex
 	userID              string
 	roomID              string
@@ -20,12 +21,19 @@ type ClientConnection struct {
 	lastHeartbeatAckAt  time.Time
 }
 
+type outboundMessage struct {
+	message any
+}
+
+const defaultClientOutboxCapacity = 64
+
 // NewClientConnection wraps one WebSocket connection with the server-side identity fields we need.
 func NewClientConnection(conn *websocket.Conn) *ClientConnection {
 	now := time.Now()
 	return &ClientConnection{
 		conn:                conn,
 		writeMu:             semaphore.NewWeighted(1),
+		outbox:              make(chan outboundMessage, defaultClientOutboxCapacity),
 		lastHeartbeatSentAt: now,
 		lastHeartbeatAckAt:  now,
 	}
@@ -74,6 +82,45 @@ func (c *ClientConnection) WriteJSON(ctx context.Context, message any) error {
 
 	// The write lock keeps concurrent responses from interleaving on the same socket.
 	return c.conn.Write(ctx, websocket.MessageText, data)
+}
+
+// EnqueueJSON adds one message to this connection's outbound queue.
+func (c *ClientConnection) EnqueueJSON(ctx context.Context, message any) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if c.outbox == nil {
+		return c.WriteJSON(ctx, message)
+	}
+
+	select {
+	case c.outbox <- outboundMessage{message: message}:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// RunWriteLoop drains queued outbound messages and writes them to the websocket in order.
+func (c *ClientConnection) RunWriteLoop(ctx context.Context) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if c.outbox == nil {
+		<-ctx.Done()
+		return ctx.Err()
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case queued := <-c.outbox:
+			if err := c.WriteJSON(ctx, queued.message); err != nil {
+				return err
+			}
+		}
+	}
 }
 
 // MarkHeartbeatSent records the last outbound heartbeat time.

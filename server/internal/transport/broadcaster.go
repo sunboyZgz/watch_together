@@ -15,7 +15,7 @@ import (
 
 type clientWriter interface {
 	UserID() string
-	WriteJSON(ctx context.Context, message any) error
+	EnqueueJSON(ctx context.Context, message any) error
 	Close(status websocket.StatusCode, reason string) error
 }
 
@@ -34,15 +34,17 @@ type broadcastStats struct {
 }
 
 type broadcastConfig struct {
-	ConcurrencyLimit    int64
-	WriteTimeout       time.Duration
-	CloseOnWriteTimeout bool
+	ConcurrencyLimit      int64
+	BroadcastTimeout      time.Duration
+	EnqueueTimeout        time.Duration
+	CloseOnEnqueueTimeout bool
 }
 
 type boundedBroadcaster struct {
-	limit               *semaphore.Weighted
-	writeTimeout        time.Duration
-	closeOnWriteTimeout bool
+	limit                 *semaphore.Weighted
+	broadcastTimeout      time.Duration
+	enqueueTimeout        time.Duration
+	closeOnEnqueueTimeout bool
 }
 
 func newBoundedBroadcaster(config broadcastConfig) *boundedBroadcaster {
@@ -50,9 +52,10 @@ func newBoundedBroadcaster(config broadcastConfig) *boundedBroadcaster {
 		config.ConcurrencyLimit = 1
 	}
 	return &boundedBroadcaster{
-		limit:               semaphore.NewWeighted(config.ConcurrencyLimit),
-		writeTimeout:        config.WriteTimeout,
-		closeOnWriteTimeout: config.CloseOnWriteTimeout,
+		limit:                 semaphore.NewWeighted(config.ConcurrencyLimit),
+		broadcastTimeout:      config.BroadcastTimeout,
+		enqueueTimeout:        config.EnqueueTimeout,
+		closeOnEnqueueTimeout: config.CloseOnEnqueueTimeout,
 	}
 }
 
@@ -63,6 +66,11 @@ func (b *boundedBroadcaster) Broadcast(
 ) (broadcastStats, error) {
 	if ctx == nil {
 		ctx = context.Background()
+	}
+	if b.broadcastTimeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, b.broadcastTimeout)
+		defer cancel()
 	}
 
 	startedAt := time.Now()
@@ -95,19 +103,19 @@ func (b *boundedBroadcaster) Broadcast(
 			defer b.limit.Release(1)
 
 			clientStartedAt := time.Now()
-			writeCtx := ctx
+			enqueueCtx := ctx
 			cancel := func() {}
-			if b.writeTimeout > 0 {
-				writeCtx, cancel = context.WithTimeout(ctx, b.writeTimeout)
+			if b.enqueueTimeout > 0 {
+				enqueueCtx, cancel = context.WithTimeout(ctx, b.enqueueTimeout)
 			}
 			defer cancel()
 
-			err := client.WriteJSON(writeCtx, envelope)
+			err := client.EnqueueJSON(enqueueCtx, envelope)
 			clientDuration := time.Since(clientStartedAt)
-			writeTimedOut := err != nil && isWriteTimeout(ctx, writeCtx)
+			enqueueTimedOut := err != nil && isEnqueueTimeout(ctx, enqueueCtx)
 			closed := false
-			if writeTimedOut && b.closeOnWriteTimeout {
-				closed = client.Close(websocket.StatusPolicyViolation, "broadcast write timeout") == nil
+			if enqueueTimedOut && b.closeOnEnqueueTimeout {
+				closed = client.Close(websocket.StatusPolicyViolation, "broadcast queue timeout") == nil
 			}
 
 			mu.Lock()
@@ -125,7 +133,7 @@ func (b *boundedBroadcaster) Broadcast(
 			if firstErr == nil {
 				firstErr = err
 			}
-			if writeTimedOut {
+			if enqueueTimedOut {
 				stats.TimedOutClients++
 				if closed {
 					stats.ClosedClients++
@@ -161,6 +169,6 @@ func roomClientWriters(clients []*room.ClientConnection) []clientWriter {
 	return writers
 }
 
-func isWriteTimeout(parentCtx context.Context, writeCtx context.Context) bool {
-	return parentCtx.Err() == nil && errors.Is(writeCtx.Err(), context.DeadlineExceeded)
+func isEnqueueTimeout(parentCtx context.Context, enqueueCtx context.Context) bool {
+	return parentCtx.Err() == nil && errors.Is(enqueueCtx.Err(), context.DeadlineExceeded)
 }

@@ -22,6 +22,7 @@ roomBroadcaster interface: transport-level fan-out contract
 boundedBroadcaster: current in-process implementation
 broadcastConfig: named runtime policy knobs
 clientWriter: minimal connection write/close boundary
+ClientConnection outbox: per-client outbound queue
 ClientConnection write semaphore: context-aware per-socket write serialization
 ```
 
@@ -29,7 +30,7 @@ The broadcaster is responsible for:
 
 ```text
 bounded fan-out concurrency
-per-write timeout
+per-client enqueue timeout
 slow client close policy
 broadcast stats
 future fan-out implementation swaps
@@ -46,6 +47,7 @@ golang.org/x/sync/semaphore
 This is a mature Go extended-library primitive and avoids hand-maintaining ad hoc concurrency counters.
 The current semaphore is process-wide per `WebSocketHandler`, not per room. This protects the server from aggregate broadcast pressure across rooms.
 The client connection also uses a one-slot semaphore for writes, so waiting behind another write can respect the same context timeout.
+Broadcast now enqueues to each client outbox. Actual socket writes happen in `ClientConnection.RunWriteLoop`.
 
 ## Current Policy
 
@@ -53,14 +55,17 @@ Defaults:
 
 ```text
 broadcast concurrency limit: 64
-write timeout: 3s
-close slow client on broadcast write timeout: true
+broadcast total timeout: 5s
+client outbox capacity: 64
+enqueue timeout: 3s
+close slow client on broadcast enqueue timeout: true
 ```
 
 Timeout policy:
 
 ```text
-if a client write exceeds the broadcast write timeout, count it as failed and timed out
+if the whole broadcast exceeds the total timeout, stop scheduling new clients
+if a client outbox cannot accept a message before the enqueue timeout, count it as failed and timed out
 close that client with websocket policy violation
 do not hold the stats mutex while closing the websocket
 if the parent broadcast context is canceled, count unscheduled clients as failed
@@ -75,26 +80,26 @@ timed out clients
 closed clients
 duration
 slowest user
-slowest write duration
+slowest enqueue duration
 ```
 
-## What This Does Not Do Yet
+## Delivery Semantics
 
-This phase does not implement per-client outbound queues yet.
-
-That remains a larger runtime change because queued writes change when a broadcast is considered delivered:
+Broadcast completion now means the message has been accepted into each target client's outbox, not necessarily written to the network yet:
 
 ```text
-direct write: broadcast latency measures actual socket writes
-queued write: broadcast latency measures enqueue latency unless a delivery ack layer is added
+room transition: committed before broadcast
+broadcast success: queued for the target client
+writer loop: eventually writes queued messages to the websocket
 ```
+
+This is intentional for authoritative timeline state. A slow client should not block room state transitions or other clients.
 
 ## Next Broadcast Architecture Step
 
 When room sizes or multi-instance needs require it, add:
 
 ```text
-per-client outbound queue
 latest-room-state coalescing
 slow-client backpressure policy
 room-scoped broadcaster interface

@@ -14,9 +14,9 @@ import (
 
 func TestBoundedBroadcasterSkipsNilClients(t *testing.T) {
 	broadcaster := newBoundedBroadcaster(broadcastConfig{
-		ConcurrencyLimit:    2,
-		WriteTimeout:        time.Second,
-		CloseOnWriteTimeout: true,
+		ConcurrencyLimit:      2,
+		EnqueueTimeout:        time.Second,
+		CloseOnEnqueueTimeout: true,
 	})
 	client := &fakeBroadcastClient{userID: "user_a"}
 
@@ -30,21 +30,21 @@ func TestBoundedBroadcasterSkipsNilClients(t *testing.T) {
 	if stats.Clients != 1 {
 		t.Fatalf("expected 1 client, got %d", stats.Clients)
 	}
-	if writes := client.writeCount(); writes != 1 {
-		t.Fatalf("expected 1 write, got %d", writes)
+	if enqueues := client.enqueueCount(); enqueues != 1 {
+		t.Fatalf("expected 1 enqueue, got %d", enqueues)
 	}
 }
 
-func TestBoundedBroadcasterReportsWriteFailure(t *testing.T) {
-	expectedErr := errors.New("write failed")
+func TestBoundedBroadcasterReportsEnqueueFailure(t *testing.T) {
+	expectedErr := errors.New("enqueue failed")
 	broadcaster := newBoundedBroadcaster(broadcastConfig{
-		ConcurrencyLimit:    2,
-		WriteTimeout:        time.Second,
-		CloseOnWriteTimeout: true,
+		ConcurrencyLimit:      2,
+		EnqueueTimeout:        time.Second,
+		CloseOnEnqueueTimeout: true,
 	})
 	client := &fakeBroadcastClient{
-		userID:   "user_a",
-		writeErr: expectedErr,
+		userID:     "user_a",
+		enqueueErr: expectedErr,
 	}
 
 	stats, err := broadcaster.Broadcast(context.Background(), []clientWriter{client}, protocol.Envelope{
@@ -52,7 +52,7 @@ func TestBoundedBroadcasterReportsWriteFailure(t *testing.T) {
 	})
 
 	if !errors.Is(err, expectedErr) {
-		t.Fatalf("expected write error, got %v", err)
+		t.Fatalf("expected enqueue error, got %v", err)
 	}
 	if stats.FailedClients != 1 {
 		t.Fatalf("expected 1 failed client, got %d", stats.FailedClients)
@@ -61,9 +61,9 @@ func TestBoundedBroadcasterReportsWriteFailure(t *testing.T) {
 
 func TestBoundedBroadcasterClosesTimedOutClient(t *testing.T) {
 	broadcaster := newBoundedBroadcaster(broadcastConfig{
-		ConcurrencyLimit:    1,
-		WriteTimeout:        time.Millisecond,
-		CloseOnWriteTimeout: true,
+		ConcurrencyLimit:      1,
+		EnqueueTimeout:        time.Millisecond,
+		CloseOnEnqueueTimeout: true,
 	})
 	client := &fakeBroadcastClient{
 		userID:       "user_a",
@@ -88,11 +88,36 @@ func TestBoundedBroadcasterClosesTimedOutClient(t *testing.T) {
 	}
 }
 
+func TestBoundedBroadcasterStopsSchedulingAfterBroadcastTimeout(t *testing.T) {
+	broadcaster := newBoundedBroadcaster(broadcastConfig{
+		ConcurrencyLimit:      1,
+		BroadcastTimeout:      time.Millisecond,
+		EnqueueTimeout:        time.Second,
+		CloseOnEnqueueTimeout: true,
+	})
+	clients := []clientWriter{
+		&fakeBroadcastClient{userID: "user_a", blockUntilCtx: true},
+		&fakeBroadcastClient{userID: "user_b"},
+		&fakeBroadcastClient{userID: "user_c"},
+	}
+
+	stats, err := broadcaster.Broadcast(context.Background(), clients, protocol.Envelope{
+		Type: protocol.TypeRoomState,
+	})
+
+	if err == nil {
+		t.Fatalf("expected broadcast timeout error")
+	}
+	if stats.FailedClients != len(clients) {
+		t.Fatalf("expected all clients to be failed, got %d", stats.FailedClients)
+	}
+}
+
 func TestBoundedBroadcasterHonorsConcurrencyLimit(t *testing.T) {
 	broadcaster := newBoundedBroadcaster(broadcastConfig{
-		ConcurrencyLimit:    2,
-		WriteTimeout:        time.Second,
-		CloseOnWriteTimeout: true,
+		ConcurrencyLimit:      2,
+		EnqueueTimeout:        time.Second,
+		CloseOnEnqueueTimeout: true,
 	})
 
 	release := make(chan struct{})
@@ -111,7 +136,7 @@ func TestBoundedBroadcasterHonorsConcurrencyLimit(t *testing.T) {
 		clients = append(clients, &fakeBroadcastClient{
 			userID:     "user",
 			blockUntil: release,
-			onWrite: func() {
+			onEnqueue: func() {
 				mu.Lock()
 				defer mu.Unlock()
 				active++
@@ -120,7 +145,7 @@ func TestBoundedBroadcasterHonorsConcurrencyLimit(t *testing.T) {
 				}
 				entered <- struct{}{}
 			},
-			afterWrite: func() {
+			afterEnqueue: func() {
 				mu.Lock()
 				defer mu.Unlock()
 				active--
@@ -140,7 +165,7 @@ func TestBoundedBroadcasterHonorsConcurrencyLimit(t *testing.T) {
 		select {
 		case <-entered:
 		case <-time.After(time.Second):
-			t.Fatalf("timed out waiting for initial writes")
+			t.Fatalf("timed out waiting for initial enqueues")
 		}
 	}
 	time.Sleep(10 * time.Millisecond)
@@ -149,7 +174,7 @@ func TestBoundedBroadcasterHonorsConcurrencyLimit(t *testing.T) {
 	observedMax := maxActive
 	mu.Unlock()
 	if observedMax > 2 {
-		t.Fatalf("expected at most 2 active writes, got %d", observedMax)
+		t.Fatalf("expected at most 2 active enqueues, got %d", observedMax)
 	}
 
 	close(release)
@@ -166,13 +191,13 @@ func TestBoundedBroadcasterHonorsConcurrencyLimit(t *testing.T) {
 
 type fakeBroadcastClient struct {
 	userID        string
-	writes        int
-	writeErr      error
+	enqueues      int
+	enqueueErr    error
 	blockUntilCtx bool
 	blockUntil    <-chan struct{}
 	closed        bool
-	onWrite       func()
-	afterWrite    func()
+	onEnqueue     func()
+	afterEnqueue  func()
 	mu            sync.Mutex
 }
 
@@ -180,16 +205,16 @@ func (c *fakeBroadcastClient) UserID() string {
 	return c.userID
 }
 
-func (c *fakeBroadcastClient) WriteJSON(ctx context.Context, message any) error {
+func (c *fakeBroadcastClient) EnqueueJSON(ctx context.Context, message any) error {
 	c.mu.Lock()
-	c.writes++
+	c.enqueues++
 	c.mu.Unlock()
 
-	if c.onWrite != nil {
-		c.onWrite()
+	if c.onEnqueue != nil {
+		c.onEnqueue()
 	}
-	if c.afterWrite != nil {
-		defer c.afterWrite()
+	if c.afterEnqueue != nil {
+		defer c.afterEnqueue()
 	}
 	if c.blockUntilCtx {
 		<-ctx.Done()
@@ -202,7 +227,7 @@ func (c *fakeBroadcastClient) WriteJSON(ctx context.Context, message any) error 
 		case <-c.blockUntil:
 		}
 	}
-	return c.writeErr
+	return c.enqueueErr
 }
 
 func (c *fakeBroadcastClient) Close(status websocket.StatusCode, reason string) error {
@@ -213,11 +238,11 @@ func (c *fakeBroadcastClient) Close(status websocket.StatusCode, reason string) 
 	return nil
 }
 
-func (c *fakeBroadcastClient) writeCount() int {
+func (c *fakeBroadcastClient) enqueueCount() int {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	return c.writes
+	return c.enqueues
 }
 
 func (c *fakeBroadcastClient) isClosed() bool {

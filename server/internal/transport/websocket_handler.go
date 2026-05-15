@@ -27,7 +27,8 @@ const (
 	defaultHeartbeatInterval         = 5 * time.Second
 	defaultHeartbeatTimeout          = 15 * time.Second
 	defaultBroadcastConcurrencyLimit = int64(64)
-	defaultBroadcastWriteTimeout     = 3 * time.Second
+	defaultBroadcastTimeout          = 5 * time.Second
+	defaultBroadcastEnqueueTimeout   = 3 * time.Second
 )
 
 type protocolMessageError struct {
@@ -81,9 +82,10 @@ func newWebSocketHandlerWithClock(
 
 func defaultWebSocketBroadcastConfig() broadcastConfig {
 	return broadcastConfig{
-		ConcurrencyLimit:    defaultBroadcastConcurrencyLimit,
-		WriteTimeout:        defaultBroadcastWriteTimeout,
-		CloseOnWriteTimeout: true,
+		ConcurrencyLimit:      defaultBroadcastConcurrencyLimit,
+		BroadcastTimeout:      defaultBroadcastTimeout,
+		EnqueueTimeout:        defaultBroadcastEnqueueTimeout,
+		CloseOnEnqueueTimeout: true,
 	}
 }
 
@@ -99,8 +101,20 @@ func (h *WebSocketHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	client := room.NewClientConnection(conn)
 	ctx, cancel := context.WithCancel(context.Background())
+	writerDone := make(chan struct{})
+	go func() {
+		defer close(writerDone)
+		if err := client.RunWriteLoop(ctx); err != nil && h.debugSync && !errors.Is(err, context.Canceled) {
+			log.Printf("websocket write loop stopped: %v", err)
+		}
+	}()
 	defer func() {
 		cancel()
+		select {
+		case <-writerDone:
+		case <-time.After(time.Second):
+			_ = client.CloseNow()
+		}
 		// Connection cleanup always flows through the room manager so empty rooms can be removed.
 		removeResult := h.roomManager.RemoveClient(client)
 		if removeResult.HostTransferred {

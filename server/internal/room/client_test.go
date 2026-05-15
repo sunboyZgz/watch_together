@@ -25,3 +25,19 @@ func TestClientConnectionWriteJSONRespectsContextWhileWaitingForWriteLock(t *tes
 		t.Fatalf("expected context canceled, got %v", err)
 	}
 }
+
+func TestClientConnectionEnqueueJSONRespectsContextWhenOutboxIsFull(t *testing.T) {
+	client := &ClientConnection{
+		writeMu: semaphore.NewWeighted(1),
+		outbox:  make(chan outboundMessage, 1),
+	}
+	client.outbox <- outboundMessage{message: map[string]string{"type": "room_state"}}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := client.EnqueueJSON(ctx, map[string]string{"type": "room_state"})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context canceled, got %v", err)
+	}
+}
