@@ -13,7 +13,7 @@ import (
 type ClientConnection struct {
 	conn                *websocket.Conn
 	writeMu             *semaphore.Weighted
-	outbox              chan outboundMessage
+	outbox              *clientOutbox
 	stateMu             sync.RWMutex
 	userID              string
 	roomID              string
@@ -22,10 +22,113 @@ type ClientConnection struct {
 }
 
 type outboundMessage struct {
-	message any
+	message     any
+	coalesceKey string
 }
 
 const defaultClientOutboxCapacity = 64
+
+type coalescableOutboundMessage interface {
+	OutboxCoalesceKey() string
+}
+
+type clientOutbox struct {
+	mu       sync.Mutex
+	queue    []outboundMessage
+	capacity int
+	notify   chan struct{}
+}
+
+func newClientOutbox(capacity int) *clientOutbox {
+	if capacity <= 0 {
+		capacity = 1
+	}
+	return &clientOutbox{
+		queue:    make([]outboundMessage, 0, capacity),
+		capacity: capacity,
+		notify:   make(chan struct{}),
+	}
+}
+
+func (o *clientOutbox) enqueue(ctx context.Context, message any) error {
+	queued := outboundMessage{
+		message:     message,
+		coalesceKey: outboxCoalesceKey(message),
+	}
+
+	for {
+		o.mu.Lock()
+		if queued.coalesceKey != "" {
+			if o.coalesceLatestLocked(queued) {
+				o.signalLocked()
+				o.mu.Unlock()
+				return nil
+			}
+		}
+		if len(o.queue) < o.capacity {
+			o.queue = append(o.queue, queued)
+			o.signalLocked()
+			o.mu.Unlock()
+			return nil
+		}
+		notify := o.notify
+		o.mu.Unlock()
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-notify:
+		}
+	}
+}
+
+func (o *clientOutbox) dequeue(ctx context.Context) (outboundMessage, error) {
+	for {
+		o.mu.Lock()
+		if len(o.queue) > 0 {
+			queued := o.queue[0]
+			copy(o.queue, o.queue[1:])
+			var zero outboundMessage
+			o.queue[len(o.queue)-1] = zero
+			o.queue = o.queue[:len(o.queue)-1]
+			o.signalLocked()
+			o.mu.Unlock()
+			return queued, nil
+		}
+		notify := o.notify
+		o.mu.Unlock()
+
+		select {
+		case <-ctx.Done():
+			return outboundMessage{}, ctx.Err()
+		case <-notify:
+		}
+	}
+}
+
+func (o *clientOutbox) coalesceLatestLocked(queued outboundMessage) bool {
+	for i := len(o.queue) - 1; i >= 0; i-- {
+		if o.queue[i].coalesceKey == queued.coalesceKey {
+			copy(o.queue[i:], o.queue[i+1:])
+			o.queue[len(o.queue)-1] = queued
+			return true
+		}
+	}
+	return false
+}
+
+func (o *clientOutbox) signalLocked() {
+	close(o.notify)
+	o.notify = make(chan struct{})
+}
+
+func outboxCoalesceKey(message any) string {
+	coalescable, ok := message.(coalescableOutboundMessage)
+	if !ok {
+		return ""
+	}
+	return coalescable.OutboxCoalesceKey()
+}
 
 // NewClientConnection wraps one WebSocket connection with the server-side identity fields we need.
 func NewClientConnection(conn *websocket.Conn) *ClientConnection {
@@ -33,7 +136,7 @@ func NewClientConnection(conn *websocket.Conn) *ClientConnection {
 	return &ClientConnection{
 		conn:                conn,
 		writeMu:             semaphore.NewWeighted(1),
-		outbox:              make(chan outboundMessage, defaultClientOutboxCapacity),
+		outbox:              newClientOutbox(defaultClientOutboxCapacity),
 		lastHeartbeatSentAt: now,
 		lastHeartbeatAckAt:  now,
 	}
@@ -93,12 +196,7 @@ func (c *ClientConnection) EnqueueJSON(ctx context.Context, message any) error {
 		return c.WriteJSON(ctx, message)
 	}
 
-	select {
-	case c.outbox <- outboundMessage{message: message}:
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
-	}
+	return c.outbox.enqueue(ctx, message)
 }
 
 // RunWriteLoop drains queued outbound messages and writes them to the websocket in order.
@@ -112,13 +210,12 @@ func (c *ClientConnection) RunWriteLoop(ctx context.Context) error {
 	}
 
 	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case queued := <-c.outbox:
-			if err := c.WriteJSON(ctx, queued.message); err != nil {
-				return err
-			}
+		queued, err := c.outbox.dequeue(ctx)
+		if err != nil {
+			return err
+		}
+		if err := c.WriteJSON(ctx, queued.message); err != nil {
+			return err
 		}
 	}
 }

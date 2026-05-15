@@ -24,6 +24,7 @@ broadcastConfig: named runtime policy knobs
 clientWriter: minimal connection write/close boundary
 ClientConnection outbox: per-client outbound queue
 ClientConnection write semaphore: context-aware per-socket write serialization
+protocol.Envelope OutboxCoalesceKey: identifies coalescable outbound messages
 ```
 
 The broadcaster is responsible for:
@@ -48,6 +49,7 @@ This is a mature Go extended-library primitive and avoids hand-maintaining ad ho
 The current semaphore is process-wide per `WebSocketHandler`, not per room. This protects the server from aggregate broadcast pressure across rooms.
 The client connection also uses a one-slot semaphore for writes, so waiting behind another write can respect the same context timeout.
 Broadcast now enqueues to each client outbox. Actual socket writes happen in `ClientConnection.RunWriteLoop`.
+`room_state` messages are coalesced in each client outbox: if an older queued `room_state` exists, the newer one replaces it.
 
 ## Current Policy
 
@@ -95,12 +97,58 @@ writer loop: eventually writes queued messages to the websocket
 
 This is intentional for authoritative timeline state. A slow client should not block room state transitions or other clients.
 
+## Coalescing Policy
+
+Only messages that explicitly expose an outbox coalesce key are eligible for replacement.
+
+Current coalescing:
+
+```text
+room_state: remove the older queued state and append the latest state to the tail
+```
+
+Current non-coalescing:
+
+```text
+play
+pause
+seek
+set_playback_rate
+ended
+room_members_changed
+heartbeat
+error
+clock_sync.pong
+```
+
+This keeps event-like protocol messages ordered while allowing high-value state snapshots to collapse to the latest authority state.
+
+## Capacity Factors
+
+The practical connection and room-size ceiling is affected by:
+
+```text
+machine memory
+websocket library overhead
+client outbox capacity
+average message size
+heartbeat frequency
+operating-system file descriptor limits
+network write throughput
+```
+
+Treat these as deployment and load-test inputs. Do not assume the per-client outbox model provides unlimited fan-out capacity.
+
 ## Next Broadcast Architecture Step
 
 When room sizes or multi-instance needs require it, add:
 
 ```text
-latest-room-state coalescing
+single-process max connection limit
+per-room member limit
+configurable outbox capacity
+queue-full close or degradation policy
+broader coalescing policy for future high-frequency state streams
 slow-client backpressure policy
 room-scoped broadcaster interface
 Redis pub/sub or stream fan-out for multi-instance delivery

@@ -27,3 +27,10 @@ type ErrorEnvelope struct {
 	Type    string       `json:"type"`
 	Payload ErrorPayload `json:"payload"`
 }
+
+func (e Envelope) OutboxCoalesceKey() string {
+	if e.Type == TypeRoomState {
+		return TypeRoomState
+	}
+	return ""
+}
