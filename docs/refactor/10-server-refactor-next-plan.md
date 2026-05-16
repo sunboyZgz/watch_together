@@ -81,15 +81,26 @@ If the local machine cannot run `go`, document that blocker before marking this 
 
 Goal: make the latest room_state cache predictable without changing sync authority.
 
+Status on 2026-05-17:
+
+```text
+[x] WebSocket join_room writes latest room_state after returning the join snapshot.
+[x] Accepted play / pause / seek / set_playback_rate / ended write latest room_state before broadcast.
+[x] host_left and host_rejoin room_state refreshes write latest room_state through broadcastRoomState.
+[x] Cache writes use a short 200ms timeout and remain best-effort.
+[x] Redis is not read for host authority, membership, or control permission.
+[ ] Room-level integration tests are deferred until the next room testing pass.
+```
+
 Tasks:
 
 ```text
-[ ] Write latest room_state after join_room snapshot.
-[ ] Write latest room_state after accepted play / pause / seek / set_playback_rate / ended.
-[ ] Write latest room_state after host_left and host_rejoin state refreshes.
-[ ] Keep cache writes best-effort and short-timeout.
-[ ] Do not read Redis to decide host authority, membership, or control permission.
-[ ] Add tests for disabled cache, key format, and transport write point.
+[x] Write latest room_state after join_room snapshot.
+[x] Write latest room_state after accepted play / pause / seek / set_playback_rate / ended.
+[x] Write latest room_state after host_left and host_rejoin state refreshes.
+[x] Keep cache writes best-effort and short-timeout.
+[x] Do not read Redis to decide host authority, membership, or control permission.
+[ ] Add room-level integration tests for cache write points in the next room testing pass.
 ```
 
 Acceptance:
@@ -162,14 +173,25 @@ Do not store durable control history only in Redis.
 
 Goal: reduce infrastructure duplication while preserving API behavior.
 
+Status on 2026-05-17:
+
+```text
+[x] PostgreSQL is opened once in app assembly.
+[x] auth, home, media, room, and progress stores share one *gorm.DB.
+[x] database/sql pool defaults are set by store.OpenPostgres.
+[x] Server has Shutdown and Close methods for HTTP, cleanup loops, Redis, and PostgreSQL resources.
+[x] roomserver handles interrupt / SIGTERM with graceful shutdown.
+[ ] go test verification is still pending until local Go tooling is available.
+```
+
 Tasks:
 
 ```text
 [x] Open PostgreSQL once during app assembly when DATABASE_URL is configured.
 [x] Share the same *gorm.DB across auth, home, media, room, and progress stores.
-[ ] Keep SQL-first migrations as the source of schema truth.
-[ ] Keep service DTOs separate from GORM model structs.
-[ ] Keep complex read queries as raw SQL when clearer than GORM chains.
+[x] Keep SQL-first migrations as the source of schema truth.
+[x] Keep service DTOs separate from GORM model structs.
+[x] Keep complex read queries as raw SQL when clearer than GORM chains.
 ```
 
 Acceptance:

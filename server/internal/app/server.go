@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -41,10 +42,13 @@ type Server struct {
 	httpServer  *http.Server
 	roomManager *room.Manager
 	redis       *cache.RedisClient
+	db          *gorm.DB
+	cancel      context.CancelFunc
 }
 
 // NewServer assembles the in-memory room manager and the HTTP routes around it.
 func NewServer(config Config) *Server {
+	serverCtx, cancel := context.WithCancel(context.Background())
 	roomManager := room.NewManager()
 	redisClient := newRedisClient(config.Redis)
 	var roomStateCache *cache.RoomStateCache
@@ -83,9 +87,9 @@ func NewServer(config Config) *Server {
 			},
 		})
 	}
-	go roomManager.StartCleanupLoop(context.Background(), room.DefaultCleanupInterval())
+	go roomManager.StartCleanupLoop(serverCtx, room.DefaultCleanupInterval())
 	if roomStore != nil {
-		go startPersistentRoomCleanupLoop(context.Background(), room.DefaultCleanupInterval(), roomStore)
+		go startPersistentRoomCleanupLoop(serverCtx, room.DefaultCleanupInterval(), roomStore)
 	}
 	roomHTTPHandler := transport.NewRoomHTTPHandler(roomManager, roomService)
 	authHTTPHandler := transport.NewAuthHTTPHandler(newAuthService(db))
@@ -114,6 +118,8 @@ func NewServer(config Config) *Server {
 		httpServer:  httpServer,
 		roomManager: roomManager,
 		redis:       redisClient,
+		db:          db,
+		cancel:      cancel,
 	}
 }
 
@@ -258,6 +264,58 @@ func (s *Server) Address() string {
 // ListenAndServe delegates the actual HTTP serving to net/http.
 func (s *Server) ListenAndServe() error {
 	return s.httpServer.ListenAndServe()
+}
+
+// Shutdown gracefully stops HTTP serving and closes infrastructure resources.
+func (s *Server) Shutdown(ctx context.Context) error {
+	if s == nil {
+		return nil
+	}
+	if s.cancel != nil {
+		s.cancel()
+	}
+	var shutdownErr error
+	if s.httpServer != nil {
+		if err := s.httpServer.Shutdown(ctx); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			shutdownErr = err
+		}
+	}
+	if err := s.Close(); err != nil && shutdownErr == nil {
+		shutdownErr = err
+	}
+	return shutdownErr
+}
+
+// Close releases shared Redis and PostgreSQL resources.
+func (s *Server) Close() error {
+	if s == nil {
+		return nil
+	}
+	if s.cancel != nil {
+		s.cancel()
+	}
+	var closeErr error
+	if s.httpServer != nil {
+		if err := s.httpServer.Close(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			closeErr = err
+		}
+	}
+	if s.redis != nil {
+		if err := s.redis.Close(); err != nil && closeErr == nil {
+			closeErr = err
+		}
+	}
+	if s.db != nil {
+		sqlDB, err := s.db.DB()
+		if err != nil {
+			if closeErr == nil {
+				closeErr = err
+			}
+		} else if err := sqlDB.Close(); err != nil && closeErr == nil {
+			closeErr = err
+		}
+	}
+	return closeErr
 }
 
 // RoomManager returns the shared in-memory manager used by transport handlers.

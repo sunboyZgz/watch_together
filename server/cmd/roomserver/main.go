@@ -1,9 +1,14 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"watch_together/server/internal/app"
@@ -49,7 +54,27 @@ func main() {
 	})
 
 	log.Printf("room server listening on %s", server.Address())
-	if err := server.ListenAndServe(); err != nil {
-		log.Fatal(err)
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- server.ListenAndServe()
+	}()
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	select {
+	case err := <-errCh:
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Fatal(err)
+		}
+	case <-ctx.Done():
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := server.Shutdown(shutdownCtx); err != nil {
+			log.Printf("room server graceful shutdown failed: %v", err)
+			if closeErr := server.Close(); closeErr != nil {
+				log.Printf("room server close failed: %v", closeErr)
+			}
+		}
 	}
 }

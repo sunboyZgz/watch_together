@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
 	"gorm.io/driver/postgres"
@@ -17,6 +18,13 @@ type PostgresUserStore struct {
 	db *gorm.DB
 }
 
+const (
+	defaultMaxOpenConns    = 20
+	defaultMaxIdleConns    = 5
+	defaultConnMaxLifetime = 30 * time.Minute
+	defaultConnMaxIdleTime = 5 * time.Minute
+)
+
 // OpenPostgres opens and verifies a GORM-backed PostgreSQL connection for API handlers.
 func OpenPostgres(ctx context.Context, databaseURL string) (*gorm.DB, error) {
 	db, err := gorm.Open(postgres.Open(databaseURL), &gorm.Config{
@@ -29,6 +37,10 @@ func OpenPostgres(ctx context.Context, databaseURL string) (*gorm.DB, error) {
 	if err != nil {
 		return nil, err
 	}
+	sqlDB.SetMaxOpenConns(defaultMaxOpenConns)
+	sqlDB.SetMaxIdleConns(defaultMaxIdleConns)
+	sqlDB.SetConnMaxLifetime(defaultConnMaxLifetime)
+	sqlDB.SetConnMaxIdleTime(defaultConnMaxIdleTime)
 	if err := sqlDB.PingContext(ctx); err != nil {
 		_ = sqlDB.Close()
 		return nil, err
