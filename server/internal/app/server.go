@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 
 	"watch_together/server/internal/auth"
 	"watch_together/server/internal/cache"
@@ -46,7 +47,12 @@ type Server struct {
 func NewServer(config Config) *Server {
 	roomManager := room.NewManager()
 	redisClient := newRedisClient(config.Redis)
-	roomService, roomStore := newRoomService(config.DatabaseURL)
+	var roomStateCache *cache.RoomStateCache
+	if redisClient != nil {
+		roomStateCache = cache.NewRoomStateCache(redisClient, 0)
+	}
+	db := newPostgresDB(config.DatabaseURL)
+	roomService, roomStore := newRoomService(db)
 	if roomStore != nil {
 		now := time.Now()
 		backfilled, err := roomStore.MarkAllActiveRoomsGracePeriod(
@@ -82,14 +88,15 @@ func NewServer(config Config) *Server {
 		go startPersistentRoomCleanupLoop(context.Background(), room.DefaultCleanupInterval(), roomStore)
 	}
 	roomHTTPHandler := transport.NewRoomHTTPHandler(roomManager, roomService)
-	authHTTPHandler := transport.NewAuthHTTPHandler(newAuthService(config.DatabaseURL))
-	homeHTTPHandler := transport.NewHomeHTTPHandler(newHomeService(config.DatabaseURL))
-	mediaHTTPHandler := transport.NewMediaHTTPHandler(newMediaService(config.DatabaseURL))
-	progressHTTPHandler := transport.NewProgressHTTPHandler(newProgressService(config.DatabaseURL))
+	authHTTPHandler := transport.NewAuthHTTPHandler(newAuthService(db))
+	homeHTTPHandler := transport.NewHomeHTTPHandler(newHomeService(db))
+	mediaHTTPHandler := transport.NewMediaHTTPHandler(newMediaService(db))
+	progressHTTPHandler := transport.NewProgressHTTPHandler(newProgressService(db))
 	router := newGinRouter(
 		roomManager,
 		config.DebugSync,
 		config.WebSocket,
+		roomStateCache,
 		roomHTTPHandler,
 		authHTTPHandler,
 		homeHTTPHandler,
@@ -128,10 +135,24 @@ func newRedisClient(config cache.RedisConfig) *cache.RedisClient {
 	return client
 }
 
+func newPostgresDB(databaseURL string) *gorm.DB {
+	if strings.TrimSpace(databaseURL) == "" {
+		log.Print("DATABASE_URL is not set; database-backed endpoints will return service unavailable")
+		return nil
+	}
+	db, err := store.OpenPostgres(context.Background(), databaseURL)
+	if err != nil {
+		log.Printf("failed to connect database; database-backed endpoints unavailable: %v", err)
+		return nil
+	}
+	return db
+}
+
 func newGinRouter(
 	roomManager *room.Manager,
 	debugSync bool,
 	webSocketConfig transport.WebSocketRuntimeConfig,
+	roomStateCache *cache.RoomStateCache,
 	roomHTTPHandler *transport.RoomHTTPHandler,
 	authHTTPHandler *transport.AuthHTTPHandler,
 	homeHTTPHandler *transport.HomeHTTPHandler,
@@ -153,77 +174,52 @@ func newGinRouter(
 	router.Any("/me/media-progress/*mediaPath", gin.WrapF(progressHTTPHandler.Update))
 	router.Any("/rooms", gin.WrapF(roomHTTPHandler.CreateRoom))
 	router.Any("/rooms/*roomPath", gin.WrapF(roomHTTPHandler.RoomRoute))
-	router.Any("/ws", gin.WrapH(transport.NewWebSocketHandlerWithConfig(roomManager, debugSync, webSocketConfig)))
+	router.Any("/ws", gin.WrapH(transport.NewWebSocketHandlerWithConfigAndRoomStateWriter(
+		roomManager,
+		debugSync,
+		webSocketConfig,
+		roomStateCache,
+	)))
 
 	return router
 }
 
-// newAuthService connects the auth API to PostgreSQL when DATABASE_URL is available.
-func newAuthService(databaseURL string) *auth.Service {
-	if strings.TrimSpace(databaseURL) == "" {
-		log.Print("DATABASE_URL is not set; auth endpoints will return service unavailable")
-		return nil
-	}
-	db, err := store.OpenPostgres(context.Background(), databaseURL)
-	if err != nil {
-		log.Printf("failed to connect database; auth endpoints unavailable: %v", err)
+// newAuthService connects the auth API to the shared PostgreSQL handle when available.
+func newAuthService(db *gorm.DB) *auth.Service {
+	if db == nil {
 		return nil
 	}
 	return auth.NewService(store.NewPostgresUserStore(db))
 }
 
-// newHomeService connects home summary reads to PostgreSQL when DATABASE_URL is available.
-func newHomeService(databaseURL string) *home.Service {
-	if strings.TrimSpace(databaseURL) == "" {
-		log.Print("DATABASE_URL is not set; home endpoints will return service unavailable")
-		return nil
-	}
-	db, err := store.OpenPostgres(context.Background(), databaseURL)
-	if err != nil {
-		log.Printf("failed to connect database; home endpoints unavailable: %v", err)
+// newHomeService connects home summary reads to the shared PostgreSQL handle when available.
+func newHomeService(db *gorm.DB) *home.Service {
+	if db == nil {
 		return nil
 	}
 	return home.NewService(store.NewPostgresHomeStore(db))
 }
 
-// newMediaService connects media catalog APIs to PostgreSQL when DATABASE_URL is available.
-func newMediaService(databaseURL string) *media.Service {
-	if strings.TrimSpace(databaseURL) == "" {
-		log.Print("DATABASE_URL is not set; media endpoints will return service unavailable")
-		return nil
-	}
-	db, err := store.OpenPostgres(context.Background(), databaseURL)
-	if err != nil {
-		log.Printf("failed to connect database; media endpoints unavailable: %v", err)
+// newMediaService connects media catalog APIs to the shared PostgreSQL handle when available.
+func newMediaService(db *gorm.DB) *media.Service {
+	if db == nil {
 		return nil
 	}
 	return media.NewService(store.NewPostgresMediaStore(db))
 }
 
-// newRoomService connects room business APIs to PostgreSQL when DATABASE_URL is available.
-func newRoomService(databaseURL string) (*roomapi.Service, *store.PostgresRoomStore) {
-	if strings.TrimSpace(databaseURL) == "" {
-		log.Print("DATABASE_URL is not set; room endpoints will return service unavailable")
-		return nil, nil
-	}
-	db, err := store.OpenPostgres(context.Background(), databaseURL)
-	if err != nil {
-		log.Printf("failed to connect database; room endpoints unavailable: %v", err)
+// newRoomService connects room business APIs to the shared PostgreSQL handle when available.
+func newRoomService(db *gorm.DB) (*roomapi.Service, *store.PostgresRoomStore) {
+	if db == nil {
 		return nil, nil
 	}
 	roomStore := store.NewPostgresRoomStore(db)
 	return roomapi.NewService(roomStore), roomStore
 }
 
-// newProgressService connects media progress writes to PostgreSQL when DATABASE_URL is available.
-func newProgressService(databaseURL string) *progress.Service {
-	if strings.TrimSpace(databaseURL) == "" {
-		log.Print("DATABASE_URL is not set; progress endpoints will return service unavailable")
-		return nil
-	}
-	db, err := store.OpenPostgres(context.Background(), databaseURL)
-	if err != nil {
-		log.Printf("failed to connect database; progress endpoints unavailable: %v", err)
+// newProgressService connects media progress writes to the shared PostgreSQL handle when available.
+func newProgressService(db *gorm.DB) *progress.Service {
+	if db == nil {
 		return nil
 	}
 	return progress.NewService(store.NewPostgresProgressStore(db))

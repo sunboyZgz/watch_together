@@ -176,7 +176,16 @@ Redis may help with:
 multi-instance fan-out
 presence summaries
 control request deduplication windows
-latest vector cache for reconnect/debug
+latest room_state cache for reconnect/debug
+```
+
+Current Redis use:
+
+```text
+best-effort latest room_state cache
+key: wt:room:state:{roomId}:v1
+ttl: 10m
+write failures do not reject room transitions or broadcasts
 ```
 
 Redis must not become the authoritative room timeline. The in-process room runtime still serializes accepted timeline transitions.

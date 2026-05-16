@@ -1,0 +1,218 @@
+# Server Refactor Next Plan
+
+> Purpose: define the next server refactor sequence after timeline authority, broadcast runtime, and the first Redis room_state cache boundary.
+
+## Current Baseline
+
+The server has already moved past the first timeline refactor milestones:
+
+```text
+Gin routing is in app assembly.
+GORM is the PostgreSQL connection layer, while migrations remain SQL-first.
+Redis infrastructure exists and is optional by default.
+Room sync is modeled as an authoritative server timeline vector.
+Clock sync is available over WebSocket.
+Broadcast fan-out is behind a bounded transport boundary.
+The first Redis-backed feature is best-effort latest room_state cache.
+```
+
+The next work should stabilize these boundaries before adding new product features.
+
+## Authority Terminology
+
+Use these terms consistently:
+
+```text
+authoritative model:
+  realtime.TimelineVector
+
+authoritative runtime binding:
+  room.State
+
+canonical protocol snapshot:
+  protocol.RoomStatePayload / room_state
+
+best-effort cache payload:
+  Redis JSON copy of protocol.RoomStatePayload
+```
+
+`room_state` is not the authority model. It is the WebSocket snapshot that carries the latest authoritative timeline vector plus room/media compatibility fields.
+
+Redis is not authority. Redis may cache the latest `room_state` snapshot, but the in-process room runtime still serializes accepted timeline transitions.
+
+## Phase A: Build And Redis Boundary Stabilization
+
+Goal: make the current Redis cache work boring and safe.
+
+Status on 2026-05-16:
+
+```text
+[x] RoomStateCache no longer references RedisClient directly.
+[x] RedisClient remains owned by internal/cache/redis.go.
+[x] RoomStateCache depends on a narrow cache.JSONStore interface.
+[x] WebSocket transport depends on a latestRoomStateWriter interface, not go-redis.
+[x] REDIS_ADDR empty keeps Redis disabled and server assembly returns nil RedisClient.
+[x] Cache write failures are isolated behind WebSocketHandler.cacheRoomState.
+[ ] Local go test verification is blocked because go.exe is not available in PATH.
+```
+
+Tasks:
+
+```text
+[ ] Verify Go tooling runs from server/ module root. Blocked locally: go.exe is not in PATH.
+[x] Fix any package or IDE issue that reports undefined RedisClient.
+[x] Confirm RedisClient remains owned by internal/cache.
+[x] Confirm transport depends on a narrow latestRoomStateWriter interface, not go-redis.
+[x] Confirm server starts when REDIS_ADDR is empty by code path and existing app test coverage.
+[ ] Confirm server starts when Redis is unavailable and REDIS_REQUIRED=false with go test or local run.
+[ ] Confirm server fails fast when REDIS_REQUIRED=true and Redis is unavailable with go test or local run.
+[x] Confirm room transitions and broadcasts succeed when cache writes fail by code path.
+```
+
+Acceptance:
+
+```text
+go test ./internal/cache ./internal/app ./internal/transport
+```
+
+If the local machine cannot run `go`, document that blocker before marking this phase complete.
+
+## Phase B: Cache Write Semantics
+
+Goal: make the latest room_state cache predictable without changing sync authority.
+
+Tasks:
+
+```text
+[ ] Write latest room_state after join_room snapshot.
+[ ] Write latest room_state after accepted play / pause / seek / set_playback_rate / ended.
+[ ] Write latest room_state after host_left and host_rejoin state refreshes.
+[ ] Keep cache writes best-effort and short-timeout.
+[ ] Do not read Redis to decide host authority, membership, or control permission.
+[ ] Add tests for disabled cache, key format, and transport write point.
+```
+
+Acceptance:
+
+```text
+Redis failures are logged only when debug sync logging is enabled.
+Accepted timeline transitions do not depend on Redis availability.
+```
+
+## Phase C: Canonical Snapshot Direction
+
+Goal: move protocol consumers toward `room_state` as the canonical snapshot while preserving client compatibility.
+
+Tasks:
+
+```text
+[ ] Keep legacy accepted-control events for Android/Web compatibility.
+[ ] Ensure every legacy control payload carries authoritative vector fields.
+[ ] Add or prepare room_state.request for clients that detect missed or stale state.
+[ ] Let room_state.request return the latest room.State as protocol.RoomStatePayload.
+[ ] Do not make clients infer authority from event type alone.
+```
+
+Important wording:
+
+```text
+Correct: room_state carries the authoritative timeline vector.
+Incorrect: room_state is the timeline authority.
+```
+
+Acceptance:
+
+```text
+Late join, reconnect, and explicit resync can recover from one latest timeline snapshot.
+Clients can ignore stale seq and request a fresh snapshot without reconnecting.
+```
+
+## Phase D: Seq Diagnostics And Request Id Dedup
+
+Goal: improve race and retry behavior without breaking existing clients.
+
+Recommended order:
+
+```text
+1. Add soft client seq diagnostics.
+2. Add structured transition logs.
+3. Add optional requestId to control payloads.
+4. Add short-TTL Redis dedup only after requestId exists.
+```
+
+Soft seq mode:
+
+```text
+client seq is recorded for logs and debugging
+client seq does not reject controls yet
+server seq remains the only authoritative version
+```
+
+Future strict mode can reject stale controls only after clients are known to send reliable expectations.
+
+Request id dedup candidate key:
+
+```text
+wt:room:{roomId}:control_req:{requestId}
+```
+
+Do not store durable control history only in Redis.
+
+## Phase E: App And Store Assembly Cleanup
+
+Goal: reduce infrastructure duplication while preserving API behavior.
+
+Tasks:
+
+```text
+[x] Open PostgreSQL once during app assembly when DATABASE_URL is configured.
+[x] Share the same *gorm.DB across auth, home, media, room, and progress stores.
+[ ] Keep SQL-first migrations as the source of schema truth.
+[ ] Keep service DTOs separate from GORM model structs.
+[ ] Keep complex read queries as raw SQL when clearer than GORM chains.
+```
+
+Acceptance:
+
+```text
+HTTP API paths and envelopes stay unchanged.
+Room creation, join, detail, media search, home summary, auth, and progress tests keep passing.
+```
+
+## Phase F: Test And Documentation Closeout
+
+Goal: finish each refactor step with a small safety net.
+
+Required checks:
+
+```text
+[ ] go test ./...
+[ ] docs/refactor updated when a phase boundary changes.
+[ ] docs/websocket-event-protocol.md updated only when the external protocol changes.
+[ ] docs/backend-api-contract.md updated only when HTTP contract changes.
+[ ] Redis keys and TTLs documented when new Redis use cases are added.
+```
+
+## Do Not Do In This Pass
+
+```text
+Do not make Redis the timeline authority.
+Do not add multi-instance fan-out before room authority placement is designed.
+Do not add buffering policy without explicit product rules.
+Do not remove legacy control broadcasts until clients migrate.
+Do not remove room.State.Paused until compatibility views are fully migrated.
+Do not add continuous current-position broadcasts.
+```
+
+## Suggested Execution Order
+
+```text
+1. Phase A: build and Redis boundary stabilization
+2. Phase B: cache write semantics
+3. Phase E: app and store assembly cleanup
+4. Phase C: canonical snapshot direction
+5. Phase D: seq diagnostics and request id dedup
+6. Phase F: closeout after each step
+```
+
+This order keeps the server buildable, avoids changing client behavior too early, and preserves the central rule: synchronize the room timeline, not individual players.

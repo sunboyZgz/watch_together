@@ -25,6 +25,7 @@ type WebSocketHandler struct {
 	clientOptions     room.ClientConnectionOptions
 	connectionLimit   *semaphore.Weighted
 	maxRoomClients    int
+	roomStateWriter   latestRoomStateWriter
 }
 
 const (
@@ -42,6 +43,10 @@ type WebSocketRuntimeConfig struct {
 	ClientOutboxCapacity      int
 	MaxConnections            int64
 	MaxRoomClients            int
+}
+
+type latestRoomStateWriter interface {
+	SetRoomState(ctx context.Context, roomID string, state protocol.RoomStatePayload) error
 }
 
 type protocolMessageError struct {
@@ -64,6 +69,17 @@ func NewWebSocketHandlerWithConfig(
 	config WebSocketRuntimeConfig,
 ) *WebSocketHandler {
 	return newWebSocketHandler(roomManager, debugSync, defaultHeartbeatInterval, defaultHeartbeatTimeout, config)
+}
+
+func NewWebSocketHandlerWithConfigAndRoomStateWriter(
+	roomManager *room.Manager,
+	debugSync bool,
+	config WebSocketRuntimeConfig,
+	roomStateWriter latestRoomStateWriter,
+) *WebSocketHandler {
+	handler := newWebSocketHandler(roomManager, debugSync, defaultHeartbeatInterval, defaultHeartbeatTimeout, config)
+	handler.roomStateWriter = roomStateWriter
+	return handler
 }
 
 func newWebSocketHandler(
@@ -335,6 +351,7 @@ func (h *WebSocketHandler) handleJoinRoom(
 	}); err != nil {
 		return err
 	}
+	h.cacheRoomState(joinResult.State)
 	if joinResult.HostChanged {
 		h.broadcastRoomState(room.RemoveClientResult{
 			State:     joinResult.State,
@@ -507,6 +524,7 @@ func (h *WebSocketHandler) handleControlEvent(
 	}
 
 	envelope := buildEnvelope(state)
+	h.cacheRoomState(state)
 	stats, err := h.broadcaster.Broadcast(ctx, roomClientWriters(clients), envelope)
 	if h.debugSync {
 		log.Printf(
@@ -580,10 +598,24 @@ func (h *WebSocketHandler) broadcastRoomState(result room.RemoveClientResult) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
+	h.cacheRoomState(result.State)
 	_ = h.broadcastEnvelope(ctx, result.Remaining, protocol.Envelope{
 		Type: protocol.TypeRoomState,
 		Payload: mustJSONRaw(roomStatePayload(result.State)),
 	})
+}
+
+func (h *WebSocketHandler) cacheRoomState(state room.State) {
+	if h.roomStateWriter == nil || state.RoomID == "" {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+
+	payload := roomStatePayload(state)
+	if err := h.roomStateWriter.SetRoomState(ctx, state.RoomID, payload); err != nil && h.debugSync {
+		log.Printf("room_state cache write failed room=%s seq=%d err=%v", state.RoomID, state.Seq, err)
+	}
 }
 
 func clientsWithout(clients []*room.ClientConnection, excluded *room.ClientConnection) []*room.ClientConnection {

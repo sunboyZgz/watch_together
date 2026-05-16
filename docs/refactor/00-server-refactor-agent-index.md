@@ -20,8 +20,10 @@ For any server refactor agent, read these files first:
 7. docs/refactor/06-websocket-sync-contract.md
 8. docs/refactor/07-server-timeline-business-integration.md
 9. docs/refactor/08-server-broadcast-runtime.md
-10. docs/sync/00-index.md
-11. docs/sync/07-agent-brief-checklists-and-anti-patterns.md
+10. docs/refactor/09-server-redis-room-state-cache.md
+11. docs/refactor/10-server-refactor-next-plan.md
+12. docs/sync/00-index.md
+13. docs/sync/07-agent-brief-checklists-and-anti-patterns.md
 ```
 
 When changing timeline structs, transitions, or WebSocket behavior, also read:
@@ -70,7 +72,8 @@ The current server already has:
 HTTP APIs for auth, home, media, room, and progress
 WebSocket room sync
 in-memory room manager
-PostgreSQL persistence through database/sql and pgx
+PostgreSQL persistence through GORM-backed stores and SQL-first migrations
+optional Redis infrastructure and latest room_state cache
 room lifecycle cleanup
 host-only playback controls
 heartbeat
@@ -132,6 +135,8 @@ phase 4: timeline model and WebSocket protocol
 phase 5: tests and compatibility cleanup
 phase 6: timeline business integration
 phase 7: broadcast runtime and high-concurrency boundary
+phase 8: Redis latest room_state cache
+phase 9: boundary stabilization, app/store cleanup, resync and dedup planning
 ```
 
 Each phase should keep the server buildable.
