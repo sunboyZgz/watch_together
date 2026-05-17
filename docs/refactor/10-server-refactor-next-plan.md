@@ -34,6 +34,9 @@ canonical protocol snapshot:
 
 best-effort cache payload:
   Redis JSON copy of protocol.RoomStatePayload
+
+current Redis DB assignment:
+  DB 0 for latest room_state cache, pinned in code by cache.RoomStateRedisDB
 ```
 
 `room_state` is not the authority model. It is the WebSocket snapshot that carries the latest authoritative timeline vector plus room/media compatibility fields.

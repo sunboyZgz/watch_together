@@ -50,7 +50,7 @@ type Server struct {
 func NewServer(config Config) *Server {
 	serverCtx, cancel := context.WithCancel(context.Background())
 	roomManager := room.NewManager()
-	redisClient := newRedisClient(config.Redis)
+	redisClient := newRedisClient("room_state", cache.RoomStateRedisConfig(config.Redis))
 	var roomStateCache *cache.RoomStateCache
 	if redisClient != nil {
 		roomStateCache = cache.NewRoomStateCache(redisClient, 0)
@@ -123,21 +123,21 @@ func NewServer(config Config) *Server {
 	}
 }
 
-func newRedisClient(config cache.RedisConfig) *cache.RedisClient {
+func newRedisClient(name string, config cache.RedisConfig) *cache.RedisClient {
 	if !config.Enabled() {
-		log.Print("REDIS_ADDR is not set; redis-backed caches and runtime metadata are disabled")
+		log.Printf("REDIS_ADDR is not set; redis-backed %s cache is disabled", name)
 		return nil
 	}
 
 	client, err := cache.OpenRedis(context.Background(), config)
 	if err != nil {
 		if config.Required {
-			log.Fatalf("failed to connect required redis: %v", err)
+			log.Fatalf("failed to connect required redis for %s: %v", name, err)
 		}
-		log.Printf("failed to connect redis; redis-backed features disabled: %v", err)
+		log.Printf("failed to connect redis for %s; redis-backed feature disabled: %v", name, err)
 		return nil
 	}
-	log.Printf("connected redis addr=%s db=%d tls=%t", config.Addr, config.DB, config.TLSEnabled)
+	log.Printf("connected redis name=%s addr=%s db=%d tls=%t", name, config.Addr, config.DB, config.TLSEnabled)
 	return client
 }
 

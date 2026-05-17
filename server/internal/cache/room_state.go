@@ -7,7 +7,11 @@ import (
 	"watch_together/server/internal/protocol"
 )
 
-const defaultRoomStateTTL = 10 * time.Minute
+const (
+	// RoomStateRedisDB is the explicit Redis database for the latest room_state cache.
+	RoomStateRedisDB    = 0
+	defaultRoomStateTTL = 10 * time.Minute
+)
 
 type RoomStateCache struct {
 	store JSONStore
@@ -18,6 +22,11 @@ type JSONStore interface {
 	GetJSON(ctx context.Context, key string, dest any) (bool, error)
 	SetJSON(ctx context.Context, key string, value any, ttl time.Duration) error
 	Delete(ctx context.Context, keys ...string) error
+}
+
+func RoomStateRedisConfig(config RedisConfig) RedisConfig {
+	config.DB = RoomStateRedisDB
+	return config
 }
 
 func NewRoomStateCache(store JSONStore, ttl time.Duration) *RoomStateCache {

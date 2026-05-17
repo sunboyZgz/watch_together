@@ -28,6 +28,12 @@ Key:
 wt:room:state:{roomId}:v1
 ```
 
+Redis database:
+
+```text
+DB 0, pinned in code by cache.RoomStateRedisDB
+```
+
 Value:
 
 ```text

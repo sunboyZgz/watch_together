@@ -15,9 +15,9 @@ services:
     image: redis:7.2-alpine
     container_name: anime-watch-redis
     restart: unless-stopped
-    command: redis-server --appendonly yes
+    command: redis-server --appendonly yes --port 6380 --requirepass ${REDIS_PASSWORD:-app}
     ports:
-      - "6379:6379"
+      - "6380:6380"
     volumes:
       - redis_data:/data
   minio:

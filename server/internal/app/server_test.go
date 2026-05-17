@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"watch_together/server/internal/cache"
 	"watch_together/server/internal/room"
 	"watch_together/server/internal/transport"
 )
@@ -60,6 +61,17 @@ func TestNewServerKeepsRedisOptionalWhenUnconfigured(t *testing.T) {
 
 	if server.RedisClient() != nil {
 		t.Fatalf("expected nil redis client when REDIS_ADDR is not configured")
+	}
+}
+
+func TestRoomStateRedisConfigPinsDBZero(t *testing.T) {
+	config := cache.RoomStateRedisConfig(RedisConfig{
+		Addr: "127.0.0.1:6380",
+		DB:   9,
+	})
+
+	if config.DB != cache.RoomStateRedisDB {
+		t.Fatalf("expected room_state redis db %d, got %d", cache.RoomStateRedisDB, config.DB)
 	}
 }
 

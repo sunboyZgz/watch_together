@@ -110,7 +110,7 @@ func TestLoadServerRuntimeConfigLoadsRedisSettings(t *testing.T) {
 	mustWriteConfigFile(
 		t,
 		filepath.Join(configDir, ".env"),
-		"REDIS_ADDR=127.0.0.1:6379\nREDIS_USERNAME=default\nREDIS_PASSWORD=secret\nREDIS_DB=2\nREDIS_TLS_ENABLED=true\nREDIS_REQUIRED=true\n",
+		"REDIS_ADDR=127.0.0.1:6380\nREDIS_USERNAME=default\nREDIS_PASSWORD=secret\nREDIS_DB=2\nREDIS_TLS_ENABLED=true\nREDIS_REQUIRED=true\n",
 	)
 
 	cfg, err := LoadServerRuntimeConfig(configDir)
@@ -118,7 +118,7 @@ func TestLoadServerRuntimeConfigLoadsRedisSettings(t *testing.T) {
 		t.Fatalf("load runtime config: %v", err)
 	}
 
-	if cfg.Redis.Addr != "127.0.0.1:6379" {
+	if cfg.Redis.Addr != "127.0.0.1:6380" {
 		t.Fatalf("expected redis addr, got %q", cfg.Redis.Addr)
 	}
 	if cfg.Redis.Username != "default" {

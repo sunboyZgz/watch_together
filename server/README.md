@@ -408,7 +408,9 @@ docker compose up -d
 - database: `anime_watch_dev`
 - Redis image: `redis:7.2-alpine`
 - Redis host: `127.0.0.1`
-- Redis port: `6379`
+- Redis port: `6380`
+- Redis password: `watch_together_redis_dev`
+- Redis DB: `0` for latest room_state cache
 - MinIO API: `http://127.0.0.1:9100`
 - MinIO Console: `http://127.0.0.1:9101`
 - MinIO root user: `minioadmin`
