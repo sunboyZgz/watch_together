@@ -26,6 +26,7 @@ type WebSocketHandler struct {
 	connectionLimit   *semaphore.Weighted
 	maxRoomClients    int
 	roomStateWriter   latestRoomStateWriter
+	controlDeduper    *controlRequestDeduper
 }
 
 const (
@@ -34,6 +35,7 @@ const (
 	defaultBroadcastConcurrencyLimit = int64(64)
 	defaultBroadcastTimeout          = 5 * time.Second
 	defaultBroadcastEnqueueTimeout   = 3 * time.Second
+	defaultControlRequestDedupTTL    = 2 * time.Minute
 )
 
 type WebSocketRuntimeConfig struct {
@@ -135,6 +137,11 @@ func newWebSocketHandlerWithClock(
 		},
 		connectionLimit: connectionLimit,
 		maxRoomClients:  config.MaxRoomClients,
+		controlDeduper: newControlRequestDeduper(
+			defaultControlRequestDedupTTL,
+			defaultControlRequestDedupMaxEntries,
+			defaultControlRequestDedupShards,
+		),
 	}
 }
 
@@ -253,6 +260,8 @@ func (h *WebSocketHandler) handleMessage(
 	switch envelope.Type {
 	case protocol.TypeJoinRoom:
 		return h.handleJoinRoom(ctx, client, envelope)
+	case protocol.TypeRoomStateRequest:
+		return h.handleRoomStateRequest(ctx, client, envelope)
 	case protocol.TypePlay:
 		return h.handlePlay(ctx, client, envelope)
 	case protocol.TypePause:
@@ -299,10 +308,51 @@ func (h *WebSocketHandler) handleClockSyncPing(
 	return client.WriteJSON(ctx, protocol.Envelope{
 		Type: protocol.TypeClockSyncPong,
 		Payload: mustJSONRaw(protocol.ClockSyncPongPayload{
-			ServerTimeMs:      serverTimeMs,
+			ServerTimeMs:     serverTimeMs,
 			ClientSendMonoMs: payload.ClientSendMonoMs,
 		}),
 	})
+}
+
+// handleRoomStateRequest lets joined clients explicitly recover the latest room snapshot
+// without reconnecting. The snapshot is read from the authoritative in-process room state.
+func (h *WebSocketHandler) handleRoomStateRequest(
+	ctx context.Context,
+	client *room.ClientConnection,
+	envelope protocol.Envelope,
+) error {
+	payload, err := protocol.DecodeRoomStateRequest(envelope)
+	if err != nil {
+		return err
+	}
+	client.MarkHeartbeatAck(h.clock.Now())
+	if client.RoomID() != payload.RoomID || client.UserID() != payload.UserID {
+		return protocolMessageError{
+			roomID:  payload.RoomID,
+			message: "room identity mismatch",
+		}
+	}
+
+	existingRoom, ok := h.roomManager.Get(payload.RoomID)
+	if !ok {
+		return protocolMessageError{
+			roomID:  payload.RoomID,
+			message: "room not found",
+		}
+	}
+
+	state := existingRoom.StateSnapshot()
+	if h.debugSync {
+		log.Printf(
+			"sync room_state_request room=%s user=%s client_seq=%d server_seq=%d",
+			payload.RoomID,
+			payload.UserID,
+			payload.Seq,
+			state.Seq,
+		)
+	}
+	h.cacheRoomState(state)
+	return h.writeRoomState(ctx, client, state)
 }
 
 // handleJoinRoom attaches the client to an existing room and returns the current
@@ -345,10 +395,7 @@ func (h *WebSocketHandler) handleJoinRoom(
 		_ = joinResult.ReplacedClient.CloseNow()
 	}
 
-	if err := client.WriteJSON(ctx, protocol.Envelope{
-		Type: protocol.TypeRoomState,
-		Payload: mustJSONRaw(roomStatePayload(joinResult.State)),
-	}); err != nil {
+	if err := h.writeRoomState(ctx, client, joinResult.State); err != nil {
 		return err
 	}
 	h.cacheRoomState(joinResult.State)
@@ -376,16 +423,24 @@ func (h *WebSocketHandler) handlePlay(
 		return err
 	}
 	client.MarkHeartbeatAck(h.clock.Now())
-	h.logControlReceived(protocol.TypePlay, payload.RoomID, payload.UserID, payload.PositionMs, payload.Seq, 0)
+	meta := controlEventMeta{
+		UserID:     payload.UserID,
+		RequestID:  payload.RequestID,
+		PositionMs: payload.PositionMs,
+		ClientSeq:  payload.Seq,
+	}
+	h.logControlReceived(protocol.TypePlay, payload.RoomID, meta, 0)
 	return h.handleControlEvent(
 		ctx,
+		client,
 		protocol.TypePlay,
 		payload.RoomID,
+		meta,
 		func(existingRoom *room.Room) (room.State, []*room.ClientConnection, error) {
 			return existingRoom.ApplyPlay(payload.UserID, payload.PositionMs)
 		},
 		func(state room.State) protocol.Envelope {
-			return controlEnvelopeFromState(protocol.TypePlay, state)
+			return controlEnvelopeFromState(protocol.TypePlay, state, payload.RequestID)
 		},
 	)
 }
@@ -401,16 +456,24 @@ func (h *WebSocketHandler) handlePause(
 		return err
 	}
 	client.MarkHeartbeatAck(h.clock.Now())
-	h.logControlReceived(protocol.TypePause, payload.RoomID, payload.UserID, payload.PositionMs, payload.Seq, 0)
+	meta := controlEventMeta{
+		UserID:     payload.UserID,
+		RequestID:  payload.RequestID,
+		PositionMs: payload.PositionMs,
+		ClientSeq:  payload.Seq,
+	}
+	h.logControlReceived(protocol.TypePause, payload.RoomID, meta, 0)
 	return h.handleControlEvent(
 		ctx,
+		client,
 		protocol.TypePause,
 		payload.RoomID,
+		meta,
 		func(existingRoom *room.Room) (room.State, []*room.ClientConnection, error) {
 			return existingRoom.ApplyPause(payload.UserID, payload.PositionMs)
 		},
 		func(state room.State) protocol.Envelope {
-			return controlEnvelopeFromState(protocol.TypePause, state)
+			return controlEnvelopeFromState(protocol.TypePause, state, payload.RequestID)
 		},
 	)
 }
@@ -426,16 +489,24 @@ func (h *WebSocketHandler) handleSeek(
 		return err
 	}
 	client.MarkHeartbeatAck(h.clock.Now())
-	h.logControlReceived(protocol.TypeSeek, payload.RoomID, payload.UserID, payload.PositionMs, payload.Seq, 0)
+	meta := controlEventMeta{
+		UserID:     payload.UserID,
+		RequestID:  payload.RequestID,
+		PositionMs: payload.PositionMs,
+		ClientSeq:  payload.Seq,
+	}
+	h.logControlReceived(protocol.TypeSeek, payload.RoomID, meta, 0)
 	return h.handleControlEvent(
 		ctx,
+		client,
 		protocol.TypeSeek,
 		payload.RoomID,
+		meta,
 		func(existingRoom *room.Room) (room.State, []*room.ClientConnection, error) {
 			return existingRoom.ApplySeek(payload.UserID, payload.PositionMs)
 		},
 		func(state room.State) protocol.Envelope {
-			return controlEnvelopeFromState(protocol.TypeSeek, state)
+			return controlEnvelopeFromState(protocol.TypeSeek, state, payload.RequestID)
 		},
 	)
 }
@@ -451,23 +522,24 @@ func (h *WebSocketHandler) handleSetPlaybackRate(
 		return err
 	}
 	client.MarkHeartbeatAck(h.clock.Now())
-	h.logControlReceived(
-		protocol.TypeSetPlaybackRate,
-		payload.RoomID,
-		payload.UserID,
-		payload.PositionMs,
-		payload.Seq,
-		payload.PlaybackRate,
-	)
+	meta := controlEventMeta{
+		UserID:     payload.UserID,
+		RequestID:  payload.RequestID,
+		PositionMs: payload.PositionMs,
+		ClientSeq:  payload.Seq,
+	}
+	h.logControlReceived(protocol.TypeSetPlaybackRate, payload.RoomID, meta, payload.PlaybackRate)
 	return h.handleControlEvent(
 		ctx,
+		client,
 		protocol.TypeSetPlaybackRate,
 		payload.RoomID,
+		meta,
 		func(existingRoom *room.Room) (room.State, []*room.ClientConnection, error) {
 			return existingRoom.ApplyPlaybackRate(payload.UserID, payload.PlaybackRate)
 		},
 		func(state room.State) protocol.Envelope {
-			return controlEnvelopeFromState(protocol.TypeSetPlaybackRate, state)
+			return controlEnvelopeFromState(protocol.TypeSetPlaybackRate, state, payload.RequestID)
 		},
 	)
 }
@@ -483,24 +555,41 @@ func (h *WebSocketHandler) handleEnded(
 		return err
 	}
 	client.MarkHeartbeatAck(h.clock.Now())
-	h.logControlReceived(protocol.TypeEnded, payload.RoomID, payload.UserID, payload.PositionMs, payload.Seq, 0)
+	meta := controlEventMeta{
+		UserID:     payload.UserID,
+		RequestID:  payload.RequestID,
+		PositionMs: payload.PositionMs,
+		ClientSeq:  payload.Seq,
+	}
+	h.logControlReceived(protocol.TypeEnded, payload.RoomID, meta, 0)
 	return h.handleControlEvent(
 		ctx,
+		client,
 		protocol.TypeEnded,
 		payload.RoomID,
+		meta,
 		func(existingRoom *room.Room) (room.State, []*room.ClientConnection, error) {
 			return existingRoom.ApplyEnded(payload.UserID, payload.PositionMs)
 		},
 		func(state room.State) protocol.Envelope {
-			return controlEnvelopeFromState(protocol.TypeEnded, state)
+			return controlEnvelopeFromState(protocol.TypeEnded, state, payload.RequestID)
 		},
 	)
 }
 
+type controlEventMeta struct {
+	UserID     string
+	RequestID  string
+	PositionMs int64
+	ClientSeq  int64
+}
+
 func (h *WebSocketHandler) handleControlEvent(
 	ctx context.Context,
+	client *room.ClientConnection,
 	eventType string,
 	roomID string,
+	meta controlEventMeta,
 	apply func(existingRoom *room.Room) (room.State, []*room.ClientConnection, error),
 	buildEnvelope func(state room.State) protocol.Envelope,
 ) error {
@@ -512,8 +601,25 @@ func (h *WebSocketHandler) handleControlEvent(
 		}
 	}
 
+	previous := existingRoom.StateSnapshot()
+	if meta.RequestID != "" && !h.reserveControlRequest(roomID, meta.RequestID, h.clock.Now()) {
+		if h.debugSync {
+			log.Printf(
+				"sync control_duplicate room=%s type=%s user=%s request_id=%q client_seq=%d server_seq=%d",
+				roomID,
+				eventType,
+				meta.UserID,
+				meta.RequestID,
+				meta.ClientSeq,
+				previous.Seq,
+			)
+		}
+		return h.writeRoomState(ctx, client, previous)
+	}
+
 	state, clients, err := apply(existingRoom)
 	if err != nil {
+		h.forgetControlRequest(roomID, meta.RequestID)
 		if errors.Is(err, room.ErrNotHost) {
 			return protocolMessageError{
 				roomID:  roomID,
@@ -523,6 +629,7 @@ func (h *WebSocketHandler) handleControlEvent(
 		return err
 	}
 
+	h.logTimelineTransition(eventType, roomID, meta, previous, state)
 	envelope := buildEnvelope(state)
 	h.cacheRoomState(state)
 	stats, err := h.broadcaster.Broadcast(ctx, roomClientWriters(clients), envelope)
@@ -553,9 +660,7 @@ func (h *WebSocketHandler) handleControlEvent(
 func (h *WebSocketHandler) logControlReceived(
 	eventType string,
 	roomID string,
-	userID string,
-	positionMs int64,
-	seq int64,
+	meta controlEventMeta,
 	playbackRate float64,
 ) {
 	if !h.debugSync {
@@ -563,23 +668,59 @@ func (h *WebSocketHandler) logControlReceived(
 	}
 	if playbackRate > 0 {
 		log.Printf(
-			"sync control received type=%s room=%s user=%s pos=%d seq=%d rate=%.2f",
+			"sync control received type=%s room=%s user=%s pos=%d seq=%d rate=%.2f request_id=%q",
 			eventType,
 			roomID,
-			userID,
-			positionMs,
-			seq,
+			meta.UserID,
+			meta.PositionMs,
+			meta.ClientSeq,
 			playbackRate,
+			meta.RequestID,
 		)
 		return
 	}
 	log.Printf(
-		"sync control received type=%s room=%s user=%s pos=%d seq=%d",
+		"sync control received type=%s room=%s user=%s pos=%d seq=%d request_id=%q",
 		eventType,
 		roomID,
-		userID,
-		positionMs,
-		seq,
+		meta.UserID,
+		meta.PositionMs,
+		meta.ClientSeq,
+		meta.RequestID,
+	)
+}
+
+func (h *WebSocketHandler) logTimelineTransition(
+	eventType string,
+	roomID string,
+	meta controlEventMeta,
+	previous room.State,
+	next room.State,
+) {
+	if !h.debugSync {
+		return
+	}
+	log.Printf(
+		"sync timeline_transition room=%s media=%s type=%s user=%s request_id=%q client_seq=%d previous_seq=%d new_seq=%d client_pos=%d previous_pos=%d new_pos=%d previous_velocity=%.2f new_velocity=%.2f previous_rate=%.2f new_rate=%.2f previous_paused=%t new_paused=%t reason=%s server_time_ms=%d",
+		roomID,
+		next.MediaID,
+		eventType,
+		meta.UserID,
+		meta.RequestID,
+		meta.ClientSeq,
+		previous.Seq,
+		next.Seq,
+		meta.PositionMs,
+		previous.PositionMs,
+		next.PositionMs,
+		previous.Velocity,
+		next.Velocity,
+		previous.PlaybackRate,
+		next.PlaybackRate,
+		previous.Paused,
+		next.Paused,
+		next.Reason,
+		next.ServerTimeMs,
 	)
 }
 
@@ -592,6 +733,17 @@ func (h *WebSocketHandler) broadcastEnvelope(
 	return err
 }
 
+func (h *WebSocketHandler) writeRoomState(
+	ctx context.Context,
+	client *room.ClientConnection,
+	state room.State,
+) error {
+	return client.WriteJSON(ctx, protocol.Envelope{
+		Type:    protocol.TypeRoomState,
+		Payload: mustJSONRaw(roomStatePayload(state)),
+	})
+}
+
 // broadcastRoomState pushes the latest authority snapshot after membership changes.
 // Disconnect cleanup uses a fresh context because the request context may already be canceled.
 func (h *WebSocketHandler) broadcastRoomState(result room.RemoveClientResult) {
@@ -600,7 +752,7 @@ func (h *WebSocketHandler) broadcastRoomState(result room.RemoveClientResult) {
 
 	h.cacheRoomState(result.State)
 	_ = h.broadcastEnvelope(ctx, result.Remaining, protocol.Envelope{
-		Type: protocol.TypeRoomState,
+		Type:    protocol.TypeRoomState,
 		Payload: mustJSONRaw(roomStatePayload(result.State)),
 	})
 }
@@ -629,6 +781,16 @@ func clientsWithout(clients []*room.ClientConnection, excluded *room.ClientConne
 	return filtered
 }
 
+// Attempt to register a control request. If this request has been processed recently, return false; if it is a new request, register it and return true.
+func (h *WebSocketHandler) reserveControlRequest(roomID string, requestID string, now time.Time) bool {
+	return h.controlDeduper.Reserve(roomID, requestID, now)
+}
+
+// If a RequestID indicates that a request has failed to complete the entire process of a service
+func (h *WebSocketHandler) forgetControlRequest(roomID string, requestID string) {
+	h.controlDeduper.Forget(roomID, requestID)
+}
+
 func roomStatePayload(state room.State) protocol.RoomStatePayload {
 	view := newRoomSyncView(state)
 	return protocol.RoomStatePayload{
@@ -647,32 +809,32 @@ func roomStatePayload(state room.State) protocol.RoomStatePayload {
 	}
 }
 
-func controlEnvelopeFromState(eventType string, state room.State) protocol.Envelope {
+func controlEnvelopeFromState(eventType string, state room.State, requestID string) protocol.Envelope {
 	switch eventType {
 	case protocol.TypePlay:
 		return protocol.Envelope{
 			Type:    protocol.TypePlay,
-			Payload: mustJSONRaw(playPayloadFromState(state)),
+			Payload: mustJSONRaw(playPayloadFromState(state, requestID)),
 		}
 	case protocol.TypePause:
 		return protocol.Envelope{
 			Type:    protocol.TypePause,
-			Payload: mustJSONRaw(pausePayloadFromState(state)),
+			Payload: mustJSONRaw(pausePayloadFromState(state, requestID)),
 		}
 	case protocol.TypeSeek:
 		return protocol.Envelope{
 			Type:    protocol.TypeSeek,
-			Payload: mustJSONRaw(seekPayloadFromState(state)),
+			Payload: mustJSONRaw(seekPayloadFromState(state, requestID)),
 		}
 	case protocol.TypeSetPlaybackRate:
 		return protocol.Envelope{
 			Type:    protocol.TypeSetPlaybackRate,
-			Payload: mustJSONRaw(setPlaybackRatePayloadFromState(state)),
+			Payload: mustJSONRaw(setPlaybackRatePayloadFromState(state, requestID)),
 		}
 	case protocol.TypeEnded:
 		return protocol.Envelope{
 			Type:    protocol.TypeEnded,
-			Payload: mustJSONRaw(endedPayloadFromState(state)),
+			Payload: mustJSONRaw(endedPayloadFromState(state, requestID)),
 		}
 	default:
 		return protocol.Envelope{
@@ -682,62 +844,67 @@ func controlEnvelopeFromState(eventType string, state room.State) protocol.Envel
 	}
 }
 
-func playPayloadFromState(state room.State) protocol.PlayPayload {
+func playPayloadFromState(state room.State, requestID string) protocol.PlayPayload {
 	return protocol.PlayPayload{
 		RoomID:       state.RoomID,
 		UserID:       state.HostUserID,
+		RequestID:    requestID,
 		PositionMs:   state.PositionMs,
 		Velocity:     state.Velocity,
-		ServerTimeMs:  state.ServerTimeMs,
+		ServerTimeMs: state.ServerTimeMs,
 		Reason:       state.Reason,
 		Seq:          state.Seq,
 	}
 }
 
-func pausePayloadFromState(state room.State) protocol.PausePayload {
+func pausePayloadFromState(state room.State, requestID string) protocol.PausePayload {
 	return protocol.PausePayload{
 		RoomID:       state.RoomID,
 		UserID:       state.HostUserID,
+		RequestID:    requestID,
 		PositionMs:   state.PositionMs,
 		Velocity:     state.Velocity,
-		ServerTimeMs:  state.ServerTimeMs,
+		ServerTimeMs: state.ServerTimeMs,
 		Reason:       state.Reason,
 		Seq:          state.Seq,
 	}
 }
 
-func seekPayloadFromState(state room.State) protocol.SeekPayload {
+func seekPayloadFromState(state room.State, requestID string) protocol.SeekPayload {
 	return protocol.SeekPayload{
 		RoomID:       state.RoomID,
 		UserID:       state.HostUserID,
+		RequestID:    requestID,
 		PositionMs:   state.PositionMs,
 		Velocity:     state.Velocity,
-		ServerTimeMs:  state.ServerTimeMs,
+		ServerTimeMs: state.ServerTimeMs,
 		Reason:       state.Reason,
 		Seq:          state.Seq,
 	}
 }
 
-func setPlaybackRatePayloadFromState(state room.State) protocol.SetPlaybackRatePayload {
+func setPlaybackRatePayloadFromState(state room.State, requestID string) protocol.SetPlaybackRatePayload {
 	return protocol.SetPlaybackRatePayload{
 		RoomID:       state.RoomID,
 		UserID:       state.HostUserID,
+		RequestID:    requestID,
 		PositionMs:   state.PositionMs,
 		Velocity:     state.Velocity,
-		ServerTimeMs:  state.ServerTimeMs,
+		ServerTimeMs: state.ServerTimeMs,
 		Reason:       state.Reason,
 		PlaybackRate: state.PlaybackRate,
 		Seq:          state.Seq,
 	}
 }
 
-func endedPayloadFromState(state room.State) protocol.EndedPayload {
+func endedPayloadFromState(state room.State, requestID string) protocol.EndedPayload {
 	return protocol.EndedPayload{
 		RoomID:       state.RoomID,
 		UserID:       state.HostUserID,
+		RequestID:    requestID,
 		PositionMs:   state.PositionMs,
 		Velocity:     state.Velocity,
-		ServerTimeMs:  state.ServerTimeMs,
+		ServerTimeMs: state.ServerTimeMs,
 		Reason:       state.Reason,
 		Seq:          state.Seq,
 	}

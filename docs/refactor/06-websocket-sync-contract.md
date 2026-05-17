@@ -38,6 +38,7 @@ join
 reconnect
 host disconnect / host reconnect
 membership-triggered state refresh
+explicit room_state.request resync
 ```
 
 Payload:
@@ -68,6 +69,33 @@ ended = room/media completion view
 mediaDurationMs = optional media bound used by server timeline policy
 ```
 
+## Explicit Resync
+
+Clients can request the latest canonical snapshot without reconnecting:
+
+```json
+{
+  "type": "room_state.request",
+  "payload": {
+    "roomId": "ROOM01",
+    "userId": "user_a",
+    "seq": 5
+  }
+}
+```
+
+Server behavior:
+
+```text
+the client must already be joined as the same roomId + userId
+the server reads the latest in-process room.State
+the server replies only to the requesting client with room_state
+the server may log client seq vs server seq for diagnostics
+the server does not read Redis and does not broadcast this response
+```
+
+`seq` in the request is the client's last known server seq. It is diagnostic data, not an optimistic-lock precondition.
+
 ## Control Events
 
 The server still emits legacy control event types for Android/Web compatibility:
@@ -91,6 +119,35 @@ seq
 ```
 
 `set_playback_rate` also includes `playbackRate`.
+
+Control requests may include optional `requestId`:
+
+```json
+{
+  "type": "play",
+  "payload": {
+    "roomId": "ROOM01",
+    "userId": "user_a",
+    "requestId": "client-generated-id",
+    "positionMs": 120000,
+    "seq": 5
+  }
+}
+```
+
+Current server behavior:
+
+```text
+requestId is optional and old clients can omit it
+accepted-control broadcasts echo requestId when provided
+dedup is one-process short-TTL dedup by roomId + requestId
+the in-process dedup set is sharded and bounded
+if the local dedup set is saturated, the server favors availability and lets the control proceed
+duplicates return the latest room_state to the requester instead of advancing seq again
+cross-instance Redis dedup is deferred until multi-instance room authority is designed
+```
+
+Client `seq` on control requests is soft diagnostic data. The server logs it with previous/new server seq but does not reject stale seq yet.
 
 Known server reasons in this branch:
 
@@ -231,6 +288,7 @@ clock_sync: server-time estimation
 | --- | --- |
 | `join_room` | client -> server |
 | `room_state` | server -> client |
+| `room_state.request` | client -> server |
 | `play` | client -> server, server -> clients |
 | `pause` | client -> server, server -> clients |
 | `seek` | client -> server, server -> clients |

@@ -40,6 +40,25 @@ func DecodeJoinRoom(envelope Envelope) (JoinRoomPayload, error) {
 	return payload, nil
 }
 
+// DecodeRoomStateRequest validates and decodes one explicit room_state refresh request.
+func DecodeRoomStateRequest(envelope Envelope) (RoomStateRequestPayload, error) {
+	if envelope.Type != TypeRoomStateRequest {
+		return RoomStateRequestPayload{}, fmt.Errorf("%w: %s", ErrUnsupportedMessageType, envelope.Type)
+	}
+
+	var payload RoomStateRequestPayload
+	if err := json.Unmarshal(envelope.Payload, &payload); err != nil {
+		return RoomStateRequestPayload{}, err
+	}
+	if payload.RoomID == "" {
+		return RoomStateRequestPayload{}, errors.New("missing roomId")
+	}
+	if payload.UserID == "" {
+		return RoomStateRequestPayload{}, errors.New("missing userId")
+	}
+	return payload, nil
+}
+
 // DecodePlay validates and decodes a play control event.
 func DecodePlay(envelope Envelope) (PlayPayload, error) {
 	if envelope.Type != TypePlay {
@@ -128,6 +147,8 @@ func DecodeClockSyncPing(envelope Envelope) (ClockSyncPingPayload, error) {
 func decodeControlPayload[T interface {
 	GetRoomID() string
 	GetUserID() string
+	GetSeq() int64
+	GetRequestID() string
 }](envelope Envelope) (T, error) {
 	var payload T
 	if err := json.Unmarshal(envelope.Payload, &payload); err != nil {

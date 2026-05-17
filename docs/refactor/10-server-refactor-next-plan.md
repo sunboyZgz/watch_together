@@ -53,13 +53,13 @@ Status on 2026-05-16:
 [x] WebSocket transport depends on a latestRoomStateWriter interface, not go-redis.
 [x] REDIS_ADDR empty keeps Redis disabled and server assembly returns nil RedisClient.
 [x] Cache write failures are isolated behind WebSocketHandler.cacheRoomState.
-[ ] Local go test verification is blocked because go.exe is not available in PATH.
+[x] Local Go tooling is available and targeted refactor packages pass tests.
 ```
 
 Tasks:
 
 ```text
-[ ] Verify Go tooling runs from server/ module root. Blocked locally: go.exe is not in PATH.
+[x] Verify Go tooling runs from server/ module root.
 [x] Fix any package or IDE issue that reports undefined RedisClient.
 [x] Confirm RedisClient remains owned by internal/cache.
 [x] Confirm transport depends on a narrow latestRoomStateWriter interface, not go-redis.
@@ -114,14 +114,24 @@ Accepted timeline transitions do not depend on Redis availability.
 
 Goal: move protocol consumers toward `room_state` as the canonical snapshot while preserving client compatibility.
 
+Status on 2026-05-17:
+
+```text
+[x] Legacy accepted-control events are preserved for Android/Web compatibility.
+[x] Accepted-control payloads carry authoritative vector fields.
+[x] room_state.request is available for clients that detect missed or stale state.
+[x] room_state.request returns the latest in-process room.State as protocol.RoomStatePayload.
+[x] room_state.request does not read Redis and does not make room_state the authority model.
+```
+
 Tasks:
 
 ```text
-[ ] Keep legacy accepted-control events for Android/Web compatibility.
-[ ] Ensure every legacy control payload carries authoritative vector fields.
-[ ] Add or prepare room_state.request for clients that detect missed or stale state.
-[ ] Let room_state.request return the latest room.State as protocol.RoomStatePayload.
-[ ] Do not make clients infer authority from event type alone.
+[x] Keep legacy accepted-control events for Android/Web compatibility.
+[x] Ensure every legacy control payload carries authoritative vector fields.
+[x] Add or prepare room_state.request for clients that detect missed or stale state.
+[x] Let room_state.request return the latest room.State as protocol.RoomStatePayload.
+[x] Do not make clients infer authority from event type alone.
 ```
 
 Important wording:
@@ -142,13 +152,27 @@ Clients can ignore stale seq and request a fresh snapshot without reconnecting.
 
 Goal: improve race and retry behavior without breaking existing clients.
 
+Status on 2026-05-17:
+
+```text
+[x] Client seq is recorded in sync debug logs and compared with previous/new server seq.
+[x] Client seq remains soft diagnostic data and does not reject controls.
+[x] Accepted transitions emit structured key-value stdout logs when debug sync logging is enabled.
+[x] Optional requestId is accepted on play / pause / seek / set_playback_rate / ended.
+[x] Accepted-control broadcasts echo requestId when provided.
+[x] One-process short-TTL requestId dedup prevents duplicate accepted controls from advancing seq again.
+[x] One-process dedup is sharded and bounded so high room counts do not share one global lock or unbounded map.
+[ ] Redis-backed cross-instance requestId dedup is deferred until multi-instance room authority is designed.
+```
+
 Recommended order:
 
 ```text
-1. Add soft client seq diagnostics.
-2. Add structured transition logs.
-3. Add optional requestId to control payloads.
-4. Add short-TTL Redis dedup only after requestId exists.
+1. Add soft client seq diagnostics. Done.
+2. Add structured transition logs. Done.
+3. Add optional requestId to control payloads. Done.
+4. Add one-process short-TTL requestId dedup. Done.
+5. Add Redis-backed cross-instance dedup only after room authority placement is designed.
 ```
 
 Soft seq mode:
@@ -169,6 +193,30 @@ wt:room:{roomId}:control_req:{requestId}
 
 Do not store durable control history only in Redis.
 
+Current dedup behavior:
+
+```text
+requestId is optional
+dedup scope is one server process
+dedup key is roomId + requestId
+dedup TTL is short and in-memory
+dedup storage is split into lock shards
+dedup storage has a hard entry budget and fails open if saturated
+expired entries are cleaned inside the touched shard instead of scanning one global map per request
+duplicate accepted controls return the latest room_state to the requester
+duplicate controls do not broadcast again and do not increment seq again
+failed controls remove the reserved requestId so the client can retry
+```
+
+Logging direction:
+
+```text
+Use structured stdout logs from the application process.
+Let product deployments persist and query logs through a logging pipeline such as Loki, OpenSearch, or a cloud log service.
+Do not write normal application logs into PostgreSQL business tables.
+Keep Prometheus-style metrics as a separate follow-up for counters, latency histograms, queue depth, and error rates.
+```
+
 ## Phase E: App And Store Assembly Cleanup
 
 Goal: reduce infrastructure duplication while preserving API behavior.
@@ -181,7 +229,7 @@ Status on 2026-05-17:
 [x] database/sql pool defaults are set by store.OpenPostgres.
 [x] Server has Shutdown and Close methods for HTTP, cleanup loops, Redis, and PostgreSQL resources.
 [x] roomserver handles interrupt / SIGTERM with graceful shutdown.
-[ ] go test verification is still pending until local Go tooling is available.
+[x] Targeted go test verification passes for internal/app and related refactor packages.
 ```
 
 Tasks:
@@ -208,9 +256,11 @@ Goal: finish each refactor step with a small safety net.
 Required checks:
 
 ```text
-[ ] go test ./...
+[ ] go test ./... currently fails in internal/mediactl on Windows because .sh ffprobe stubs are not Win32 executables.
+[x] go test ./internal/protocol ./internal/transport ./internal/room ./internal/cache ./internal/app
 [ ] docs/refactor updated when a phase boundary changes.
-[ ] docs/websocket-event-protocol.md updated only when the external protocol changes.
+[x] docs/refactor updated when a phase boundary changes.
+[x] docs/websocket-event-protocol.md updated because room_state.request and requestId changed the external protocol.
 [ ] docs/backend-api-contract.md updated only when HTTP contract changes.
 [ ] Redis keys and TTLs documented when new Redis use cases are added.
 ```

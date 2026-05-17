@@ -278,6 +278,135 @@ func TestWebSocketControlSyncFlow(t *testing.T) {
 	}
 }
 
+func TestWebSocketRoomStateRequestReturnsLatestSnapshot(t *testing.T) {
+	roomManager := room.NewManager()
+	createdRoom, err := roomManager.CreateRoom("user_a", "sample_001")
+	if err != nil {
+		t.Fatalf("create room: %v", err)
+	}
+	mux := http.NewServeMux()
+	mux.Handle("/ws", NewWebSocketHandler(roomManager, true))
+
+	httpServer := httptest.NewServer(mux)
+	defer httpServer.Close()
+
+	wsURL := "ws" + httpServer.URL[len("http"):] + "/ws"
+	ctx := context.Background()
+
+	hostConn := mustDialWebSocket(t, ctx, wsURL)
+	defer hostConn.Close(websocket.StatusNormalClosure, "test done")
+
+	mustJoinRoom(t, ctx, hostConn, createdRoom.ID(), "user_a")
+	initial := mustReadEnvelope(t, ctx, hostConn)
+	if initial.Type != protocol.TypeRoomState {
+		t.Fatalf("expected initial room_state, got %s", initial.Type)
+	}
+
+	mustSendEnvelope(t, ctx, hostConn, protocol.Envelope{
+		Type: protocol.TypePlay,
+		Payload: mustJSONRaw(protocol.PlayPayload{
+			RoomID:     createdRoom.ID(),
+			UserID:     "user_a",
+			PositionMs: 12_000,
+			Seq:        1,
+		}),
+	})
+	assertControlBroadcast(t, ctx, hostConn, protocol.TypePlay, -1, 2)
+
+	mustSendEnvelope(t, ctx, hostConn, protocol.Envelope{
+		Type: protocol.TypeRoomStateRequest,
+		Payload: mustJSONRaw(protocol.RoomStateRequestPayload{
+			RoomID: createdRoom.ID(),
+			UserID: "user_a",
+			Seq:    1,
+		}),
+	})
+
+	response := mustReadEnvelope(t, ctx, hostConn)
+	if response.Type != protocol.TypeRoomState {
+		t.Fatalf("expected room_state response, got %s", response.Type)
+	}
+	var payload protocol.RoomStatePayload
+	if err := json.Unmarshal(response.Payload, &payload); err != nil {
+		t.Fatalf("unmarshal room_state payload: %v", err)
+	}
+	if payload.Seq != 2 {
+		t.Fatalf("expected latest seq 2, got %d", payload.Seq)
+	}
+	if payload.Paused {
+		t.Fatalf("expected latest room_state to reflect playing state")
+	}
+}
+
+func TestWebSocketControlRequestIDDeduplicatesAcceptedControl(t *testing.T) {
+	roomManager := room.NewManager()
+	createdRoom, err := roomManager.CreateRoom("user_a", "sample_001")
+	if err != nil {
+		t.Fatalf("create room: %v", err)
+	}
+	mux := http.NewServeMux()
+	mux.Handle("/ws", NewWebSocketHandler(roomManager, true))
+
+	httpServer := httptest.NewServer(mux)
+	defer httpServer.Close()
+
+	wsURL := "ws" + httpServer.URL[len("http"):] + "/ws"
+	ctx := context.Background()
+
+	hostConn := mustDialWebSocket(t, ctx, wsURL)
+	defer hostConn.Close(websocket.StatusNormalClosure, "test done")
+
+	mustJoinRoom(t, ctx, hostConn, createdRoom.ID(), "user_a")
+	mustReadEnvelope(t, ctx, hostConn)
+
+	requestID := "req-play-1"
+	mustSendEnvelope(t, ctx, hostConn, protocol.Envelope{
+		Type: protocol.TypePlay,
+		Payload: mustJSONRaw(protocol.PlayPayload{
+			RoomID:     createdRoom.ID(),
+			UserID:     "user_a",
+			RequestID:  requestID,
+			PositionMs: 12_000,
+			Seq:        1,
+		}),
+	})
+
+	first := mustReadEnvelope(t, ctx, hostConn)
+	if first.Type != protocol.TypePlay {
+		t.Fatalf("expected first request to broadcast play, got %s", first.Type)
+	}
+	var playPayload protocol.PlayPayload
+	if err := json.Unmarshal(first.Payload, &playPayload); err != nil {
+		t.Fatalf("unmarshal play payload: %v", err)
+	}
+	if playPayload.Seq != 2 || playPayload.RequestID != requestID {
+		t.Fatalf("unexpected play payload after first request: %+v", playPayload)
+	}
+
+	mustSendEnvelope(t, ctx, hostConn, protocol.Envelope{
+		Type: protocol.TypePlay,
+		Payload: mustJSONRaw(protocol.PlayPayload{
+			RoomID:     createdRoom.ID(),
+			UserID:     "user_a",
+			RequestID:  requestID,
+			PositionMs: 12_000,
+			Seq:        1,
+		}),
+	})
+
+	duplicate := mustReadEnvelope(t, ctx, hostConn)
+	if duplicate.Type != protocol.TypeRoomState {
+		t.Fatalf("expected duplicate request to return room_state, got %s", duplicate.Type)
+	}
+	var state protocol.RoomStatePayload
+	if err := json.Unmarshal(duplicate.Payload, &state); err != nil {
+		t.Fatalf("unmarshal duplicate room_state payload: %v", err)
+	}
+	if state.Seq != 2 {
+		t.Fatalf("expected duplicate request to keep seq 2, got %d", state.Seq)
+	}
+}
+
 func TestWebSocketControlSyncRejectsNonHost(t *testing.T) {
 	roomManager := room.NewManager()
 	createdRoom, err := roomManager.CreateRoom("user_a", "sample_001")

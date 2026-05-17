@@ -243,6 +243,25 @@
 }
 ```
 
+### `room_state.request`
+
+- Direction: client -> server
+- Purpose: request the latest `room_state` snapshot without reconnecting.
+- The client must already be joined as the same `roomId + userId`.
+- `seq` is optional and represents the client's last known server seq. It is diagnostic only.
+- The server replies only to the requesting client with `room_state`.
+
+```json
+{
+  "type": "room_state.request",
+  "payload": {
+    "roomId": "room_001",
+    "userId": "user_a",
+    "seq": 3
+  }
+}
+```
+
 ### `play`
 
 - 方向：client -> server / server -> clients
@@ -256,11 +275,17 @@
   "payload": {
     "roomId": "room_001",
     "userId": "user_a",
+    "requestId": "optional-client-generated-id",
     "positionMs": 125000,
     "seq": 4
   }
 }
 ```
+
+For `play`, `pause`, `seek`, `set_playback_rate`, and `ended`, clients may include optional `requestId`.
+When provided, the server echoes it on the accepted-control broadcast and uses short-TTL sharded in-process dedup by `roomId + requestId`.
+Duplicate accepted controls return the latest `room_state` to the requester and do not increment `seq` again.
+If the local dedup budget is saturated, the server favors availability and lets the control proceed.
 
 ### `pause`
 
@@ -411,6 +436,7 @@
 | --- | --- |
 | `join_room` | client -> server |
 | `room_state` | server -> client |
+| `room_state.request` | client -> server |
 | `play` | client -> server, server -> clients |
 | `pause` | client -> server, server -> clients |
 | `seek` | client -> server, server -> clients |
