@@ -29,7 +29,7 @@ func TestWebSocketJoinRoomFlow(t *testing.T) {
 
 	wsURL := "ws" + httpServer.URL[len("http"):] + "/ws"
 	ctx := context.Background()
-	conn, _, err := websocket.Dial(ctx, wsURL, nil)
+	conn, _, err := websocket.Dial(ctx, wsURL, websocketDialOptions("user_b"))
 	if err != nil {
 		t.Fatalf("dial websocket: %v", err)
 	}
@@ -103,7 +103,7 @@ func TestWebSocketJoinBroadcastsRoomMembersChangedToExistingClients(t *testing.T
 
 	hostConn := mustDialWebSocket(t, ctx, wsURL)
 	defer hostConn.Close(websocket.StatusNormalClosure, "test done")
-	viewerConn := mustDialWebSocket(t, ctx, wsURL)
+	viewerConn := mustDialWebSocket(t, ctx, wsURL, "user_b")
 	defer viewerConn.Close(websocket.StatusNormalClosure, "test done")
 
 	mustJoinRoom(t, ctx, hostConn, createdRoom.ID(), "user_a")
@@ -144,7 +144,7 @@ func TestWebSocketJoinRoomMissingRoomReturnsError(t *testing.T) {
 
 	wsURL := "ws" + httpServer.URL[len("http"):] + "/ws"
 	ctx := context.Background()
-	conn, _, err := websocket.Dial(ctx, wsURL, nil)
+	conn, _, err := websocket.Dial(ctx, wsURL, websocketDialOptions("user_b"))
 	if err != nil {
 		t.Fatalf("dial websocket: %v", err)
 	}
@@ -185,6 +185,28 @@ func TestWebSocketJoinRoomMissingRoomReturnsError(t *testing.T) {
 	}
 }
 
+func TestWebSocketRejectsMissingAccessToken(t *testing.T) {
+	roomManager := room.NewManager()
+	mux := http.NewServeMux()
+	mux.Handle("/ws", NewWebSocketHandler(roomManager, true))
+
+	httpServer := httptest.NewServer(mux)
+	defer httpServer.Close()
+
+	wsURL := "ws" + httpServer.URL[len("http"):] + "/ws"
+	ctx := context.Background()
+	_, response, err := websocket.Dial(ctx, wsURL, nil)
+	if err == nil {
+		t.Fatalf("expected websocket dial without token to fail")
+	}
+	if response == nil {
+		t.Fatalf("expected HTTP response for rejected websocket")
+	}
+	if response.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("expected status %d, got %d", http.StatusUnauthorized, response.StatusCode)
+	}
+}
+
 func TestWebSocketControlSyncFlow(t *testing.T) {
 	roomManager := room.NewManager()
 	createdRoom, err := roomManager.CreateRoom("user_a", "sample_001")
@@ -202,7 +224,7 @@ func TestWebSocketControlSyncFlow(t *testing.T) {
 
 	hostConn := mustDialWebSocket(t, ctx, wsURL)
 	defer hostConn.Close(websocket.StatusNormalClosure, "test done")
-	viewerConn := mustDialWebSocket(t, ctx, wsURL)
+	viewerConn := mustDialWebSocket(t, ctx, wsURL, "user_b")
 	defer viewerConn.Close(websocket.StatusNormalClosure, "test done")
 
 	mustJoinRoom(t, ctx, hostConn, createdRoom.ID(), "user_a")
@@ -424,7 +446,7 @@ func TestWebSocketControlSyncRejectsNonHost(t *testing.T) {
 
 	hostConn := mustDialWebSocket(t, ctx, wsURL)
 	defer hostConn.Close(websocket.StatusNormalClosure, "test done")
-	viewerConn := mustDialWebSocket(t, ctx, wsURL)
+	viewerConn := mustDialWebSocket(t, ctx, wsURL, "user_b")
 	defer viewerConn.Close(websocket.StatusNormalClosure, "test done")
 
 	mustJoinRoom(t, ctx, hostConn, createdRoom.ID(), "user_a")
@@ -475,6 +497,47 @@ func TestWebSocketControlSyncRejectsNonHost(t *testing.T) {
 	}
 }
 
+func TestWebSocketControlIgnoresSpoofedPayloadUserID(t *testing.T) {
+	roomManager := room.NewManager()
+	createdRoom, err := roomManager.CreateRoom("user_a", "sample_001")
+	if err != nil {
+		t.Fatalf("create room: %v", err)
+	}
+	mux := http.NewServeMux()
+	mux.Handle("/ws", NewWebSocketHandler(roomManager, true))
+
+	httpServer := httptest.NewServer(mux)
+	defer httpServer.Close()
+
+	wsURL := "ws" + httpServer.URL[len("http"):] + "/ws"
+	ctx := context.Background()
+
+	viewerConn := mustDialWebSocket(t, ctx, wsURL, "user_b")
+	defer viewerConn.Close(websocket.StatusNormalClosure, "test done")
+
+	mustJoinRoom(t, ctx, viewerConn, createdRoom.ID(), "user_b")
+	mustReadEnvelope(t, ctx, viewerConn)
+
+	mustSendEnvelope(t, ctx, viewerConn, protocol.Envelope{
+		Type: protocol.TypePlay,
+		Payload: mustJSONRaw(protocol.PlayPayload{
+			RoomID:     createdRoom.ID(),
+			UserID:     "user_a",
+			PositionMs: 5_000,
+			Seq:        1,
+		}),
+	})
+
+	var envelope protocol.ErrorEnvelope
+	readMessageAs(t, ctx, viewerConn, &envelope)
+	if envelope.Type != protocol.TypeError {
+		t.Fatalf("expected error response, got %s", envelope.Type)
+	}
+	if envelope.Payload.Message != "only host can control playback" {
+		t.Fatalf("expected only-host error, got %q", envelope.Payload.Message)
+	}
+}
+
 func TestWebSocketHostDisconnectPausesRoomWithoutTransfer(t *testing.T) {
 	roomManager := room.NewManager()
 	createdRoom, err := roomManager.CreateRoom("user_a", "sample_001")
@@ -491,7 +554,7 @@ func TestWebSocketHostDisconnectPausesRoomWithoutTransfer(t *testing.T) {
 	ctx := context.Background()
 
 	hostConn := mustDialWebSocket(t, ctx, wsURL)
-	viewerConn := mustDialWebSocket(t, ctx, wsURL)
+	viewerConn := mustDialWebSocket(t, ctx, wsURL, "user_b")
 	defer viewerConn.Close(websocket.StatusNormalClosure, "test done")
 
 	mustJoinRoom(t, ctx, hostConn, createdRoom.ID(), "user_a")
@@ -704,8 +767,8 @@ func TestWebSocketRepeatedJoinReplacesPreviousConnectionForSameUser(t *testing.T
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	firstConn := mustDialWebSocket(t, ctx, wsURL)
-	secondConn := mustDialWebSocket(t, ctx, wsURL)
+	firstConn := mustDialWebSocket(t, ctx, wsURL, "user_b")
+	secondConn := mustDialWebSocket(t, ctx, wsURL, "user_b")
 	defer secondConn.Close(websocket.StatusNormalClosure, "test done")
 
 	mustJoinRoom(t, ctx, firstConn, createdRoom.ID(), "user_b")
@@ -796,8 +859,8 @@ func TestWebSocketRepeatedJoinReturnsCurrentEffectiveRoomState(t *testing.T) {
 
 	hostConn := mustDialWebSocket(t, ctx, wsURL)
 	defer hostConn.Close(websocket.StatusNormalClosure, "test done")
-	viewerConn1 := mustDialWebSocket(t, ctx, wsURL)
-	viewerConn2 := mustDialWebSocket(t, ctx, wsURL)
+	viewerConn1 := mustDialWebSocket(t, ctx, wsURL, "user_b")
+	viewerConn2 := mustDialWebSocket(t, ctx, wsURL, "user_b")
 	defer viewerConn2.Close(websocket.StatusNormalClosure, "test done")
 
 	mustJoinRoom(t, ctx, hostConn, createdRoom.ID(), "user_a")
@@ -861,8 +924,8 @@ func TestWebSocketRepeatedJoinKeepsCurrentPlaybackRateInRoomState(t *testing.T) 
 
 	hostConn := mustDialWebSocket(t, ctx, wsURL)
 	defer hostConn.Close(websocket.StatusNormalClosure, "test done")
-	viewerConn1 := mustDialWebSocket(t, ctx, wsURL)
-	viewerConn2 := mustDialWebSocket(t, ctx, wsURL)
+	viewerConn1 := mustDialWebSocket(t, ctx, wsURL, "user_b")
+	viewerConn2 := mustDialWebSocket(t, ctx, wsURL, "user_b")
 	defer viewerConn2.Close(websocket.StatusNormalClosure, "test done")
 
 	mustJoinRoom(t, ctx, hostConn, createdRoom.ID(), "user_a")
@@ -917,8 +980,8 @@ func TestWebSocketEndedBroadcastAndRepeatedJoinState(t *testing.T) {
 
 	hostConn := mustDialWebSocket(t, ctx, wsURL)
 	defer hostConn.Close(websocket.StatusNormalClosure, "test done")
-	viewerConn1 := mustDialWebSocket(t, ctx, wsURL)
-	viewerConn2 := mustDialWebSocket(t, ctx, wsURL)
+	viewerConn1 := mustDialWebSocket(t, ctx, wsURL, "user_b")
+	viewerConn2 := mustDialWebSocket(t, ctx, wsURL, "user_b")
 	defer viewerConn2.Close(websocket.StatusNormalClosure, "test done")
 
 	mustJoinRoom(t, ctx, hostConn, createdRoom.ID(), "user_a")
@@ -985,7 +1048,7 @@ func TestWebSocketEndedRejectsNonHost(t *testing.T) {
 
 	hostConn := mustDialWebSocket(t, ctx, wsURL)
 	defer hostConn.Close(websocket.StatusNormalClosure, "test done")
-	viewerConn := mustDialWebSocket(t, ctx, wsURL)
+	viewerConn := mustDialWebSocket(t, ctx, wsURL, "user_b")
 	defer viewerConn.Close(websocket.StatusNormalClosure, "test done")
 
 	mustJoinRoom(t, ctx, hostConn, createdRoom.ID(), "user_a")
@@ -1030,7 +1093,7 @@ func TestWebSocketSeekClearsEndedState(t *testing.T) {
 
 	hostConn := mustDialWebSocket(t, ctx, wsURL)
 	defer hostConn.Close(websocket.StatusNormalClosure, "test done")
-	viewerConn := mustDialWebSocket(t, ctx, wsURL)
+	viewerConn := mustDialWebSocket(t, ctx, wsURL, "user_b")
 	defer viewerConn.Close(websocket.StatusNormalClosure, "test done")
 
 	mustJoinRoom(t, ctx, hostConn, createdRoom.ID(), "user_a")
@@ -1085,7 +1148,7 @@ func TestWebSocketHostReconnectRestoresHostControl(t *testing.T) {
 	defer cancel()
 
 	hostConn := mustDialWebSocket(t, ctx, wsURL)
-	viewerConn := mustDialWebSocket(t, ctx, wsURL)
+	viewerConn := mustDialWebSocket(t, ctx, wsURL, "user_b")
 	defer viewerConn.Close(websocket.StatusNormalClosure, "test done")
 
 	mustJoinRoom(t, ctx, hostConn, createdRoom.ID(), "user_a")
@@ -1160,13 +1223,25 @@ func TestWebSocketHostReconnectRestoresHostControl(t *testing.T) {
 	}
 }
 
-func mustDialWebSocket(t *testing.T, ctx context.Context, wsURL string) *websocket.Conn {
+func mustDialWebSocket(t *testing.T, ctx context.Context, wsURL string, userIDs ...string) *websocket.Conn {
 	t.Helper()
-	conn, _, err := websocket.Dial(ctx, wsURL, nil)
+	userID := "user_a"
+	if len(userIDs) > 0 && userIDs[0] != "" {
+		userID = userIDs[0]
+	}
+	conn, _, err := websocket.Dial(ctx, wsURL, websocketDialOptions(userID))
 	if err != nil {
 		t.Fatalf("dial websocket: %v", err)
 	}
 	return conn
+}
+
+func websocketDialOptions(userID string) *websocket.DialOptions {
+	return &websocket.DialOptions{
+		HTTPHeader: map[string][]string{
+			"Authorization": {testAuthorizationHeader(userID)},
+		},
+	}
 }
 
 func mustJoinRoom(

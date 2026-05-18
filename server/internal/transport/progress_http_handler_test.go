@@ -29,7 +29,7 @@ func TestUpdateProgressFlow(t *testing.T) {
 		"/me/media-progress/media_001",
 		strings.NewReader(`{"lastPositionSeconds":564,"durationSeconds":1458,"completed":false}`),
 	)
-	request.Header.Set("Authorization", "Bearer dev_user_a")
+	request.Header.Set("Authorization", testAuthorizationHeader("user_a"))
 	recorder := httptest.NewRecorder()
 
 	handler.Update(recorder, request)
@@ -62,7 +62,7 @@ func TestUpdateProgressRejectsInvalidProgress(t *testing.T) {
 		"/me/media-progress/media_001",
 		strings.NewReader(`{"lastPositionSeconds":200,"durationSeconds":100,"completed":false}`),
 	)
-	request.Header.Set("Authorization", "Bearer dev_user_a")
+	request.Header.Set("Authorization", testAuthorizationHeader("user_a"))
 	recorder := httptest.NewRecorder()
 
 	handler.Update(recorder, request)

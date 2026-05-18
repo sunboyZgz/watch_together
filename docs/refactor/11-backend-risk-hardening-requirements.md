@@ -24,7 +24,7 @@
 - WebSocket 必须携带登录 token。
 - 后端不能信任 payload 中的 `userId`。
 - 握手鉴权通过后，连接身份由 token 绑定。
-- JWT 可以作为正式 token 的成熟工具方向。
+- JWT 已作为正式 access token 的成熟工具落地。
 
 ### 2.2 公开房间加入规则
 
@@ -99,7 +99,7 @@
 | PostgreSQL driver | pgx / gorm postgres driver | 已使用 | PostgreSQL 生态成熟 | 连接池参数由 `store.OpenPostgres` 管理 |
 | Redis client | `github.com/redis/go-redis/v9` | 已使用 | Redis 官方推荐 Go 客户端之一 | room_state 明确 DB 0 |
 | 密码哈希 | `golang.org/x/crypto/bcrypt` | 已使用 | 密码存储成熟方案 | 保留 |
-| JWT | 待选型 | 推荐 | 正式 HTTP / WS token 生成和验证 | 可评估 `github.com/golang-jwt/jwt/v5` 或其他维护活跃库 |
+| JWT | `github.com/golang-jwt/jwt/v5` | 已使用 | 正式 HTTP / WS token 生成和验证 | 当前签发 HS256 access token，不保留 legacy dev token |
 | 指标 | Prometheus 风格 metrics | 待实现 | 广播延迟、队列深度、连接数、错误率可观测 | 可先用 `prometheus/client_golang` |
 | 日志持久化 | Loki / OpenSearch / 云日志服务 | 待选型 | 应用日志不写业务数据库 | 本地先 stdout，部署用日志管道收集 |
 | HLS 分发 | Nginx / 对象存储 / CDN | 已有方向 | Go 不承载大流量字节分发 | 后端签发短期 URL 或 cookie |
@@ -117,6 +117,8 @@
 
 ### R1 WebSocket 鉴权缺失
 
+状态：已完成第一轮加固。
+
 业务需求：
 
 - WS 连接必须携带登录 token。
@@ -125,19 +127,22 @@
 
 当前状态：
 
-- HTTP 登录返回 `dev_<userId>` 占位 token。
-- WS 当前仍解析 payload `userId`。
+- HTTP 登录返回 JWT access token。
+- 服务端 token verifier 只接受 JWT access token。
+- WS 握手要求 `Authorization: Bearer <accessToken>`。
+- WS 连接身份来自 token 验证结果。
 
 目标行为：
 
-- 未携带 token、token 无效、用户不存在时拒绝 WS 握手或立即关闭。
+- 未携带 token 或 token 无效时拒绝 WS 握手。
 - 连接身份在握手后绑定到 `ClientConnection`。
+- `join_room`、`room_state.request` 和控制事件不再信任 payload `userId` 推进权限。
 - 控制事件使用连接身份做房主校验。
 
 实现前需确认：
 
-- 第一版是否兼容 `dev_<userId>`，还是直接切 JWT。
-- token 放在 query、header 还是 WebSocket subprotocol；Android OkHttp 支持 header，推荐 header。
+- 已选择 `Authorization` header；Android OkHttp 已补齐 header。
+- 不保留 legacy `dev_<userId>` 兼容。
 
 优先级：P0。
 
@@ -384,7 +389,7 @@
 
 第一批必须先做：
 
-1. WebSocket token 鉴权和连接身份绑定。
+1. WebSocket token 鉴权和连接身份绑定。已完成第一轮加固。
 2. stale seq 拒绝和拒绝后的 `room_state` 恢复。
 3. 断线、重连、主动离开和 5 分钟 grace period。
 4. host transfer 旧语义清理，确保只保留 owner reclaim。

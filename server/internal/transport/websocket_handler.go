@@ -27,6 +27,7 @@ type WebSocketHandler struct {
 	maxRoomClients    int
 	roomStateWriter   latestRoomStateWriter
 	controlDeduper    *controlRequestDeduper
+	tokenVerifier     accessTokenVerifier
 }
 
 const (
@@ -79,8 +80,25 @@ func NewWebSocketHandlerWithConfigAndRoomStateWriter(
 	config WebSocketRuntimeConfig,
 	roomStateWriter latestRoomStateWriter,
 ) *WebSocketHandler {
+	return NewWebSocketHandlerWithConfigAndRoomStateWriterAndTokenVerifier(
+		roomManager,
+		debugSync,
+		config,
+		roomStateWriter,
+		nil,
+	)
+}
+
+func NewWebSocketHandlerWithConfigAndRoomStateWriterAndTokenVerifier(
+	roomManager *room.Manager,
+	debugSync bool,
+	config WebSocketRuntimeConfig,
+	roomStateWriter latestRoomStateWriter,
+	tokenVerifier accessTokenVerifier,
+) *WebSocketHandler {
 	handler := newWebSocketHandler(roomManager, debugSync, defaultHeartbeatInterval, defaultHeartbeatTimeout, config)
 	handler.roomStateWriter = roomStateWriter
+	handler.tokenVerifier = tokenVerifier
 	return handler
 }
 
@@ -142,6 +160,7 @@ func newWebSocketHandlerWithClock(
 			defaultControlRequestDedupMaxEntries,
 			defaultControlRequestDedupShards,
 		),
+		tokenVerifier: defaultAccessTokenVerifier,
 	}
 }
 
@@ -173,6 +192,12 @@ func broadcastConfigFromWebSocketConfig(config WebSocketRuntimeConfig) broadcast
 // ServeHTTP upgrades the request to WebSocket and keeps reading protocol messages
 // until the client disconnects or a read error occurs.
 func (h *WebSocketHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	authUserID, ok := h.authenticateRequest(r)
+	if !ok {
+		http.Error(w, "missing or invalid access token", http.StatusUnauthorized)
+		return
+	}
+
 	if h.connectionLimit != nil {
 		if !h.connectionLimit.TryAcquire(1) {
 			http.Error(w, "websocket connection limit reached", http.StatusServiceUnavailable)
@@ -189,6 +214,7 @@ func (h *WebSocketHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	client := room.NewClientConnectionWithOptions(conn, h.clientOptions)
+	client.SetIdentity(authUserID, "")
 	ctx, cancel := context.WithCancel(context.Background())
 	writerDone := make(chan struct{})
 	go func() {
@@ -244,6 +270,25 @@ func (h *WebSocketHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			})
 		}
 	}
+}
+
+func (h *WebSocketHandler) authenticateRequest(r *http.Request) (string, bool) {
+	token, ok := bearerTokenFromRequestHeader(r.Header.Get("Authorization"))
+	if !ok {
+		return "", false
+	}
+	verifier := h.tokenVerifier
+	if verifier == nil {
+		verifier = defaultAccessTokenVerifier
+	}
+	claims, err := verifier.VerifyAccessToken(token)
+	if err != nil {
+		return "", false
+	}
+	if claims.UserID == "" {
+		return "", false
+	}
+	return claims.UserID, true
 }
 
 // handleMessage routes one decoded envelope to the matching protocol handler.
@@ -326,7 +371,7 @@ func (h *WebSocketHandler) handleRoomStateRequest(
 		return err
 	}
 	client.MarkHeartbeatAck(h.clock.Now())
-	if client.RoomID() != payload.RoomID || client.UserID() != payload.UserID {
+	if client.RoomID() != payload.RoomID || client.UserID() == "" || client.UserID() != payload.UserID {
 		return protocolMessageError{
 			roomID:  payload.RoomID,
 			message: "room identity mismatch",
@@ -367,6 +412,13 @@ func (h *WebSocketHandler) handleJoinRoom(
 		return err
 	}
 	client.MarkHeartbeatAck(h.clock.Now())
+	authUserID := client.UserID()
+	if authUserID == "" || payload.UserID != authUserID {
+		return protocolMessageError{
+			roomID:  payload.RoomID,
+			message: "room identity mismatch",
+		}
+	}
 
 	existingRoom, ok := h.roomManager.Get(payload.RoomID)
 	if !ok {
@@ -377,7 +429,7 @@ func (h *WebSocketHandler) handleJoinRoom(
 	}
 
 	// We persist identity on the connection first so disconnect cleanup can find the room later.
-	client.SetIdentity(payload.UserID, payload.RoomID)
+	client.SetIdentity(authUserID, payload.RoomID)
 	joinResult := existingRoom.JoinWithLimit(client, h.maxRoomClients)
 	if joinResult.Err != nil {
 		client.SetIdentity("", "")
@@ -424,7 +476,7 @@ func (h *WebSocketHandler) handlePlay(
 	}
 	client.MarkHeartbeatAck(h.clock.Now())
 	meta := controlEventMeta{
-		UserID:     payload.UserID,
+		UserID:     client.UserID(),
 		RequestID:  payload.RequestID,
 		PositionMs: payload.PositionMs,
 		ClientSeq:  payload.Seq,
@@ -437,7 +489,7 @@ func (h *WebSocketHandler) handlePlay(
 		payload.RoomID,
 		meta,
 		func(existingRoom *room.Room) (room.State, []*room.ClientConnection, error) {
-			return existingRoom.ApplyPlay(payload.UserID, payload.PositionMs)
+			return existingRoom.ApplyPlay(meta.UserID, payload.PositionMs)
 		},
 		func(state room.State) protocol.Envelope {
 			return controlEnvelopeFromState(protocol.TypePlay, state, payload.RequestID)
@@ -457,7 +509,7 @@ func (h *WebSocketHandler) handlePause(
 	}
 	client.MarkHeartbeatAck(h.clock.Now())
 	meta := controlEventMeta{
-		UserID:     payload.UserID,
+		UserID:     client.UserID(),
 		RequestID:  payload.RequestID,
 		PositionMs: payload.PositionMs,
 		ClientSeq:  payload.Seq,
@@ -470,7 +522,7 @@ func (h *WebSocketHandler) handlePause(
 		payload.RoomID,
 		meta,
 		func(existingRoom *room.Room) (room.State, []*room.ClientConnection, error) {
-			return existingRoom.ApplyPause(payload.UserID, payload.PositionMs)
+			return existingRoom.ApplyPause(meta.UserID, payload.PositionMs)
 		},
 		func(state room.State) protocol.Envelope {
 			return controlEnvelopeFromState(protocol.TypePause, state, payload.RequestID)
@@ -490,7 +542,7 @@ func (h *WebSocketHandler) handleSeek(
 	}
 	client.MarkHeartbeatAck(h.clock.Now())
 	meta := controlEventMeta{
-		UserID:     payload.UserID,
+		UserID:     client.UserID(),
 		RequestID:  payload.RequestID,
 		PositionMs: payload.PositionMs,
 		ClientSeq:  payload.Seq,
@@ -503,7 +555,7 @@ func (h *WebSocketHandler) handleSeek(
 		payload.RoomID,
 		meta,
 		func(existingRoom *room.Room) (room.State, []*room.ClientConnection, error) {
-			return existingRoom.ApplySeek(payload.UserID, payload.PositionMs)
+			return existingRoom.ApplySeek(meta.UserID, payload.PositionMs)
 		},
 		func(state room.State) protocol.Envelope {
 			return controlEnvelopeFromState(protocol.TypeSeek, state, payload.RequestID)
@@ -523,7 +575,7 @@ func (h *WebSocketHandler) handleSetPlaybackRate(
 	}
 	client.MarkHeartbeatAck(h.clock.Now())
 	meta := controlEventMeta{
-		UserID:     payload.UserID,
+		UserID:     client.UserID(),
 		RequestID:  payload.RequestID,
 		PositionMs: payload.PositionMs,
 		ClientSeq:  payload.Seq,
@@ -536,7 +588,7 @@ func (h *WebSocketHandler) handleSetPlaybackRate(
 		payload.RoomID,
 		meta,
 		func(existingRoom *room.Room) (room.State, []*room.ClientConnection, error) {
-			return existingRoom.ApplyPlaybackRate(payload.UserID, payload.PlaybackRate)
+			return existingRoom.ApplyPlaybackRate(meta.UserID, payload.PlaybackRate)
 		},
 		func(state room.State) protocol.Envelope {
 			return controlEnvelopeFromState(protocol.TypeSetPlaybackRate, state, payload.RequestID)
@@ -556,7 +608,7 @@ func (h *WebSocketHandler) handleEnded(
 	}
 	client.MarkHeartbeatAck(h.clock.Now())
 	meta := controlEventMeta{
-		UserID:     payload.UserID,
+		UserID:     client.UserID(),
 		RequestID:  payload.RequestID,
 		PositionMs: payload.PositionMs,
 		ClientSeq:  payload.Seq,
@@ -569,7 +621,7 @@ func (h *WebSocketHandler) handleEnded(
 		payload.RoomID,
 		meta,
 		func(existingRoom *room.Room) (room.State, []*room.ClientConnection, error) {
-			return existingRoom.ApplyEnded(payload.UserID, payload.PositionMs)
+			return existingRoom.ApplyEnded(meta.UserID, payload.PositionMs)
 		},
 		func(state room.State) protocol.Envelope {
 			return controlEnvelopeFromState(protocol.TypeEnded, state, payload.RequestID)
@@ -593,6 +645,12 @@ func (h *WebSocketHandler) handleControlEvent(
 	apply func(existingRoom *room.Room) (room.State, []*room.ClientConnection, error),
 	buildEnvelope func(state room.State) protocol.Envelope,
 ) error {
+	if client.UserID() == "" || client.UserID() != meta.UserID || client.RoomID() != roomID {
+		return protocolMessageError{
+			roomID:  roomID,
+			message: "room identity mismatch",
+		}
+	}
 	existingRoom, ok := h.roomManager.Get(roomID)
 	if !ok {
 		return protocolMessageError{

@@ -26,12 +26,14 @@ class RoomSessionController(
     fun startSession(
         roomId: String,
         userId: String,
+        accessToken: String,
         listener: RoomWebSocketListener
     ) {
         roomWebSocketClient.joinRoom(
             wsUrl = AppConfig.wsBaseUrl,
             roomId = roomId,
             userId = userId,
+            accessToken = accessToken,
             listener = listener
         )
     }

@@ -302,14 +302,15 @@ fun RoomTheaterScreen(
         }
     }
 
-    LaunchedEffect(activeRoomCode, activeRoomUserId) {
+    LaunchedEffect(activeRoomCode, activeRoomUserId, accessToken) {
         val roomCode = activeRoomCode
         val userId = activeRoomUserId
-        if (roomCode.isBlank() || userId.isNullOrBlank()) return@LaunchedEffect
+        if (roomCode.isBlank() || userId.isNullOrBlank() || accessToken.isBlank()) return@LaunchedEffect
         appendPlayerLog(playerLogs, "starting ws roomId=$roomCode userId=$userId", maxSize = 10)
         roomSessionController.startSession(
             roomId = roomCode,
             userId = userId,
+            accessToken = accessToken,
             listener = syncListener
         )
     }

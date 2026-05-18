@@ -11,8 +11,9 @@ import (
 )
 
 type RoomHTTPHandler struct {
-	roomManager *room.Manager
-	roomService *roomapi.Service
+	roomManager   *room.Manager
+	roomService   *roomapi.Service
+	tokenVerifier accessTokenVerifier
 }
 
 type createRoomRequest struct {
@@ -76,9 +77,18 @@ type roomDetailResponse struct {
 
 // NewRoomHTTPHandler builds the HTTP entrypoint for room creation and join-by-code.
 func NewRoomHTTPHandler(roomManager *room.Manager, roomService *roomapi.Service) *RoomHTTPHandler {
+	return NewRoomHTTPHandlerWithTokenVerifier(roomManager, roomService, nil)
+}
+
+func NewRoomHTTPHandlerWithTokenVerifier(
+	roomManager *room.Manager,
+	roomService *roomapi.Service,
+	tokenVerifier accessTokenVerifier,
+) *RoomHTTPHandler {
 	return &RoomHTTPHandler{
-		roomManager: roomManager,
-		roomService: roomService,
+		roomManager:   roomManager,
+		roomService:   roomService,
+		tokenVerifier: tokenVerifier,
 	}
 }
 
@@ -92,7 +102,7 @@ func (h *RoomHTTPHandler) CreateRoom(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	hostUserID, ok := userIDFromAuthorization(r.Header.Get("Authorization"))
+	hostUserID, ok := userIDFromAuthorization(r.Header.Get("Authorization"), h.tokenVerifier)
 	if !ok {
 		writeAPIError(w, http.StatusUnauthorized, "UNAUTHORIZED", "missing or invalid access token", nil)
 		return
@@ -134,7 +144,7 @@ func (h *RoomHTTPHandler) JoinRoomByCode(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	userID, ok := userIDFromAuthorization(r.Header.Get("Authorization"))
+	userID, ok := userIDFromAuthorization(r.Header.Get("Authorization"), h.tokenVerifier)
 	if !ok {
 		writeAPIError(w, http.StatusUnauthorized, "UNAUTHORIZED", "missing or invalid access token", nil)
 		return

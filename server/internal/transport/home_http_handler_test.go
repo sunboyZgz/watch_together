@@ -37,7 +37,7 @@ func TestHomeSummaryReturnsUserAndWatchingProgress(t *testing.T) {
 	}))
 
 	request := httptest.NewRequest(http.MethodGet, "/home/summary", nil)
-	request.Header.Set("Authorization", "Bearer dev_user_001")
+	request.Header.Set("Authorization", testAuthorizationHeader("user_001"))
 	recorder := httptest.NewRecorder()
 
 	handler.Summary(recorder, request)
@@ -78,7 +78,7 @@ func TestHomeSummaryAllowsEmptyWatchingProgress(t *testing.T) {
 	}))
 
 	request := httptest.NewRequest(http.MethodGet, "/home/summary", nil)
-	request.Header.Set("Authorization", "Bearer dev_user_001")
+	request.Header.Set("Authorization", testAuthorizationHeader("user_001"))
 	recorder := httptest.NewRecorder()
 
 	handler.Summary(recorder, request)

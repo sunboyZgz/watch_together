@@ -132,13 +132,13 @@ PROD_MEDIA_BASE_URL=http://106.12.35.52:9100/watch-together-media
 - `auth/AuthHttpClient.kt` 负责调用 `POST /auth/login`
 - `auth/AuthModels.kt` 保存 `AuthSession` 与最小用户信息
 - 登录成功后首页优先使用服务端返回的 `nickname`
-- 当前 access token 仍为后端约定的 `dev_<userId>` 占位 token
+- 当前 access token 为后端签发的 JWT token
 - token 暂时只保存在 Compose 运行时状态中，后续再接正式持久化/session 方案
 
 当前首页接入状态：
 
 - `pages/home/HomeSummaryClient.kt` 负责调用 `GET /home/summary`
-- 请求使用登录后保存的 `Authorization: Bearer dev_<userId>` token
+- 请求使用登录后保存的 `Authorization: Bearer <accessToken>` token
 - `HomePage` 会用接口返回的 `user.nickname / avatarSeed` 更新欢迎语和头像缩写
 - `HomePage` 会用 `lastWatched` 和 `continueWatching` 更新“上次观看”和“继续追番”
 - `lastPositionSeconds / durationSeconds` 在 Android 侧展示为秒级 `mm:ss` 进度
@@ -167,8 +167,8 @@ PROD_MEDIA_BASE_URL=http://106.12.35.52:9100/watch-together-media
 - `WatchTogetherApp` 进入 `PlayerScreen` 时会传入 `accessToken / currentUserId / selectedEpisodeId`
 - `PlayerScreen` 会自动调用 DB-backed `POST /rooms`
 - 请求体暂时使用 `{ "mediaItemId": "<selected-episode-id>" }`
-- 请求头使用 `Authorization: Bearer dev_<userId>`
-- 创建成功后使用响应中的 `room.roomCode` 建立 WebSocket `join_room`
+- 请求头使用 `Authorization: Bearer <accessToken>`
+- 创建成功后使用响应中的 `room.roomCode` 建立携带 `Authorization` header 的 WebSocket `join_room`
 - 创建成功后使用响应中的 `media.title / media.episodeLabel / media.mediaUrl` 更新 `03 放映室`
 - 播放器会优先使用 `media.mediaUrl` 载入选中的影片
 - 如果后端返回的本地媒体 URL 使用 `127.0.0.1`、`localhost` 或 `0.0.0.0`，且 `REWRITE_LOOPBACK_MEDIA_URLS=true`，Android 会在本地环境中改写为 `MEDIA_BASE_URL` 的 host，例如默认的 `10.0.2.2`
@@ -178,7 +178,7 @@ PROD_MEDIA_BASE_URL=http://106.12.35.52:9100/watch-together-media
 
 - 首页 `加入房间` 弹窗输入 6 位房间码后，会进入 `PlayerScreen`
 - Android 会先调用 `POST /rooms/{roomCode}/join`，用当前登录用户写入或恢复业务成员关系
-- HTTP join 成功后才会连接 WebSocket `/ws` 并发送 `join_room`
+- HTTP join 成功后才会连接 WebSocket `/ws` 并发送 `join_room`；WebSocket 握手也会携带 `Authorization: Bearer <accessToken>`
 - `PlayerScreen` 会在进入或加入房间时调用 `GET /rooms/{roomCode}`
 - `GET /rooms/{roomCode}` 返回的业务数据用于 `03 放映室` 首屏展示
 - `media.title / media.episodeLabel / media.mediaUrl` 来自 room detail 或 create room response
@@ -190,7 +190,7 @@ PROD_MEDIA_BASE_URL=http://106.12.35.52:9100/watch-together-media
 
 - `ProgressHttpClient` 会调用 `PUT /me/media-progress/{mediaItemId}`
 - 路径字段名仍叫 `mediaItemId`，但 Android 内部传入的是 episode id
-- 上报使用登录后的 `Authorization: Bearer dev_<userId>` token
+- 上报使用登录后的 `Authorization: Bearer <accessToken>` token
 - 上报单位为秒，不上传毫秒
 - 当前低频上报时机包括暂停、播放结束，以及每 30 秒一次的低频后台 tick
 - `completed=true` 时会带上 `completionSource=ended`

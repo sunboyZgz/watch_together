@@ -17,14 +17,14 @@
 - 已实现 `POST /auth/login`，使用账号密码登录。
 - 密码使用 `bcrypt` 哈希后写入 PostgreSQL。
 - 账号写入前会做 trim 和 lowercase 归一化。
-- 当前登录返回 `dev_<userId>` 占位 access token。
-- Android 登录成功后在运行时保存 `AuthSession`，后续 HTTP 请求携带 `Authorization: Bearer dev_<userId>`。
+- 当前登录返回 JWT access token。
+- Android 登录成功后在运行时保存 `AuthSession`，后续 HTTP 请求携带 `Authorization: Bearer <accessToken>`。
 
 已确认的下一步需求：
 
-- WebSocket 必须携带登录 token。
-- 后端不能信任 WebSocket payload 中的 `userId`，应从 token 验证结果绑定用户身份。
-- JWT 可以作为正式 access token 的成熟工具方向。
+- WebSocket 已要求携带登录 token。
+- 后端不再信任 WebSocket payload 中的 `userId`，连接身份从 token 验证结果绑定。
+- JWT 已作为 access token 工具落地。
 - 后续 token 持久化、refresh token、登出和多端 session 管理另行设计。
 
 ## 3. 首页
@@ -67,6 +67,7 @@
 - `POST /rooms/{roomCode}/join` 支持通过房间码加入业务房间。
 - `GET /rooms/{roomCode}` 提供放映室首屏业务数据，包括房间、媒体和成员。
 - Android 当前在进入放映室前会尽量加载 room detail，避免收到实时状态时缺少真实 `mediaUrl`。
+- Android WebSocket 握手已携带 `Authorization: Bearer <accessToken>`。
 
 当前公开房间规则：
 
@@ -150,8 +151,6 @@ Android 当前能力：
 
 待实现或待加固：
 
-- WebSocket 握手必须鉴权。
-- 握手成功后用户身份应绑定到连接，业务消息不再信任 payload userId。
 - 需要区分主动离开和异常断开。
 - 需要定义慢客户端策略：优先合并/丢弃可恢复消息，让客户端通过 `room_state.request` 恢复；长期不可写或心跳超时再关闭连接。
 - 需要补充面向 100+ 人房间的压测和指标。
@@ -243,8 +242,6 @@ Android 当前能力：
 
 ## 14. 已确认但待实现的近期能力
 
-- WebSocket token 鉴权。
-- WebSocket 身份从 token 绑定，不信任 payload userId。
 - stale seq 拒绝。
 - 断线重连 5 分钟 grace period。
 - 主动离开房间协议。

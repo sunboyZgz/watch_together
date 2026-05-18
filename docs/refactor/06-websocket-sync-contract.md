@@ -13,6 +13,16 @@ All WebSocket messages use:
 }
 ```
 
+## Authentication
+
+WebSocket `/ws` requires:
+
+```http
+Authorization: Bearer <accessToken>
+```
+
+The server verifies the token during the WebSocket handshake and binds the authenticated user id to the connection. Payload `userId` is kept only for protocol compatibility and mismatch detection; it is not trusted for room membership, host authorization, or control authority.
+
 ## Authority Model
 
 The server owns the room timeline vector:

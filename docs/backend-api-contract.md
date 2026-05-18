@@ -187,7 +187,7 @@ Authorization: Bearer <accessToken>
       "nickname": "Xingye",
       "avatarSeed": "xingye"
     },
-    "accessToken": "dev_token_placeholder"
+    "accessToken": "jwt_access_token"
   },
   "meta": {
     "requestId": "req_20260426_004"
@@ -195,7 +195,15 @@ Authorization: Bearer <accessToken>
 }
 ```
 
-当前阶段如果暂不实现真实 JWT，也不要让 Android 直接依赖“无 token 登录”的最终形态。
+当前阶段服务端已经签发 JWT access token，不保留 `dev_<userId>` legacy token 兼容。
+
+WebSocket `/ws` 也必须携带同一个 header：
+
+```http
+Authorization: Bearer <accessToken>
+```
+
+服务端以 token 验证结果绑定连接身份，不再信任 WebSocket payload 中的 `userId` 作为权限来源。
 
 ## 分页规则
 
@@ -237,7 +245,7 @@ cursor=opaque_cursor
 - `POST /auth/login` 已落地，对应 `INT-116`
 - 密码使用 `bcrypt` 写入 `users.password_hash`
 - 账号写入前会做 trim + lowercase 归一化
-- 当前 `accessToken` 为 `dev_<userId>` 占位 token，后续再替换为正式 token/session 机制
+- 当前 `accessToken` 为 JWT access token，后续再补充 refresh token / session 持久化机制
 - 启动服务端前必须配置 `DATABASE_URL`，否则 auth endpoints 会返回 `503`
 
 #### `POST /auth/login`
@@ -265,7 +273,7 @@ cursor=opaque_cursor
       "avatarSeed": "xingye",
       "avatarUrl": null
     },
-    "accessToken": "dev_token_placeholder"
+    "accessToken": "jwt_access_token"
   },
   "meta": {
     "requestId": "req_001"
@@ -332,7 +340,7 @@ cursor=opaque_cursor
 当前实现状态：
 
 - `GET /home/summary` 已落地，对应 `INT-118`
-- 使用 `Authorization: Bearer dev_<userId>` 读取当前用户
+- 使用 `Authorization: Bearer <accessToken>` 读取当前用户
 - 观看进度展示数据来自 `users`、`user_media_progress`、`media_episodes` 与 `media_seasons`
 - `lastWatched` 没有记录时返回 `null`
 - `continueWatching` 当前取最近 2 条未完成记录
@@ -346,7 +354,7 @@ cursor=opaque_cursor
 
 ```http
 GET /home/summary
-Authorization: Bearer dev_user_uuid
+Authorization: Bearer <accessToken>
 Accept: application/json
 ```
 
@@ -548,7 +556,7 @@ Android 联调状态：
 - `POST /rooms/{roomCode}/join` 已落地，对应 `INT-122`
 - 房间媒体业务主数据来自 PostgreSQL `rooms / room_members / media_episodes / media_seasons`
 - `rooms.media_episode_id` 是 create/detail 的媒体引用
-- 创建房间和加入房间都需要 `Authorization: Bearer dev_<userId>`
+- 创建房间和加入房间都需要 `Authorization: Bearer <accessToken>`
 - `room.id` 是 PostgreSQL 中的 UUID 主键
 - `room.roomCode` 是 6 位可分享房间码，也是当前 WebSocket `join_room.roomId` 使用的运行时房间 key
 - HTTP 负责创建/加入业务关系，WebSocket 仍负责实时连接、初始 `room_state` 和播放同步
@@ -561,7 +569,7 @@ Android 联调状态：
 
 ```http
 POST /rooms
-Authorization: Bearer dev_user_uuid
+Authorization: Bearer <accessToken>
 Content-Type: application/json
 Accept: application/json
 ```
@@ -637,7 +645,7 @@ Accept: application/json
 
 ```http
 POST /rooms/A7K2M9/join
-Authorization: Bearer dev_user_uuid
+Authorization: Bearer <accessToken>
 Accept: application/json
 ```
 
@@ -761,7 +769,7 @@ Accept: application/json
 - `PUT /me/media-progress/{mediaItemId}` 已落地，对应 `INT-124`
 - 写入 PostgreSQL `user_media_progress`
 - 写入目标为 `user_media_progress.media_episode_id`
-- 使用 `Authorization: Bearer dev_<userId>` 识别当前用户
+- 使用 `Authorization: Bearer <accessToken>` 识别当前用户
 - 进度以秒级写入，用于首页 `lastWatched / continueWatching`
 - 不用于实时播放同步，不替代 WebSocket authority state
 
@@ -769,7 +777,7 @@ Accept: application/json
 
 ```http
 PUT /me/media-progress/episode_uuid
-Authorization: Bearer dev_user_uuid
+Authorization: Bearer <accessToken>
 Content-Type: application/json
 Accept: application/json
 ```
@@ -880,8 +888,7 @@ psql "$DATABASE_URL" -f seeds/dev_seed.sql
 - host user: `00000000-0000-0000-0000-000000000001`
 - viewer user: `00000000-0000-0000-0000-000000000002`
 - test password: `secret`
-- host dev token: `dev_00000000-0000-0000-0000-000000000001`
-- viewer dev token: `dev_00000000-0000-0000-0000-000000000002`
+- host/viewer access token: call `POST /auth/login` with the seeded account and use the returned JWT `accessToken`
 - media item: `10000000-0000-0000-0000-000000000001`，`紫罗兰永恒花园`
 - media item: `10000000-0000-0000-0000-000000000002`，`孤独摇滚!`
 - media item: `10000000-0000-0000-0000-000000000003`，`葬送的芙莉莲`
@@ -949,7 +956,7 @@ Android 联调注意：
 ```bash
 curl -s http://127.0.0.1:8080/rooms \
   -H 'Content-Type: application/json' \
-  -H 'Authorization: Bearer dev_<userId>' \
+  -H 'Authorization: Bearer <accessToken>' \
   -d '{"mediaItemId":"<mediaItemId>"}'
 ```
 
@@ -957,7 +964,7 @@ curl -s http://127.0.0.1:8080/rooms \
 
 ```bash
 curl -s -X POST http://127.0.0.1:8080/rooms/A7K2M9/join \
-  -H 'Authorization: Bearer dev_<userId>'
+  -H 'Authorization: Bearer <accessToken>'
 ```
 
 获取放映室首屏数据：
@@ -983,7 +990,7 @@ Android 联调注意：
 ```bash
 curl -s -X PUT http://127.0.0.1:8080/me/media-progress/10000000-0000-0000-0000-000000000001 \
   -H 'Content-Type: application/json' \
-  -H 'Authorization: Bearer dev_00000000-0000-0000-0000-000000000001' \
+  -H 'Authorization: Bearer <accessToken>' \
   -d '{"lastPositionSeconds":600,"durationSeconds":1458,"completed":false}'
 ```
 
@@ -992,7 +999,7 @@ curl -s -X PUT http://127.0.0.1:8080/me/media-progress/10000000-0000-0000-0000-0
 ```bash
 curl -s -X PUT http://127.0.0.1:8080/me/media-progress/10000000-0000-0000-0000-000000000001 \
   -H 'Content-Type: application/json' \
-  -H 'Authorization: Bearer dev_00000000-0000-0000-0000-000000000001' \
+  -H 'Authorization: Bearer <accessToken>' \
   -d '{"lastPositionSeconds":1458,"durationSeconds":1458,"completed":true,"completionSource":"ended"}'
 ```
 

@@ -30,12 +30,14 @@ type Config struct {
 	LogLevel    string
 	DatabaseURL string
 	DebugSync   bool
+	Auth        auth.TokenConfig
 	Redis       cache.RedisConfig
 	WebSocket   transport.WebSocketRuntimeConfig
 }
 
 type RedisConfig = cache.RedisConfig
 type WebSocketRuntimeConfig = transport.WebSocketRuntimeConfig
+type AuthTokenConfig = auth.TokenConfig
 
 type Server struct {
 	config      Config
@@ -50,6 +52,7 @@ type Server struct {
 func NewServer(config Config) *Server {
 	serverCtx, cancel := context.WithCancel(context.Background())
 	roomManager := room.NewManager()
+	tokenManager := auth.NewTokenManager(config.Auth)
 	redisClient := newRedisClient("room_state", cache.RoomStateRedisConfig(config.Redis))
 	var roomStateCache *cache.RoomStateCache
 	if redisClient != nil {
@@ -91,16 +94,17 @@ func NewServer(config Config) *Server {
 	if roomStore != nil {
 		go startPersistentRoomCleanupLoop(serverCtx, room.DefaultCleanupInterval(), roomStore)
 	}
-	roomHTTPHandler := transport.NewRoomHTTPHandler(roomManager, roomService)
-	authHTTPHandler := transport.NewAuthHTTPHandler(newAuthService(db))
-	homeHTTPHandler := transport.NewHomeHTTPHandler(newHomeService(db))
+	roomHTTPHandler := transport.NewRoomHTTPHandlerWithTokenVerifier(roomManager, roomService, tokenManager)
+	authHTTPHandler := transport.NewAuthHTTPHandler(newAuthService(db, tokenManager))
+	homeHTTPHandler := transport.NewHomeHTTPHandlerWithTokenVerifier(newHomeService(db), tokenManager)
 	mediaHTTPHandler := transport.NewMediaHTTPHandler(newMediaService(db))
-	progressHTTPHandler := transport.NewProgressHTTPHandler(newProgressService(db))
+	progressHTTPHandler := transport.NewProgressHTTPHandlerWithTokenVerifier(newProgressService(db), tokenManager)
 	router := newGinRouter(
 		roomManager,
 		config.DebugSync,
 		config.WebSocket,
 		roomStateCache,
+		tokenManager,
 		roomHTTPHandler,
 		authHTTPHandler,
 		homeHTTPHandler,
@@ -159,6 +163,7 @@ func newGinRouter(
 	debugSync bool,
 	webSocketConfig transport.WebSocketRuntimeConfig,
 	roomStateCache *cache.RoomStateCache,
+	tokenManager *auth.TokenManager,
 	roomHTTPHandler *transport.RoomHTTPHandler,
 	authHTTPHandler *transport.AuthHTTPHandler,
 	homeHTTPHandler *transport.HomeHTTPHandler,
@@ -180,22 +185,23 @@ func newGinRouter(
 	router.Any("/me/media-progress/*mediaPath", gin.WrapF(progressHTTPHandler.Update))
 	router.Any("/rooms", gin.WrapF(roomHTTPHandler.CreateRoom))
 	router.Any("/rooms/*roomPath", gin.WrapF(roomHTTPHandler.RoomRoute))
-	router.Any("/ws", gin.WrapH(transport.NewWebSocketHandlerWithConfigAndRoomStateWriter(
+	router.Any("/ws", gin.WrapH(transport.NewWebSocketHandlerWithConfigAndRoomStateWriterAndTokenVerifier(
 		roomManager,
 		debugSync,
 		webSocketConfig,
 		roomStateCache,
+		tokenManager,
 	)))
 
 	return router
 }
 
 // newAuthService connects the auth API to the shared PostgreSQL handle when available.
-func newAuthService(db *gorm.DB) *auth.Service {
+func newAuthService(db *gorm.DB, tokenManager *auth.TokenManager) *auth.Service {
 	if db == nil {
 		return nil
 	}
-	return auth.NewService(store.NewPostgresUserStore(db))
+	return auth.NewServiceWithTokenManager(store.NewPostgresUserStore(db), tokenManager)
 }
 
 // newHomeService connects home summary reads to the shared PostgreSQL handle when available.

@@ -37,7 +37,7 @@ func TestCreateRoomFlow(t *testing.T) {
 		"/rooms",
 		strings.NewReader(`{"mediaItemId":"media_001"}`),
 	)
-	request.Header.Set("Authorization", "Bearer dev_user_a")
+	request.Header.Set("Authorization", testAuthorizationHeader("user_a"))
 	request.Header.Set("Content-Type", "application/json")
 	recorder := httptest.NewRecorder()
 
@@ -104,7 +104,7 @@ func TestJoinRoomByCodeFlow(t *testing.T) {
 	}
 	handler := NewRoomHTTPHandler(room.NewManager(), roomapi.NewService(store))
 	request := httptest.NewRequest(http.MethodPost, "/rooms/A7K2M9/join", nil)
-	request.Header.Set("Authorization", "Bearer dev_user_b")
+	request.Header.Set("Authorization", testAuthorizationHeader("user_b"))
 	recorder := httptest.NewRecorder()
 
 	handler.JoinRoomByCode(recorder, request)
@@ -136,7 +136,7 @@ func TestJoinRoomByCodeFlow(t *testing.T) {
 func TestJoinRoomByCodeRejectsUnknownRoute(t *testing.T) {
 	handler := NewRoomHTTPHandler(room.NewManager(), roomapi.NewService(&fakeRoomStore{}))
 	request := httptest.NewRequest(http.MethodPost, "/rooms/A7K2M9/nope", nil)
-	request.Header.Set("Authorization", "Bearer dev_user_b")
+	request.Header.Set("Authorization", testAuthorizationHeader("user_b"))
 	recorder := httptest.NewRecorder()
 
 	handler.JoinRoomByCode(recorder, request)
@@ -150,7 +150,7 @@ func TestJoinRoomByCodeReturnsNotFoundWhenRoomMissing(t *testing.T) {
 	store := &fakeRoomStore{err: roomapi.ErrRoomNotFound}
 	handler := NewRoomHTTPHandler(room.NewManager(), roomapi.NewService(store))
 	request := httptest.NewRequest(http.MethodPost, "/rooms/Z9X8Y7/join", nil)
-	request.Header.Set("Authorization", "Bearer dev_user_b")
+	request.Header.Set("Authorization", testAuthorizationHeader("user_b"))
 	recorder := httptest.NewRecorder()
 
 	handler.JoinRoomByCode(recorder, request)

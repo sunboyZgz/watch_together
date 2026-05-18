@@ -39,7 +39,8 @@ type CreateUserParams struct {
 }
 
 type Service struct {
-	store UserStore
+	store        UserStore
+	tokenManager *TokenManager
 }
 
 type AuthResult struct {
@@ -49,7 +50,17 @@ type AuthResult struct {
 
 // NewService builds the auth service around a persistent user store.
 func NewService(store UserStore) *Service {
-	return &Service{store: store}
+	return NewServiceWithTokenManager(store, NewTokenManager(DefaultTokenConfig()))
+}
+
+func NewServiceWithTokenManager(store UserStore, tokenManager *TokenManager) *Service {
+	if tokenManager == nil {
+		tokenManager = NewTokenManager(DefaultTokenConfig())
+	}
+	return &Service{
+		store:        store,
+		tokenManager: tokenManager,
+	}
 }
 
 // Register validates account input, hashes the password, and creates a user.
@@ -75,10 +86,7 @@ func (s *Service) Register(ctx context.Context, account string, password string,
 		return AuthResult{}, err
 	}
 
-	return AuthResult{
-		User:        user,
-		AccessToken: devAccessToken(user.ID),
-	}, nil
+	return s.authResult(user)
 }
 
 // Login verifies the account and password and returns the minimum auth result.
@@ -99,16 +107,20 @@ func (s *Service) Login(ctx context.Context, account string, password string) (A
 		return AuthResult{}, ErrInvalidCredentials
 	}
 
-	return AuthResult{
-		User:        user,
-		AccessToken: devAccessToken(user.ID),
-	}, nil
+	return s.authResult(user)
 }
 
 func normalizeAccount(account string) string {
 	return strings.ToLower(strings.TrimSpace(account))
 }
 
-func devAccessToken(userID string) string {
-	return "dev_" + userID
+func (s *Service) authResult(user User) (AuthResult, error) {
+	accessToken, err := s.tokenManager.IssueAccessToken(user)
+	if err != nil {
+		return AuthResult{}, err
+	}
+	return AuthResult{
+		User:        user,
+		AccessToken: accessToken,
+	}, nil
 }

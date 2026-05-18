@@ -35,6 +35,10 @@ func main() {
 		LogLevel:    runtimeConfig.LogLevel,
 		DatabaseURL: runtimeConfig.DatabaseURL,
 		DebugSync:   runtimeConfig.DebugSync,
+		Auth: app.AuthTokenConfig{
+			JWTSecret:      runtimeConfig.Auth.JWTSecret,
+			AccessTokenTTL: time.Duration(runtimeConfig.Auth.AccessTokenTTLHours) * time.Hour,
+		},
 		Redis: app.RedisConfig{
 			Addr:       runtimeConfig.Redis.Addr,
 			Username:   runtimeConfig.Redis.Username,

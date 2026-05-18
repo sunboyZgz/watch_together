@@ -12,6 +12,7 @@ import (
 
 type ProgressHTTPHandler struct {
 	progressService *progress.Service
+	tokenVerifier   accessTokenVerifier
 }
 
 type updateProgressRequest struct {
@@ -31,7 +32,17 @@ type progressResponse struct {
 
 // NewProgressHTTPHandler builds the HTTP entrypoint for user media progress writes.
 func NewProgressHTTPHandler(progressService *progress.Service) *ProgressHTTPHandler {
-	return &ProgressHTTPHandler{progressService: progressService}
+	return NewProgressHTTPHandlerWithTokenVerifier(progressService, nil)
+}
+
+func NewProgressHTTPHandlerWithTokenVerifier(
+	progressService *progress.Service,
+	tokenVerifier accessTokenVerifier,
+) *ProgressHTTPHandler {
+	return &ProgressHTTPHandler{
+		progressService: progressService,
+		tokenVerifier:   tokenVerifier,
+	}
 }
 
 // Update handles PUT /me/media-progress/{mediaItemId}.
@@ -44,7 +55,7 @@ func (h *ProgressHTTPHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	userID, ok := userIDFromAuthorization(r.Header.Get("Authorization"))
+	userID, ok := userIDFromAuthorization(r.Header.Get("Authorization"), h.tokenVerifier)
 	if !ok {
 		writeAPIError(w, http.StatusUnauthorized, "UNAUTHORIZED", "missing or invalid access token", nil)
 		return

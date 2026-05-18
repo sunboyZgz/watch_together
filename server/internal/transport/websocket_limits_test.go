@@ -29,12 +29,12 @@ func TestWebSocketHandlerRejectsJoinWhenRoomIsFull(t *testing.T) {
 	defer httpServer.Close()
 
 	ctx := context.Background()
-	first := dialTestWebSocket(t, ctx, httpServer.URL)
+	first := dialTestWebSocket(t, ctx, httpServer.URL, "user_b")
 	defer first.Close(websocket.StatusNormalClosure, "test done")
 	writeJoinRoom(t, ctx, first, createdRoom.ID(), "user_b")
 	assertNextEnvelopeType(t, ctx, first, protocol.TypeRoomState)
 
-	second := dialTestWebSocket(t, ctx, httpServer.URL)
+	second := dialTestWebSocket(t, ctx, httpServer.URL, "user_c")
 	defer second.Close(websocket.StatusNormalClosure, "test done")
 	writeJoinRoom(t, ctx, second, createdRoom.ID(), "user_c")
 	envelope := assertNextEnvelopeType(t, ctx, second, protocol.TypeError)
@@ -59,10 +59,10 @@ func TestWebSocketHandlerRejectsConnectionWhenProcessLimitIsReached(t *testing.T
 	defer httpServer.Close()
 
 	ctx := context.Background()
-	first := dialTestWebSocket(t, ctx, httpServer.URL)
+	first := dialTestWebSocket(t, ctx, httpServer.URL, "user_a")
 	defer first.Close(websocket.StatusNormalClosure, "test done")
 
-	_, response, err := websocket.Dial(ctx, wsURL(httpServer.URL), nil)
+	_, response, err := websocket.Dial(ctx, wsURL(httpServer.URL), websocketDialOptions("user_b"))
 	if err == nil {
 		t.Fatalf("expected second websocket dial to fail")
 	}
@@ -74,9 +74,9 @@ func TestWebSocketHandlerRejectsConnectionWhenProcessLimitIsReached(t *testing.T
 	}
 }
 
-func dialTestWebSocket(t *testing.T, ctx context.Context, serverURL string) *websocket.Conn {
+func dialTestWebSocket(t *testing.T, ctx context.Context, serverURL string, userID string) *websocket.Conn {
 	t.Helper()
-	conn, _, err := websocket.Dial(ctx, wsURL(serverURL), nil)
+	conn, _, err := websocket.Dial(ctx, wsURL(serverURL), websocketDialOptions(userID))
 	if err != nil {
 		t.Fatalf("dial websocket: %v", err)
 	}

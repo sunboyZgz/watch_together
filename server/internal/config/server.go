@@ -12,8 +12,14 @@ type ServerRuntimeConfig struct {
 	LogLevel    string
 	DatabaseURL string
 	DebugSync   bool
+	Auth        AuthConfig
 	Redis       RedisConfig
 	WebSocket   WebSocketConfig
+}
+
+type AuthConfig struct {
+	JWTSecret           string
+	AccessTokenTTLHours int
 }
 
 type RedisConfig struct {
@@ -36,18 +42,19 @@ type WebSocketConfig struct {
 
 func LoadServerRuntimeConfig(configDir string) (ServerRuntimeConfig, error) {
 	defaults := map[string]any{
-		"APP_ENV":                        "local",
-		"SERVER_HOST":                    "0.0.0.0",
-		"SERVER_PORT":                    "8080",
-		"LOG_LEVEL":                      "debug",
-		"DEBUG_SYNC":                     true,
-		"REDIS_DB":                       0,
-		"WS_BROADCAST_CONCURRENCY_LIMIT": 64,
-		"WS_BROADCAST_TIMEOUT_MS":        5000,
+		"APP_ENV":                         "local",
+		"SERVER_HOST":                     "0.0.0.0",
+		"SERVER_PORT":                     "8080",
+		"LOG_LEVEL":                       "debug",
+		"DEBUG_SYNC":                      true,
+		"AUTH_ACCESS_TOKEN_TTL_HOURS":     24,
+		"REDIS_DB":                        0,
+		"WS_BROADCAST_CONCURRENCY_LIMIT":  64,
+		"WS_BROADCAST_TIMEOUT_MS":         5000,
 		"WS_BROADCAST_ENQUEUE_TIMEOUT_MS": 3000,
-		"WS_CLIENT_OUTBOX_CAPACITY":      64,
-		"WS_MAX_CONNECTIONS":             0,
-		"ROOM_MAX_CLIENTS":               0,
+		"WS_CLIENT_OUTBOX_CAPACITY":       64,
+		"WS_MAX_CONNECTIONS":              0,
+		"ROOM_MAX_CLIENTS":                0,
 	}
 	keys := []string{
 		"APP_ENV",
@@ -56,6 +63,8 @@ func LoadServerRuntimeConfig(configDir string) (ServerRuntimeConfig, error) {
 		"LOG_LEVEL",
 		"DATABASE_URL",
 		"DEBUG_SYNC",
+		"AUTH_JWT_SECRET",
+		"AUTH_ACCESS_TOKEN_TTL_HOURS",
 		"REDIS_ADDR",
 		"REDIS_USERNAME",
 		"REDIS_PASSWORD",
@@ -82,6 +91,10 @@ func LoadServerRuntimeConfig(configDir string) (ServerRuntimeConfig, error) {
 		LogLevel:    trimmedString(loader, "LOG_LEVEL"),
 		DatabaseURL: trimmedString(loader, "DATABASE_URL"),
 		DebugSync:   strings.EqualFold(strings.TrimSpace(loader.GetString("DEBUG_SYNC")), "true"),
+		Auth: AuthConfig{
+			JWTSecret:           trimmedString(loader, "AUTH_JWT_SECRET"),
+			AccessTokenTTLHours: intFromConfig(loader, "AUTH_ACCESS_TOKEN_TTL_HOURS"),
+		},
 		Redis: RedisConfig{
 			Addr:       trimmedString(loader, "REDIS_ADDR"),
 			Username:   trimmedString(loader, "REDIS_USERNAME"),

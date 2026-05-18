@@ -40,8 +40,15 @@ func TestRegisterCreatesUserWithEnvelope(t *testing.T) {
 	if response.Data.User.Nickname != "Xingye" {
 		t.Fatalf("expected nickname Xingye, got %q", response.Data.User.Nickname)
 	}
-	if !strings.HasPrefix(response.Data.AccessToken, "dev_") {
-		t.Fatalf("expected dev access token, got %q", response.Data.AccessToken)
+	if response.Data.AccessToken == "" {
+		t.Fatalf("expected access token")
+	}
+	claims, err := auth.NewTokenManager(auth.DefaultTokenConfig()).VerifyAccessToken(response.Data.AccessToken)
+	if err != nil {
+		t.Fatalf("verify access token: %v", err)
+	}
+	if claims.UserID != response.Data.User.ID {
+		t.Fatalf("expected token user %s, got %s", response.Data.User.ID, claims.UserID)
 	}
 	if response.Meta.RequestID == "" {
 		t.Fatalf("expected requestId in meta")

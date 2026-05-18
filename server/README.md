@@ -292,7 +292,7 @@ server/
 - `go test ./...`
 - `go run ./cmd/mediactl ingest --library-root <root> --input <root>/<season>/season-01/episode-01.mp4 --title <title>` 输出 dry-run summary
 - `go run ./cmd/mediactl ingest --library-root <root> --input <root>/<season>/season-01/episode-01.mp4 --title <title> --dry-run=false` 生成 HLS 并执行配置好的 storage uploader
-- `POST /auth/register` 返回 `201 Created`、用户资料和 `dev_<userId>` access token
+- `POST /auth/register` 返回 `201 Created`、用户资料和 JWT access token
 - `POST /auth/login` 校验 bcrypt 密码并返回统一 envelope
 - 重复注册同一账号返回 `409 CONFLICT`
 - 错误密码登录返回 `401 UNAUTHORIZED`

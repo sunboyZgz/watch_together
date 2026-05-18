@@ -3,13 +3,13 @@ package transport
 import (
 	"errors"
 	"net/http"
-	"strings"
 
 	"watch_together/server/internal/home"
 )
 
 type HomeHTTPHandler struct {
-	homeService *home.Service
+	homeService   *home.Service
+	tokenVerifier accessTokenVerifier
 }
 
 type homeSummaryResponse struct {
@@ -34,7 +34,17 @@ type watchProgressResponse struct {
 
 // NewHomeHTTPHandler builds the HTTP entrypoint for the Android home page.
 func NewHomeHTTPHandler(homeService *home.Service) *HomeHTTPHandler {
-	return &HomeHTTPHandler{homeService: homeService}
+	return NewHomeHTTPHandlerWithTokenVerifier(homeService, nil)
+}
+
+func NewHomeHTTPHandlerWithTokenVerifier(
+	homeService *home.Service,
+	tokenVerifier accessTokenVerifier,
+) *HomeHTTPHandler {
+	return &HomeHTTPHandler{
+		homeService:   homeService,
+		tokenVerifier: tokenVerifier,
+	}
 }
 
 // Summary handles GET /home/summary using the current dev access token.
@@ -47,7 +57,7 @@ func (h *HomeHTTPHandler) Summary(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	userID, ok := userIDFromAuthorization(r.Header.Get("Authorization"))
+	userID, ok := userIDFromAuthorization(r.Header.Get("Authorization"), h.tokenVerifier)
 	if !ok {
 		writeAPIError(w, http.StatusUnauthorized, "UNAUTHORIZED", "missing or invalid access token", nil)
 		return
@@ -78,21 +88,6 @@ func (h *HomeHTTPHandler) writeHomeError(w http.ResponseWriter, err error) {
 	default:
 		writeAPIError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "home summary request failed", nil)
 	}
-}
-
-func userIDFromAuthorization(header string) (string, bool) {
-	const bearerPrefix = "Bearer "
-	const devTokenPrefix = "dev_"
-
-	if !strings.HasPrefix(header, bearerPrefix) {
-		return "", false
-	}
-	token := strings.TrimSpace(strings.TrimPrefix(header, bearerPrefix))
-	userID := strings.TrimSpace(strings.TrimPrefix(token, devTokenPrefix))
-	if token == userID || userID == "" {
-		return "", false
-	}
-	return userID, true
 }
 
 func homeSummaryToResponse(summary home.Summary) homeSummaryResponse {

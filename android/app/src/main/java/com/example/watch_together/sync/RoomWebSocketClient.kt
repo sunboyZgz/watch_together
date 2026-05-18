@@ -51,7 +51,13 @@ class RoomWebSocketClient(
 
     // joinRoom opens the shared /ws endpoint, sends join_room, and forwards the
     // first protocol messages back to the UI layer.
-    fun joinRoom(wsUrl: String, roomId: String, userId: String, listener: RoomWebSocketListener) {
+    fun joinRoom(
+        wsUrl: String,
+        roomId: String,
+        userId: String,
+        accessToken: String,
+        listener: RoomWebSocketListener
+    ) {
         close()
         val generation = ++sessionGeneration
         activeRoomId = roomId
@@ -61,6 +67,7 @@ class RoomWebSocketClient(
 
         val request = Request.Builder()
             .url(wsUrl)
+            .header("Authorization", "Bearer $accessToken")
             .build()
 
         webSocket = okHttpClient.newWebSocket(request, object : WebSocketListener() {
