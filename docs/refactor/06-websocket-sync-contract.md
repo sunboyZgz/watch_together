@@ -104,7 +104,7 @@ the server may log client seq vs server seq for diagnostics
 the server does not read Redis and does not broadcast this response
 ```
 
-`seq` in the request is the client's last known server seq. It is diagnostic data, not an optimistic-lock precondition.
+`seq` in `room_state.request` is the client's last known server seq. It is diagnostic data and does not gate the response.
 
 ## Control Events
 
@@ -157,7 +157,7 @@ duplicates return the latest room_state to the requester instead of advancing se
 cross-instance Redis dedup is deferred until multi-instance room authority is designed
 ```
 
-Client `seq` on control requests is soft diagnostic data. The server logs it with previous/new server seq but does not reject stale seq yet.
+Client `seq` on control requests is the expected authoritative server seq. The server accepts a control only when client `seq == current room_state.seq`; any mismatch returns the latest `room_state` to the requester, does not advance the timeline, does not broadcast a control event, and does not reserve `requestId`.
 
 Known server reasons in this branch:
 

@@ -191,6 +191,12 @@ fun RoomTheaterScreen(
             override fun onPlay(payload: PlayPayload) {
                 coroutineScope.launch {
                     if (payload.userId == currentActiveRoomUserId) {
+                        latestRoomState = currentLatestRoomState?.copy(
+                            paused = false,
+                            ended = false,
+                            positionMs = payload.positionMs,
+                            seq = payload.seq
+                        )
                         appendPlayerLog(playerLogs, "self play ack seq=${payload.seq} pos=${payload.positionMs}", maxSize = 10)
                         return@launch
                     }
@@ -213,6 +219,12 @@ fun RoomTheaterScreen(
             override fun onPause(payload: PausePayload) {
                 coroutineScope.launch {
                     if (payload.userId == currentActiveRoomUserId) {
+                        latestRoomState = currentLatestRoomState?.copy(
+                            paused = true,
+                            ended = false,
+                            positionMs = payload.positionMs,
+                            seq = payload.seq
+                        )
                         appendPlayerLog(playerLogs, "self pause ack seq=${payload.seq} pos=${payload.positionMs}", maxSize = 10)
                         return@launch
                     }
@@ -235,6 +247,10 @@ fun RoomTheaterScreen(
             override fun onSeek(payload: SeekPayload) {
                 coroutineScope.launch {
                     if (payload.userId == currentActiveRoomUserId) {
+                        latestRoomState = currentLatestRoomState?.copy(
+                            positionMs = payload.positionMs,
+                            seq = payload.seq
+                        )
                         appendPlayerLog(playerLogs, "self seek ack seq=${payload.seq} pos=${payload.positionMs}", maxSize = 10)
                         return@launch
                     }
@@ -256,6 +272,11 @@ fun RoomTheaterScreen(
             override fun onPlaybackRate(payload: SetPlaybackRatePayload) {
                 coroutineScope.launch {
                     if (payload.userId == currentActiveRoomUserId) {
+                        latestRoomState = currentLatestRoomState?.copy(
+                            positionMs = payload.positionMs,
+                            playbackRate = payload.playbackRate,
+                            seq = payload.seq
+                        )
                         appendPlayerLog(playerLogs, "self rate ack seq=${payload.seq} rate=${payload.playbackRate}", maxSize = 10)
                         return@launch
                     }
@@ -278,6 +299,12 @@ fun RoomTheaterScreen(
             override fun onEnded(payload: EndedPayload) {
                 coroutineScope.launch {
                     if (payload.userId == currentActiveRoomUserId) {
+                        latestRoomState = currentLatestRoomState?.copy(
+                            paused = true,
+                            ended = true,
+                            positionMs = payload.positionMs,
+                            seq = payload.seq
+                        )
                         appendPlayerLog(playerLogs, "self ended ack seq=${payload.seq}", maxSize = 10)
                         return@launch
                     }
@@ -424,6 +451,7 @@ fun RoomTheaterScreen(
                                 coroutineScope = coroutineScope,
                                 roomSessionController = roomSessionController,
                                 adapter = adapter,
+                                latestSeq = { currentLatestRoomState?.seq ?: 0L },
                                 logs = playerLogs
                             )
                         }
@@ -447,6 +475,7 @@ fun RoomTheaterScreen(
                                 coroutineScope = coroutineScope,
                                 roomSessionController = roomSessionController,
                                 adapter = adapter,
+                                latestSeq = { currentLatestRoomState?.seq ?: 0L },
                                 logs = playerLogs
                             )
                         }
@@ -467,6 +496,7 @@ fun RoomTheaterScreen(
                                 coroutineScope = coroutineScope,
                                 roomSessionController = roomSessionController,
                                 adapter = adapter,
+                                latestSeq = { currentLatestRoomState?.seq ?: 0L },
                                 logs = playerLogs
                             )
                         }
@@ -708,12 +738,13 @@ private fun schedulePostSeekCalibration(
     coroutineScope: kotlinx.coroutines.CoroutineScope,
     roomSessionController: RoomSessionController,
     adapter: PlayerAdapter,
+    latestSeq: () -> Long,
     logs: MutableList<String>
 ): Job {
     return coroutineScope.launch {
         delay(PostSeekCalibrationDelayMs)
         val positionMs = adapter.getCurrentPosition().coerceAtLeast(0L)
-        val sent = roomSessionController.sendSeek(positionMs = positionMs, seq = 0L)
+        val sent = roomSessionController.sendSeek(positionMs = positionMs, seq = latestSeq())
         appendHostSendLog(logs, roomSessionController, "seek-calibration", sent, "pos=$positionMs")
     }
 }

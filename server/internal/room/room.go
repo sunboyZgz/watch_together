@@ -9,8 +9,9 @@ import (
 )
 
 var (
-	ErrNotHost  = errors.New("only host can control playback")
-	ErrRoomFull = errors.New("room is full")
+	ErrNotHost     = errors.New("only host can control playback")
+	ErrRoomFull    = errors.New("room is full")
+	ErrSeqMismatch = errors.New("control seq does not match current room state")
 )
 
 const (
@@ -21,18 +22,18 @@ const (
 )
 
 type State struct {
-	RoomID       string
-	MediaID      string
+	RoomID          string
+	MediaID         string
 	MediaDurationMs *int64
-	HostUserID   string
-	Paused       bool
-	Ended        bool
-	PositionMs   int64
-	Velocity     float64
-	ServerTimeMs int64
-	PlaybackRate float64
-	Seq          int64
-	Reason       string
+	HostUserID      string
+	Paused          bool
+	Ended           bool
+	PositionMs      int64
+	Velocity        float64
+	ServerTimeMs    int64
+	PlaybackRate    float64
+	Seq             int64
+	Reason          string
 }
 
 type Room struct {
@@ -239,11 +240,22 @@ func (r *Room) ClientCount() int {
 // ApplyPlay updates the room's authority state for a play action and snapshots the
 // active clients so the transport layer can broadcast without holding the room lock.
 func (r *Room) ApplyPlay(userID string, positionMs int64) (State, []*ClientConnection, error) {
+	return r.applyPlay(userID, positionMs, nil)
+}
+
+func (r *Room) ApplyPlayIfSeq(userID string, positionMs int64, expectedSeq int64) (State, []*ClientConnection, error) {
+	return r.applyPlay(userID, positionMs, &expectedSeq)
+}
+
+func (r *Room) applyPlay(userID string, positionMs int64, expectedSeq *int64) (State, []*ClientConnection, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	if r.state.HostUserID != userID {
 		return State{}, nil, ErrNotHost
+	}
+	if expectedSeq != nil && *expectedSeq != r.state.Seq {
+		return r.currentStateLocked(r.now()), nil, ErrSeqMismatch
 	}
 
 	now := r.now()
@@ -261,11 +273,22 @@ func (r *Room) ApplyPlay(userID string, positionMs int64) (State, []*ClientConne
 
 // ApplyPause updates the room's authority state for a pause action.
 func (r *Room) ApplyPause(userID string, positionMs int64) (State, []*ClientConnection, error) {
+	return r.applyPause(userID, positionMs, nil)
+}
+
+func (r *Room) ApplyPauseIfSeq(userID string, positionMs int64, expectedSeq int64) (State, []*ClientConnection, error) {
+	return r.applyPause(userID, positionMs, &expectedSeq)
+}
+
+func (r *Room) applyPause(userID string, positionMs int64, expectedSeq *int64) (State, []*ClientConnection, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	if r.state.HostUserID != userID {
 		return State{}, nil, ErrNotHost
+	}
+	if expectedSeq != nil && *expectedSeq != r.state.Seq {
+		return r.currentStateLocked(r.now()), nil, ErrSeqMismatch
 	}
 
 	now := r.now()
@@ -276,11 +299,22 @@ func (r *Room) ApplyPause(userID string, positionMs int64) (State, []*ClientConn
 
 // ApplySeek updates the room position while preserving the current paused flag.
 func (r *Room) ApplySeek(userID string, positionMs int64) (State, []*ClientConnection, error) {
+	return r.applySeek(userID, positionMs, nil)
+}
+
+func (r *Room) ApplySeekIfSeq(userID string, positionMs int64, expectedSeq int64) (State, []*ClientConnection, error) {
+	return r.applySeek(userID, positionMs, &expectedSeq)
+}
+
+func (r *Room) applySeek(userID string, positionMs int64, expectedSeq *int64) (State, []*ClientConnection, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	if r.state.HostUserID != userID {
 		return State{}, nil, ErrNotHost
+	}
+	if expectedSeq != nil && *expectedSeq != r.state.Seq {
+		return r.currentStateLocked(r.now()), nil, ErrSeqMismatch
 	}
 
 	now := r.now()
@@ -294,11 +328,30 @@ func (r *Room) ApplyPlaybackRate(
 	userID string,
 	playbackRate float64,
 ) (State, []*ClientConnection, error) {
+	return r.applyPlaybackRate(userID, playbackRate, nil)
+}
+
+func (r *Room) ApplyPlaybackRateIfSeq(
+	userID string,
+	playbackRate float64,
+	expectedSeq int64,
+) (State, []*ClientConnection, error) {
+	return r.applyPlaybackRate(userID, playbackRate, &expectedSeq)
+}
+
+func (r *Room) applyPlaybackRate(
+	userID string,
+	playbackRate float64,
+	expectedSeq *int64,
+) (State, []*ClientConnection, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	if r.state.HostUserID != userID {
 		return State{}, nil, ErrNotHost
+	}
+	if expectedSeq != nil && *expectedSeq != r.state.Seq {
+		return r.currentStateLocked(r.now()), nil, ErrSeqMismatch
 	}
 
 	now := r.now()
@@ -317,11 +370,22 @@ func (r *Room) ApplyPlaybackRate(
 
 // ApplyEnded marks the room authority timeline as completed and freezes the position.
 func (r *Room) ApplyEnded(userID string, positionMs int64) (State, []*ClientConnection, error) {
+	return r.applyEnded(userID, positionMs, nil)
+}
+
+func (r *Room) ApplyEndedIfSeq(userID string, positionMs int64, expectedSeq int64) (State, []*ClientConnection, error) {
+	return r.applyEnded(userID, positionMs, &expectedSeq)
+}
+
+func (r *Room) applyEnded(userID string, positionMs int64, expectedSeq *int64) (State, []*ClientConnection, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	if r.state.HostUserID != userID {
 		return State{}, nil, ErrNotHost
+	}
+	if expectedSeq != nil && *expectedSeq != r.state.Seq {
+		return r.currentStateLocked(r.now()), nil, ErrSeqMismatch
 	}
 
 	now := r.now()
@@ -338,6 +402,7 @@ func (r *Room) clientsSnapshotLocked() []*ClientConnection {
 	return clients
 }
 
+// save snapshot of current state with position updated to now, without modifying the actual room state
 func (r *Room) currentStateLocked(now time.Time) State {
 	snapshot := r.state
 	vector := r.vectorLocked().SnapshotAt(now)

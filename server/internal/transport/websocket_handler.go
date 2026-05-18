@@ -489,7 +489,7 @@ func (h *WebSocketHandler) handlePlay(
 		payload.RoomID,
 		meta,
 		func(existingRoom *room.Room) (room.State, []*room.ClientConnection, error) {
-			return existingRoom.ApplyPlay(meta.UserID, payload.PositionMs)
+			return existingRoom.ApplyPlayIfSeq(meta.UserID, payload.PositionMs, meta.ClientSeq)
 		},
 		func(state room.State) protocol.Envelope {
 			return controlEnvelopeFromState(protocol.TypePlay, state, payload.RequestID)
@@ -522,7 +522,7 @@ func (h *WebSocketHandler) handlePause(
 		payload.RoomID,
 		meta,
 		func(existingRoom *room.Room) (room.State, []*room.ClientConnection, error) {
-			return existingRoom.ApplyPause(meta.UserID, payload.PositionMs)
+			return existingRoom.ApplyPauseIfSeq(meta.UserID, payload.PositionMs, meta.ClientSeq)
 		},
 		func(state room.State) protocol.Envelope {
 			return controlEnvelopeFromState(protocol.TypePause, state, payload.RequestID)
@@ -555,7 +555,7 @@ func (h *WebSocketHandler) handleSeek(
 		payload.RoomID,
 		meta,
 		func(existingRoom *room.Room) (room.State, []*room.ClientConnection, error) {
-			return existingRoom.ApplySeek(meta.UserID, payload.PositionMs)
+			return existingRoom.ApplySeekIfSeq(meta.UserID, payload.PositionMs, meta.ClientSeq)
 		},
 		func(state room.State) protocol.Envelope {
 			return controlEnvelopeFromState(protocol.TypeSeek, state, payload.RequestID)
@@ -588,7 +588,7 @@ func (h *WebSocketHandler) handleSetPlaybackRate(
 		payload.RoomID,
 		meta,
 		func(existingRoom *room.Room) (room.State, []*room.ClientConnection, error) {
-			return existingRoom.ApplyPlaybackRate(meta.UserID, payload.PlaybackRate)
+			return existingRoom.ApplyPlaybackRateIfSeq(meta.UserID, payload.PlaybackRate, meta.ClientSeq)
 		},
 		func(state room.State) protocol.Envelope {
 			return controlEnvelopeFromState(protocol.TypeSetPlaybackRate, state, payload.RequestID)
@@ -621,7 +621,7 @@ func (h *WebSocketHandler) handleEnded(
 		payload.RoomID,
 		meta,
 		func(existingRoom *room.Room) (room.State, []*room.ClientConnection, error) {
-			return existingRoom.ApplyEnded(meta.UserID, payload.PositionMs)
+			return existingRoom.ApplyEndedIfSeq(meta.UserID, payload.PositionMs, meta.ClientSeq)
 		},
 		func(state room.State) protocol.Envelope {
 			return controlEnvelopeFromState(protocol.TypeEnded, state, payload.RequestID)
@@ -660,6 +660,22 @@ func (h *WebSocketHandler) handleControlEvent(
 	}
 
 	previous := existingRoom.StateSnapshot()
+	if meta.ClientSeq != previous.Seq {
+		if h.debugSync {
+			log.Printf(
+				"sync control_seq_mismatch room=%s type=%s user=%s request_id=%q client_seq=%d server_seq=%d",
+				roomID,
+				eventType,
+				meta.UserID,
+				meta.RequestID,
+				meta.ClientSeq,
+				previous.Seq,
+			)
+		}
+		h.cacheRoomState(previous)
+		return h.writeRoomState(ctx, client, previous)
+	}
+
 	if meta.RequestID != "" && !h.reserveControlRequest(roomID, meta.RequestID, h.clock.Now()) {
 		if h.debugSync {
 			log.Printf(
@@ -678,6 +694,21 @@ func (h *WebSocketHandler) handleControlEvent(
 	state, clients, err := apply(existingRoom)
 	if err != nil {
 		h.forgetControlRequest(roomID, meta.RequestID)
+		if errors.Is(err, room.ErrSeqMismatch) {
+			if h.debugSync {
+				log.Printf(
+					"sync control_seq_mismatch room=%s type=%s user=%s request_id=%q client_seq=%d server_seq=%d",
+					roomID,
+					eventType,
+					meta.UserID,
+					meta.RequestID,
+					meta.ClientSeq,
+					state.Seq,
+				)
+			}
+			h.cacheRoomState(state)
+			return h.writeRoomState(ctx, client, state)
+		}
 		if errors.Is(err, room.ErrNotHost) {
 			return protocolMessageError{
 				roomID:  roomID,

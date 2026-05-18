@@ -125,14 +125,14 @@ Android 当前能力：
 
 当前广播策略：
 
-- 服务端接受控制事件后更新权威 timeline，并递增 `seq`。
+- 服务端只接受 `seq == current room_state.seq` 的控制事件；接受后更新权威 timeline，并递增 `seq`。
 - 接受的控制事件会广播给房间内客户端。
+- Android host 收到自己的控制确认后会更新本地 `latestRoomState.seq`，避免下一次控制继续沿用旧版本。
 - `join_room`、房主断开、房主重连、显式 `room_state.request` 会下发 `room_state`。
 - 当前不做高频周期性位置广播，客户端应基于服务器时间自行外推。
 
 已确认的下一步需求：
 
-- 开始拒绝 stale seq，而不是只记录日志。
 - 建议后续把客户端控制请求中的 `seq` 迁移为更明确的 `expectedSeq`。
 - 快速连续 seek 应按房主意图处理，但要避免广播风暴；可在客户端和服务端引入节流、合并或最后值优先策略。
 
@@ -242,7 +242,7 @@ Android 当前能力：
 
 ## 14. 已确认但待实现的近期能力
 
-- stale seq 拒绝。
+- 控制请求 `seq` 字段后续改名为 `expectedSeq`。
 - 断线重连 5 分钟 grace period。
 - 主动离开房间协议。
 - 慢客户端策略完善和压测。

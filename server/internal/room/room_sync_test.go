@@ -1,6 +1,7 @@
 package room
 
 import (
+	"errors"
 	"testing"
 	"time"
 
@@ -30,6 +31,30 @@ func TestRoomPlayIgnoresClientPositionAsAuthority(t *testing.T) {
 	}
 	if state.Reason != realtime.ReasonPlay {
 		t.Fatalf("expected play reason, got %s", state.Reason)
+	}
+}
+
+func TestRoomControlExpectedSeqRejectsStaleUpdate(t *testing.T) {
+	currentTime := time.UnixMilli(1_000)
+	room := newTestRoomWithClock("ROOM01", &currentTime)
+
+	state, _, err := room.ApplyPlayIfSeq("user_a", 0, 1)
+	if err != nil {
+		t.Fatalf("apply play with expected seq: %v", err)
+	}
+	if state.Seq != 2 {
+		t.Fatalf("expected accepted play to advance seq to 2, got %d", state.Seq)
+	}
+
+	state, _, err = room.ApplyPauseIfSeq("user_a", 0, 1)
+	if !errors.Is(err, ErrSeqMismatch) {
+		t.Fatalf("expected stale pause to return ErrSeqMismatch, got %v", err)
+	}
+	if state.Seq != 2 {
+		t.Fatalf("expected stale pause to return latest seq 2, got %d", state.Seq)
+	}
+	if state.Paused {
+		t.Fatalf("expected stale pause not to overwrite playing state")
 	}
 }
 

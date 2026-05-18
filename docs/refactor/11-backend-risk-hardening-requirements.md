@@ -64,10 +64,10 @@
 
 ### 2.7 stale seq 从诊断进入拒绝
 
-- 当前 `seq` 仍是软诊断。
-- 下一步应开始拒绝 stale seq，避免旧控制覆盖新状态。
-- 推荐后续把控制请求里的客户端版本字段命名为 `expectedSeq`，和服务端广播 `seq` 区分。
-- 迁移期可以兼容旧字段 `seq`。
+- 当前 `seq` 已作为控制请求的权威版本校验字段。
+- 旧控制如果携带过期 `seq`，服务端必须拒绝推进时间轴，并返回最新 `room_state`。
+- 控制请求里的客户端版本字段后续建议命名为 `expectedSeq`，和服务端广播 `seq` 区分。
+- 迁移期可继续接受旧字段 `seq`，但语义已经是乐观版本前置条件。
 
 ### 2.8 requestId 去重
 
@@ -288,20 +288,20 @@
 
 当前状态：
 
-- 当前 client seq 只用于 debug 日志。
+- 当前 client seq 已进入控制前置校验。
 - 服务端 seq 是权威递增版本。
 
 目标行为：
 
-- 客户端控制请求携带 `expectedSeq`。
-- 如果 `expectedSeq < currentSeq`，服务端拒绝并返回最新 `room_state`。
+- 客户端控制请求携带 `expectedSeq`，当前协议阶段继续使用 `seq` 字段承载这个语义。
+- 如果 `expectedSeq != currentSeq`，服务端拒绝并返回最新 `room_state`。
 - 如果 `expectedSeq == currentSeq`，服务端接受并推进。
-- 兼容旧客户端时，可以先用 `seq` 字段作为 `expectedSeq`。
+- 拒绝时不推进 timeline，不广播控制事件，不写入 requestId 去重表。
 
 实现前需确认：
 
-- 是否允许 `expectedSeq == 0` 的旧客户端临时通过。
-- 拒绝时错误消息格式和 Android UI 行为。
+- 已决定不保留宽松旧客户端行为；`seq == 0` 只有在当前权威 seq 也为 0 时才可能通过。
+- 拒绝时不单独发 error，直接向请求方返回最新 `room_state`，让客户端恢复。
 
 优先级：P0。
 
@@ -390,7 +390,7 @@
 第一批必须先做：
 
 1. WebSocket token 鉴权和连接身份绑定。已完成第一轮加固。
-2. stale seq 拒绝和拒绝后的 `room_state` 恢复。
+2. stale seq 拒绝和拒绝后的 `room_state` 恢复。已完成第一轮加固。
 3. 断线、重连、主动离开和 5 分钟 grace period。
 4. host transfer 旧语义清理，确保只保留 owner reclaim。
 

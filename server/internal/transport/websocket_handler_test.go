@@ -429,6 +429,72 @@ func TestWebSocketControlRequestIDDeduplicatesAcceptedControl(t *testing.T) {
 	}
 }
 
+func TestWebSocketControlRejectsSeqMismatchWithLatestRoomState(t *testing.T) {
+	roomManager := room.NewManager()
+	createdRoom, err := roomManager.CreateRoom("user_a", "sample_001")
+	if err != nil {
+		t.Fatalf("create room: %v", err)
+	}
+	mux := http.NewServeMux()
+	mux.Handle("/ws", NewWebSocketHandler(roomManager, true))
+
+	httpServer := httptest.NewServer(mux)
+	defer httpServer.Close()
+
+	wsURL := "ws" + httpServer.URL[len("http"):] + "/ws"
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	hostConn := mustDialWebSocket(t, ctx, wsURL)
+	defer hostConn.Close(websocket.StatusNormalClosure, "test done")
+
+	mustJoinRoom(t, ctx, hostConn, createdRoom.ID(), "user_a")
+	mustReadEnvelope(t, ctx, hostConn)
+
+	mustSendEnvelope(t, ctx, hostConn, protocol.Envelope{
+		Type: protocol.TypePlay,
+		Payload: mustJSONRaw(protocol.PlayPayload{
+			RoomID:     createdRoom.ID(),
+			UserID:     "user_a",
+			RequestID:  "req-play-current",
+			PositionMs: 12_000,
+			Seq:        1,
+		}),
+	})
+	assertControlBroadcast(t, ctx, hostConn, protocol.TypePlay, -1, 2)
+
+	mustSendEnvelope(t, ctx, hostConn, protocol.Envelope{
+		Type: protocol.TypePause,
+		Payload: mustJSONRaw(protocol.PausePayload{
+			RoomID:     createdRoom.ID(),
+			UserID:     "user_a",
+			RequestID:  "req-pause-stale",
+			PositionMs: 13_500,
+			Seq:        1,
+		}),
+	})
+
+	response := mustReadEnvelope(t, ctx, hostConn)
+	if response.Type != protocol.TypeRoomState {
+		t.Fatalf("expected stale control to return room_state, got %s", response.Type)
+	}
+	var payload protocol.RoomStatePayload
+	if err := json.Unmarshal(response.Payload, &payload); err != nil {
+		t.Fatalf("unmarshal stale room_state payload: %v", err)
+	}
+	if payload.Seq != 2 {
+		t.Fatalf("expected stale control to keep seq 2, got %d", payload.Seq)
+	}
+	if payload.Paused {
+		t.Fatalf("expected stale pause not to overwrite accepted play state")
+	}
+
+	state := createdRoom.StateSnapshot()
+	if state.Seq != 2 || state.Paused {
+		t.Fatalf("expected room timeline to stay at accepted play state, got seq=%d paused=%t", state.Seq, state.Paused)
+	}
+}
+
 func TestWebSocketControlSyncRejectsNonHost(t *testing.T) {
 	roomManager := room.NewManager()
 	createdRoom, err := roomManager.CreateRoom("user_a", "sample_001")
