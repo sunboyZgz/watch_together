@@ -245,7 +245,7 @@ cursor=opaque_cursor
 - `POST /auth/login` 已落地，对应 `INT-116`
 - 密码使用 `bcrypt` 写入 `users.password_hash`
 - 账号写入前会做 trim + lowercase 归一化
-- 当前 `accessToken` 为 JWT access token，后续再补充 refresh token / session 持久化机制
+- 当前 `accessToken` 为 JWT access token，后续再补充 refresh token / session 续期机制
 - 启动服务端前必须配置 `DATABASE_URL`，否则 auth endpoints 会返回 `503`
 
 #### `POST /auth/login`

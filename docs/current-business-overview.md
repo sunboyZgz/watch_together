@@ -18,7 +18,7 @@
 - 密码使用 `bcrypt` 哈希后写入 PostgreSQL。
 - 账号写入前会做 trim 和 lowercase 归一化。
 - 当前登录返回 JWT access token。
-- Android 登录成功后在运行时保存 `AuthSession`，后续 HTTP 请求携带 `Authorization: Bearer <accessToken>`。
+- Android 登录成功后在本地持久化 `AuthSession`，后续 HTTP 请求携带 `Authorization: Bearer <accessToken>`。
 
 已确认的下一步需求：
 

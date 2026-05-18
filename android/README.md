@@ -120,7 +120,7 @@ PROD_MEDIA_BASE_URL=http://106.12.35.52:9100/watch-together-media
 1. 先进入 `pages/login/LoginPage`
 2. 点击 `登录` 后弹出 `LoginDialog`
 3. 输入账号密码后调用 `POST /auth/login`
-4. 登录成功后保存当前运行时 `AuthSession`，并进入 `pages/home/HomePage`
+4. 登录成功后把 `AuthSession` 持久化到本地，并进入 `pages/home/HomePage`
 5. 点击 `创建放映室` 后，进入 `pages/video/VideoSelectionPage`
 6. 在选片页选择影片后，底部固定栏可进入当前播放器放映室页面
 
@@ -133,7 +133,7 @@ PROD_MEDIA_BASE_URL=http://106.12.35.52:9100/watch-together-media
 - `auth/AuthModels.kt` 保存 `AuthSession` 与最小用户信息
 - 登录成功后首页优先使用服务端返回的 `nickname`
 - 当前 access token 为后端签发的 JWT token
-- token 暂时只保存在 Compose 运行时状态中，后续再接正式持久化/session 方案
+- `AuthSessionStore` 会把登录态持久化到本地，避免每次启动都重新登录
 
 当前首页接入状态：
 

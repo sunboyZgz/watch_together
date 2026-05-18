@@ -3,14 +3,17 @@ package com.example.watch_together.pages
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalContext
+import com.example.watch_together.auth.SharedPreferencesAuthSessionStore
 import com.example.watch_together.config.AppConfig
 import com.example.watch_together.pages.home.HomePage
 import com.example.watch_together.pages.login.LoginPage
+import com.example.watch_together.pages.room.RoomTheaterScreen
 import com.example.watch_together.pages.video.MediaEpisode
 import com.example.watch_together.pages.video.VideoSelectionPage
-import com.example.watch_together.pages.room.RoomTheaterScreen
 
 private enum class AppScreen {
     Login,
@@ -21,11 +24,21 @@ private enum class AppScreen {
 
 @Composable
 fun WatchTogetherApp() {
-    var currentScreen by rememberSaveable { mutableStateOf(AppScreen.Login) }
-    var sessionUserId by rememberSaveable { mutableStateOf("") }
-    var sessionAccount by rememberSaveable { mutableStateOf("") }
-    var sessionNickname by rememberSaveable { mutableStateOf("") }
-    var sessionAccessToken by rememberSaveable { mutableStateOf("") }
+    val context = LocalContext.current
+    val authSessionStore = remember(context) {
+        SharedPreferencesAuthSessionStore(context)
+    }
+    val savedSession = remember(authSessionStore) {
+        authSessionStore.load()
+    }
+
+    var currentScreen by rememberSaveable {
+        mutableStateOf(if (savedSession == null) AppScreen.Login else AppScreen.Home)
+    }
+    var sessionUserId by rememberSaveable { mutableStateOf(savedSession?.user?.id.orEmpty()) }
+    var sessionAccount by rememberSaveable { mutableStateOf(savedSession?.user?.account.orEmpty()) }
+    var sessionNickname by rememberSaveable { mutableStateOf(savedSession?.user?.nickname.orEmpty()) }
+    var sessionAccessToken by rememberSaveable { mutableStateOf(savedSession?.accessToken.orEmpty()) }
     var selectedEpisodeId by rememberSaveable { mutableStateOf(AppConfig.defaultMediaIdForRoom()) }
     var selectedEpisodeTitle by rememberSaveable { mutableStateOf("") }
     var selectedEpisodeMediaUrl by rememberSaveable { mutableStateOf<String?>(null) }
@@ -38,6 +51,7 @@ fun WatchTogetherApp() {
     when (currentScreen) {
         AppScreen.Login -> LoginPage(
             onLoginConfirmed = { session ->
+                authSessionStore.save(session)
                 sessionUserId = session.user.id
                 sessionAccount = session.user.account
                 sessionNickname = session.user.nickname
