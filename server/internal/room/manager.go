@@ -11,7 +11,7 @@ import (
 var ErrUnableToGenerateRoomID = errors.New("unable to generate unique room id")
 
 const (
-	defaultEmptyRoomGracePeriod = 2 * time.Minute
+	defaultEmptyRoomGracePeriod = 5 * time.Minute
 	defaultCleanupInterval      = 5 * time.Second
 )
 
@@ -174,6 +174,41 @@ func (m *Manager) RemoveClient(client *ClientConnection) RemoveClientResult {
 	m.mu.Unlock()
 	if triggerEmptyHook && m.hooks.OnRoomBecameEmpty != nil {
 		m.hooks.OnRoomBecameEmpty(roomID, emptySince, destroyAfter)
+	}
+	return result
+}
+
+// LeaveClient handles an intentional room leave. Unlike transient disconnects,
+// an empty room is destroyed immediately instead of entering the reconnect grace period.
+func (m *Manager) LeaveClient(client *ClientConnection) RemoveClientResult {
+	roomID := client.RoomID()
+	if roomID == "" {
+		return RemoveClientResult{}
+	}
+
+	m.mu.Lock()
+
+	room, ok := m.rooms[roomID]
+	if !ok {
+		m.mu.Unlock()
+		return RemoveClientResult{}
+	}
+
+	leaveResult := room.Leave(client)
+	result := RemoveClientResult{
+		State:           leaveResult.State,
+		Remaining:       leaveResult.Remaining,
+		HostUnavailable: leaveResult.HostUnavailable,
+	}
+	if leaveResult.RoomEmpty {
+		delete(m.emptySince, roomID)
+		delete(m.rooms, roomID)
+		result.RoomRemoved = true
+	}
+	m.mu.Unlock()
+
+	if result.RoomRemoved && m.hooks.OnRoomDestroyed != nil {
+		m.hooks.OnRoomDestroyed(roomID)
 	}
 	return result
 }

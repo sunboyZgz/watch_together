@@ -68,6 +68,24 @@ func TestDecodeRoomStateRequest(t *testing.T) {
 	}
 }
 
+func TestDecodeLeaveRoom(t *testing.T) {
+	envelope := Envelope{
+		Type: TypeLeaveRoom,
+		Payload: mustRawMessage(t, LeaveRoomPayload{
+			RoomID: "room_001",
+			UserID: "user_a",
+		}),
+	}
+
+	payload, err := DecodeLeaveRoom(envelope)
+	if err != nil {
+		t.Fatalf("decode leave_room: %v", err)
+	}
+	if payload.RoomID != "room_001" || payload.UserID != "user_a" {
+		t.Fatalf("unexpected leave_room payload: %+v", payload)
+	}
+}
+
 func TestDecodePlayKeepsOptionalRequestID(t *testing.T) {
 	envelope := Envelope{
 		Type: TypePlay,

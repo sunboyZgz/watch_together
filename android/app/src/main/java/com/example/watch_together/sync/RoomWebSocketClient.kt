@@ -1,6 +1,7 @@
 package com.example.watch_together.sync
 
 import com.example.watch_together.sync.protocol.JoinRoomPayload
+import com.example.watch_together.sync.protocol.LeaveRoomPayload
 import com.example.watch_together.sync.protocol.HeartbeatAckPayload
 import com.example.watch_together.sync.protocol.EndedPayload
 import com.example.watch_together.sync.protocol.PausePayload
@@ -196,6 +197,19 @@ class RoomWebSocketClient(
 
     fun close() {
         sessionGeneration++
+        val roomId = activeRoomId
+        val userId = activeUserId
+        val socket = webSocket
+        if (socket != null && !roomId.isNullOrBlank() && !userId.isNullOrBlank()) {
+            socket.send(
+                envelopeToJson(
+                    LeaveRoomPayload(
+                        roomId = roomId,
+                        userId = userId
+                    ).toEnvelope()
+                )
+            )
+        }
         webSocket?.close(1000, "client closed")
         webSocket = null
         activeRoomId = null
@@ -230,6 +244,11 @@ class RoomWebSocketClient(
     private fun com.example.watch_together.sync.protocol.ProtocolEnvelope<*>.payloadAsMap(): Map<String, Any> {
         return when (val payload = payload) {
             is JoinRoomPayload -> mapOf(
+                "roomId" to payload.roomId,
+                "userId" to payload.userId
+            )
+
+            is LeaveRoomPayload -> mapOf(
                 "roomId" to payload.roomId,
                 "userId" to payload.userId
             )

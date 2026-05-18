@@ -62,6 +62,7 @@ type DetailResult struct {
 type Store interface {
 	CreateRoom(ctx context.Context, params CreateRoomParams) (CreateRoomResult, error)
 	JoinRoomByCode(ctx context.Context, params JoinRoomParams) (JoinRoomResult, error)
+	LeaveRoomByCode(ctx context.Context, params LeaveRoomParams) error
 	GetRoomDetail(ctx context.Context, roomCode string) (DetailResult, error)
 }
 
@@ -72,6 +73,11 @@ type CreateRoomParams struct {
 }
 
 type JoinRoomParams struct {
+	RoomCode string
+	UserID   string
+}
+
+type LeaveRoomParams struct {
 	RoomCode string
 	UserID   string
 }
@@ -120,6 +126,19 @@ func (s *Service) JoinRoomByCode(ctx context.Context, roomCode string, userID st
 		return JoinRoomResult{}, ErrInvalidInput
 	}
 	return s.store.JoinRoomByCode(ctx, JoinRoomParams{
+		RoomCode: roomCode,
+		UserID:   userID,
+	})
+}
+
+// LeaveRoomByCode marks the user's business membership inactive for an intentional leave.
+func (s *Service) LeaveRoomByCode(ctx context.Context, roomCode string, userID string) error {
+	roomCode = strings.ToUpper(strings.TrimSpace(roomCode))
+	userID = strings.TrimSpace(userID)
+	if len(roomCode) != 6 || userID == "" {
+		return ErrInvalidInput
+	}
+	return s.store.LeaveRoomByCode(ctx, LeaveRoomParams{
 		RoomCode: roomCode,
 		UserID:   userID,
 	})

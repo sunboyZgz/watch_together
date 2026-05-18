@@ -317,7 +317,8 @@ server/
 - former host 在 host transfer 后重新 join room 时，会作为普通成员回到房间，不会隐式拿回 host 身份
 - 同一 `userId` repeated join 同一房间时，新连接会替换旧连接并重新收到基于 authority timeline 结算后的最新 `room_state`
 - repeated join / reconnect 在视频已播完时，会收到 `ended=true` 的稳定 `room_state`
-- 最后一个成员离开后，房间不会立即销毁，而是进入 2 分钟 grace period；若期间有人重新加入则继续保留，否则自动销毁
+- 最后一个成员异常断开后，房间不会立即销毁，而是进入 5 分钟 grace period；若期间有人重新加入则继续保留，否则自动销毁
+- 主动 `leave_room` 会立即退出成员关系；若房间因此为空，则立即销毁，不进入 grace period
 
 其中 `POST /rooms`、`join_room`、`play / pause / seek / set_playback_rate / ended` 与 host transfer 的最小同步路径已通过基础测试验证。
 

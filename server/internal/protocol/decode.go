@@ -40,6 +40,25 @@ func DecodeJoinRoom(envelope Envelope) (JoinRoomPayload, error) {
 	return payload, nil
 }
 
+// DecodeLeaveRoom validates that the envelope is a leave_room event and decodes its payload.
+func DecodeLeaveRoom(envelope Envelope) (LeaveRoomPayload, error) {
+	if envelope.Type != TypeLeaveRoom {
+		return LeaveRoomPayload{}, fmt.Errorf("%w: %s", ErrUnsupportedMessageType, envelope.Type)
+	}
+
+	var payload LeaveRoomPayload
+	if err := json.Unmarshal(envelope.Payload, &payload); err != nil {
+		return LeaveRoomPayload{}, err
+	}
+	if payload.RoomID == "" {
+		return LeaveRoomPayload{}, errors.New("missing roomId")
+	}
+	if payload.UserID == "" {
+		return LeaveRoomPayload{}, errors.New("missing userId")
+	}
+	return payload, nil
+}
+
 // DecodeRoomStateRequest validates and decodes one explicit room_state refresh request.
 func DecodeRoomStateRequest(envelope Envelope) (RoomStateRequestPayload, error) {
 	if envelope.Type != TypeRoomStateRequest {

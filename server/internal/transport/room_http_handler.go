@@ -92,6 +92,13 @@ func NewRoomHTTPHandlerWithTokenVerifier(
 	}
 }
 
+func (h *RoomHTTPHandler) RoomLeaver() roomMembershipLeaver {
+	if h == nil {
+		return nil
+	}
+	return h.roomService
+}
+
 // CreateRoom handles POST /rooms, persists room business data, and prepares runtime sync state.
 func (h *RoomHTTPHandler) CreateRoom(w http.ResponseWriter, r *http.Request) {
 	if !h.ensureReady(w) {

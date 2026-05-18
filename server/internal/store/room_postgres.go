@@ -123,6 +123,30 @@ func (s *PostgresRoomStore) JoinRoomByCode(ctx context.Context, params roomapi.J
 	return result, nil
 }
 
+// LeaveRoomByCode marks one active room member inactive for an intentional leave.
+func (s *PostgresRoomStore) LeaveRoomByCode(ctx context.Context, params roomapi.LeaveRoomParams) error {
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		room, err := findActiveRoomByCode(ctx, tx, params.RoomCode)
+		if err != nil {
+			return err
+		}
+
+		const query = `
+			UPDATE room_members
+			SET is_active = false, left_at = NOW()
+			WHERE room_id = ? AND user_id = ? AND is_active = true
+		`
+		if err := tx.WithContext(ctx).Exec(query, room.ID, params.UserID).Error; err != nil {
+			return fmt.Errorf("leave room member: %w", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
 // GetRoomDetail loads the persisted room, media, and active members for the theater page.
 func (s *PostgresRoomStore) GetRoomDetail(ctx context.Context, roomCode string) (roomapi.DetailResult, error) {
 	var result roomapi.DetailResult
@@ -280,7 +304,7 @@ func findActiveMember(ctx context.Context, tx *gorm.DB, roomID string, userID st
 func reactivateRoomMember(ctx context.Context, tx *gorm.DB, roomID string, userID string) error {
 	const updateExisting = `
 		UPDATE room_members
-		SET is_active = true, left_at = NULL, joined_at = NOW(), role = 'member'
+		SET is_active = true, left_at = NULL, joined_at = NOW()
 		WHERE id = (
 			SELECT id
 			FROM room_members

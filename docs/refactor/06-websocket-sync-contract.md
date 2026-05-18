@@ -106,6 +106,32 @@ the server does not read Redis and does not broadcast this response
 
 `seq` in `room_state.request` is the client's last known server seq. It is diagnostic data and does not gate the response.
 
+## Leave Room
+
+Clients should send `leave_room` before intentionally leaving a room:
+
+```json
+{
+  "type": "leave_room",
+  "payload": {
+    "roomId": "ROOM01",
+    "userId": "user_a"
+  }
+}
+```
+
+Server behavior:
+
+```text
+the client must already be joined as the same roomId + userId
+the server marks the persistent room_members row inactive when room storage is available
+the server removes the runtime connection from the in-process room
+if the room becomes empty, it is destroyed immediately instead of entering grace_period
+if other clients remain, they receive room_members_changed with reason leave
+if the leaving client is the host, remaining clients also receive room_state with reason host_left
+transient network disconnects do not send leave_room and still use the 5 minute reconnect grace period
+```
+
 ## Control Events
 
 The server still emits legacy control event types for Android/Web compatibility:
@@ -297,6 +323,7 @@ clock_sync: server-time estimation
 | Event | Direction |
 | --- | --- |
 | `join_room` | client -> server |
+| `leave_room` | client -> server |
 | `room_state` | server -> client |
 | `room_state.request` | client -> server |
 | `play` | client -> server, server -> clients |

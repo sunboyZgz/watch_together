@@ -246,6 +246,14 @@ func (s *fakeRoomStore) JoinRoomByCode(_ context.Context, params roomapi.JoinRoo
 	return s.joinResult, nil
 }
 
+func (s *fakeRoomStore) LeaveRoomByCode(_ context.Context, params roomapi.LeaveRoomParams) error {
+	s.lastJoin = roomapi.JoinRoomParams{
+		RoomCode: params.RoomCode,
+		UserID:   params.UserID,
+	}
+	return s.err
+}
+
 func (s *fakeRoomStore) GetRoomDetail(_ context.Context, roomCode string) (roomapi.DetailResult, error) {
 	s.lastDetailRoomCode = roomCode
 	if s.err != nil {

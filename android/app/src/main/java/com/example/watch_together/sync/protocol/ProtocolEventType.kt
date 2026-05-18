@@ -8,6 +8,10 @@ enum class ProtocolEventType(
         wireName = "join_room",
         direction = ProtocolDirection.ClientToServer
     ),
+    LeaveRoom(
+        wireName = "leave_room",
+        direction = ProtocolDirection.ClientToServer
+    ),
     RoomState(
         wireName = "room_state",
         direction = ProtocolDirection.ServerToClient

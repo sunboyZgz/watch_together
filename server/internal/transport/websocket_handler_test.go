@@ -682,6 +682,96 @@ func TestWebSocketHostDisconnectPausesRoomWithoutTransfer(t *testing.T) {
 	}
 }
 
+func TestWebSocketLeaveRoomRemovesClientWithoutGracePeriod(t *testing.T) {
+	roomManager := room.NewManager()
+	createdRoom, err := roomManager.CreateRoom("user_a", "sample_001")
+	if err != nil {
+		t.Fatalf("create room: %v", err)
+	}
+	mux := http.NewServeMux()
+	mux.Handle("/ws", NewWebSocketHandler(roomManager, true))
+
+	httpServer := httptest.NewServer(mux)
+	defer httpServer.Close()
+
+	wsURL := "ws" + httpServer.URL[len("http"):] + "/ws"
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	conn := mustDialWebSocket(t, ctx, wsURL)
+	defer conn.Close(websocket.StatusNormalClosure, "test done")
+
+	mustJoinRoom(t, ctx, conn, createdRoom.ID(), "user_a")
+	mustReadEnvelope(t, ctx, conn)
+
+	mustSendEnvelope(t, ctx, conn, protocol.Envelope{
+		Type: protocol.TypeLeaveRoom,
+		Payload: mustJSONRaw(protocol.LeaveRoomPayload{
+			RoomID: createdRoom.ID(),
+			UserID: "user_a",
+		}),
+	})
+
+	_, _, readErr := conn.Read(ctx)
+	if readErr == nil {
+		t.Fatalf("expected server to close websocket after leave_room")
+	}
+	if got := roomManager.RoomCount(); got != 0 {
+		t.Fatalf("expected active leave to remove empty room immediately, got %d rooms", got)
+	}
+}
+
+func TestWebSocketLeaveRoomBroadcastsMembershipChanged(t *testing.T) {
+	roomManager := room.NewManager()
+	createdRoom, err := roomManager.CreateRoom("user_a", "sample_001")
+	if err != nil {
+		t.Fatalf("create room: %v", err)
+	}
+	mux := http.NewServeMux()
+	mux.Handle("/ws", NewWebSocketHandler(roomManager, true))
+
+	httpServer := httptest.NewServer(mux)
+	defer httpServer.Close()
+
+	wsURL := "ws" + httpServer.URL[len("http"):] + "/ws"
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	hostConn := mustDialWebSocket(t, ctx, wsURL)
+	defer hostConn.Close(websocket.StatusNormalClosure, "test done")
+	viewerConn := mustDialWebSocket(t, ctx, wsURL, "user_b")
+	defer viewerConn.Close(websocket.StatusNormalClosure, "test done")
+
+	mustJoinRoom(t, ctx, hostConn, createdRoom.ID(), "user_a")
+	mustReadEnvelope(t, ctx, hostConn)
+	mustJoinRoom(t, ctx, viewerConn, createdRoom.ID(), "user_b")
+	mustReadEnvelope(t, ctx, viewerConn)
+	mustReadEnvelope(t, ctx, hostConn)
+
+	mustSendEnvelope(t, ctx, viewerConn, protocol.Envelope{
+		Type: protocol.TypeLeaveRoom,
+		Payload: mustJSONRaw(protocol.LeaveRoomPayload{
+			RoomID: createdRoom.ID(),
+			UserID: "user_b",
+		}),
+	})
+
+	membersChanged := mustReadEnvelope(t, ctx, hostConn)
+	if membersChanged.Type != protocol.TypeRoomMembersChanged {
+		t.Fatalf("expected room_members_changed after active leave, got %s", membersChanged.Type)
+	}
+	var payload protocol.RoomMembersChangedPayload
+	if err := json.Unmarshal(membersChanged.Payload, &payload); err != nil {
+		t.Fatalf("unmarshal room_members_changed payload: %v", err)
+	}
+	if payload.Reason != "leave" {
+		t.Fatalf("expected leave reason, got %s", payload.Reason)
+	}
+	if got := roomManager.ClientCount(createdRoom.ID()); got != 1 {
+		t.Fatalf("expected one remaining client, got %d", got)
+	}
+}
+
 /*
 *
 它验证的是下面这条链路：

@@ -151,7 +151,6 @@ Android 当前能力：
 
 待实现或待加固：
 
-- 需要区分主动离开和异常断开。
 - 需要定义慢客户端策略：优先合并/丢弃可恢复消息，让客户端通过 `room_state.request` 恢复；长期不可写或心跳超时再关闭连接。
 - 需要补充面向 100+ 人房间的压测和指标。
 
@@ -175,7 +174,7 @@ Android 当前能力：
 
 最新业务规则：
 
-- 必须区分异常断线和主动离开房间。
+- 已区分异常断线和主动离开房间。
 - 异常断线进入 `grace_period`，宽限期 5 分钟。
 - 如果用户在 5 分钟内回来，应恢复房间。
 - 如果 5 分钟后没有任何人回来，房间清理。
@@ -184,10 +183,11 @@ Android 当前能力：
 
 当前实现状态：
 
-- 内存 `room.Manager` 已有空房间 grace period 和 cleanup loop。
+- 内存 `room.Manager` 已有空房间 grace period 和 cleanup loop，默认宽限期已按最新规则调整为 5 分钟。
 - PostgreSQL `rooms` 已有 `active / grace_period` 生命周期更新和过期清理。
-- 当前默认空房间宽限期代码仍是 2 分钟，需要按最新业务规则改为 5 分钟。
-- 当前 WebSocket 断开都会走连接清理，但“主动离开”和“异常断开”的协议语义仍需补齐。
+- WebSocket 已新增 `leave_room` 主动离开协议；Android 正常关闭房间会先发送 `leave_room`，异常断线不会发送。
+- 主动离开会将 PostgreSQL `room_members.is_active` 置为 false；如果房间因此为空，内存房间会立即销毁，不进入 grace period。
+- 异常断线仍走连接清理；如果房间为空，则进入 5 分钟 grace period，期间重连会恢复房间。
 
 ## 11. HLS 媒体访问
 
@@ -243,8 +243,7 @@ Android 当前能力：
 ## 14. 已确认但待实现的近期能力
 
 - 控制请求 `seq` 字段后续改名为 `expectedSeq`。
-- 断线重连 5 分钟 grace period。
-- 主动离开房间协议。
+- 持久化成员列表和在线成员列表的 UI 展示边界。
 - 慢客户端策略完善和压测。
 - HLS 短期授权访问。
 - 面向 100+ 人房间的广播、心跳、重连和 goroutine 泄漏测试。

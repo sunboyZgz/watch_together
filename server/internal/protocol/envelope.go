@@ -4,6 +4,7 @@ import "encoding/json"
 
 const (
 	TypeJoinRoom           = "join_room"
+	TypeLeaveRoom          = "leave_room"
 	TypeRoomState          = "room_state"
 	TypeRoomStateRequest   = "room_state.request"
 	TypeRoomMembersChanged = "room_members_changed"

@@ -193,7 +193,7 @@
 
 实现前需确认：
 
-- 房主主动离开是否关闭房间，还是进入 owner unavailable。当前建议另开需求确认。
+- 房主主动离开且仍有其他成员时，当前进入 owner unavailable；如需关闭房间，应另建显式 `close_room` 需求。
 
 优先级：P0。
 
@@ -209,19 +209,22 @@
 当前状态：
 
 - 内存和 PostgreSQL 已有 grace period 机制。
-- 当前默认值为 2 分钟。
-- 主动离开协议尚未明确。
+- 当前默认值已改为 5 分钟。
+- WebSocket 已新增 `leave_room` 主动离开协议。
+- Android 正常关闭房间会先发送 `leave_room`；异常断线不会发送。
 
 目标行为：
 
 - 默认 grace period 改为 5 分钟。
 - 增加 `leave_room` 或等价协议，区分主动离开和网络断开。
+- 主动离开会将 PostgreSQL `room_members.is_active` 置为 false。
+- 主动离开导致空房间时立即清理，不进入 grace period。
 - 重连恢复时清除房间 grace 状态。
 
 实现前需确认：
 
-- 主动离开的 UI 入口和是否需要 REST + WS 双写。
-- 房主主动离开是否关闭房间。
+- 房主主动离开且仍有其他成员时，目前进入 owner unavailable，不自动转移 host。
+- 后续如果需要“房主主动关闭房间”，应另建显式 `close_room` 语义。
 
 优先级：P0。
 
@@ -344,7 +347,7 @@
 
 - 启动时会把 active rooms backfill 到 grace_period。
 - cleanup loop 会清理过期房间。
-- 当前 grace 默认值仍需调整为 5 分钟。
+- 当前 grace 默认值已调整为 5 分钟。
 
 目标行为：
 
@@ -391,7 +394,7 @@
 
 1. WebSocket token 鉴权和连接身份绑定。已完成第一轮加固。
 2. stale seq 拒绝和拒绝后的 `room_state` 恢复。已完成第一轮加固。
-3. 断线、重连、主动离开和 5 分钟 grace period。
+3. 断线、重连、主动离开和 5 分钟 grace period。已完成第一轮加固。
 4. host transfer 旧语义清理，确保只保留 owner reclaim。
 
 第二批稳定性增强：

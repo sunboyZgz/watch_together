@@ -38,6 +38,41 @@ func TestManagerRemoveClientDeletesEmptyRoom(t *testing.T) {
 	}
 }
 
+func TestManagerDefaultEmptyRoomGracePeriodIsFiveMinutes(t *testing.T) {
+	if got := DefaultEmptyRoomGracePeriod(); got != 5*time.Minute {
+		t.Fatalf("expected default grace period 5m, got %s", got)
+	}
+}
+
+func TestManagerLeaveClientDestroysEmptyRoomImmediately(t *testing.T) {
+	currentTime := time.UnixMilli(1_000)
+	manager := newManagerWithClock(func() time.Time {
+		return currentTime
+	}, 5*time.Minute)
+	destroyed := ""
+	manager.SetLifecycleHooks(LifecycleHooks{
+		OnRoomDestroyed: func(roomID string) {
+			destroyed = roomID
+		},
+	})
+
+	createdRoom := manager.GetOrCreate("room_001")
+	client := NewClientConnection(nil)
+	client.SetIdentity("user_a", "room_001")
+	createdRoom.Join(client)
+
+	result := manager.LeaveClient(client)
+	if !result.RoomRemoved {
+		t.Fatalf("expected active leave to remove empty room immediately")
+	}
+	if got := manager.RoomCount(); got != 0 {
+		t.Fatalf("expected no rooms after active leave, got %d", got)
+	}
+	if destroyed != "room_001" {
+		t.Fatalf("expected destroyed hook for room_001, got %q", destroyed)
+	}
+}
+
 func TestManagerCreateRoomRegistersUniqueRoom(t *testing.T) {
 	manager := NewManager()
 

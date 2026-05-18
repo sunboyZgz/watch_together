@@ -26,6 +26,7 @@ type WebSocketHandler struct {
 	connectionLimit   *semaphore.Weighted
 	maxRoomClients    int
 	roomStateWriter   latestRoomStateWriter
+	roomLeaver        roomMembershipLeaver
 	controlDeduper    *controlRequestDeduper
 	tokenVerifier     accessTokenVerifier
 }
@@ -50,6 +51,10 @@ type WebSocketRuntimeConfig struct {
 
 type latestRoomStateWriter interface {
 	SetRoomState(ctx context.Context, roomID string, state protocol.RoomStatePayload) error
+}
+
+type roomMembershipLeaver interface {
+	LeaveRoomByCode(ctx context.Context, roomCode string, userID string) error
 }
 
 type protocolMessageError struct {
@@ -96,9 +101,28 @@ func NewWebSocketHandlerWithConfigAndRoomStateWriterAndTokenVerifier(
 	roomStateWriter latestRoomStateWriter,
 	tokenVerifier accessTokenVerifier,
 ) *WebSocketHandler {
+	return NewWebSocketHandlerWithConfigAndRoomStateWriterAndTokenVerifierAndRoomLeaver(
+		roomManager,
+		debugSync,
+		config,
+		roomStateWriter,
+		tokenVerifier,
+		nil,
+	)
+}
+
+func NewWebSocketHandlerWithConfigAndRoomStateWriterAndTokenVerifierAndRoomLeaver(
+	roomManager *room.Manager,
+	debugSync bool,
+	config WebSocketRuntimeConfig,
+	roomStateWriter latestRoomStateWriter,
+	tokenVerifier accessTokenVerifier,
+	roomLeaver roomMembershipLeaver,
+) *WebSocketHandler {
 	handler := newWebSocketHandler(roomManager, debugSync, defaultHeartbeatInterval, defaultHeartbeatTimeout, config)
 	handler.roomStateWriter = roomStateWriter
 	handler.tokenVerifier = tokenVerifier
+	handler.roomLeaver = roomLeaver
 	return handler
 }
 
@@ -305,6 +329,8 @@ func (h *WebSocketHandler) handleMessage(
 	switch envelope.Type {
 	case protocol.TypeJoinRoom:
 		return h.handleJoinRoom(ctx, client, envelope)
+	case protocol.TypeLeaveRoom:
+		return h.handleLeaveRoom(ctx, client, envelope)
 	case protocol.TypeRoomStateRequest:
 		return h.handleRoomStateRequest(ctx, client, envelope)
 	case protocol.TypePlay:
@@ -323,6 +349,48 @@ func (h *WebSocketHandler) handleMessage(
 		return h.handleClockSyncPing(ctx, client, envelope)
 	default:
 		return protocol.ErrUnsupportedMessageType
+	}
+}
+
+// handleLeaveRoom handles an intentional room leave. It differs from disconnect cleanup:
+// empty rooms are destroyed immediately, while transient disconnects keep the grace period.
+func (h *WebSocketHandler) handleLeaveRoom(
+	ctx context.Context,
+	client *room.ClientConnection,
+	envelope protocol.Envelope,
+) error {
+	payload, err := protocol.DecodeLeaveRoom(envelope)
+	if err != nil {
+		return err
+	}
+	client.MarkHeartbeatAck(h.clock.Now())
+	if client.RoomID() != payload.RoomID || client.UserID() == "" || client.UserID() != payload.UserID {
+		return protocolMessageError{
+			roomID:  payload.RoomID,
+			message: "room identity mismatch",
+		}
+	}
+
+	h.persistRoomLeave(payload.RoomID, payload.UserID)
+	leaveResult := h.roomManager.LeaveClient(client)
+	client.SetIdentity("", "")
+	if leaveResult.HostUnavailable {
+		h.broadcastRoomState(leaveResult)
+	}
+	if !leaveResult.RoomRemoved {
+		h.broadcastRoomMembersChangedToOthers(payload.RoomID, leaveResult.Remaining, client, "leave")
+	}
+	return client.Close(websocket.StatusNormalClosure, "left room")
+}
+
+func (h *WebSocketHandler) persistRoomLeave(roomID string, userID string) {
+	if h.roomLeaver == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := h.roomLeaver.LeaveRoomByCode(ctx, roomID, userID); err != nil && h.debugSync {
+		log.Printf("room leave persistence failed room=%s user=%s err=%v", roomID, userID, err)
 	}
 }
 

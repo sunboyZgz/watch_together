@@ -185,12 +185,13 @@ func newGinRouter(
 	router.Any("/me/media-progress/*mediaPath", gin.WrapF(progressHTTPHandler.Update))
 	router.Any("/rooms", gin.WrapF(roomHTTPHandler.CreateRoom))
 	router.Any("/rooms/*roomPath", gin.WrapF(roomHTTPHandler.RoomRoute))
-	router.Any("/ws", gin.WrapH(transport.NewWebSocketHandlerWithConfigAndRoomStateWriterAndTokenVerifier(
+	router.Any("/ws", gin.WrapH(transport.NewWebSocketHandlerWithConfigAndRoomStateWriterAndTokenVerifierAndRoomLeaver(
 		roomManager,
 		debugSync,
 		webSocketConfig,
 		roomStateCache,
 		tokenManager,
+		roomHTTPHandler.RoomLeaver(),
 	)))
 
 	return router

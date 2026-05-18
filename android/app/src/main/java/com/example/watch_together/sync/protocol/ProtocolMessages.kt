@@ -5,6 +5,11 @@ data class JoinRoomPayload(
     val userId: String
 ) : ProtocolPayload
 
+data class LeaveRoomPayload(
+    val roomId: String,
+    val userId: String
+) : ProtocolPayload
+
 data class RoomStatePayload(
     val roomId: String,
     val mediaId: String,
@@ -74,6 +79,13 @@ data class ErrorPayload(
 fun JoinRoomPayload.toEnvelope(): ProtocolEnvelope<JoinRoomPayload> {
     return ProtocolEnvelope(
         type = ProtocolEventType.JoinRoom.wireName,
+        payload = this
+    )
+}
+
+fun LeaveRoomPayload.toEnvelope(): ProtocolEnvelope<LeaveRoomPayload> {
+    return ProtocolEnvelope(
+        type = ProtocolEventType.LeaveRoom.wireName,
         payload = this
     )
 }
