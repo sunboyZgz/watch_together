@@ -16,6 +16,7 @@
 - [架构.png](./架构.png): 当前架构图静态资源
 - [android-player-refactor-analysis.md](./android-player-refactor-analysis.md): Android 播放器业务与同步核心逻辑分离的重构分析
 - [android-player-usage.md](./android-player-usage.md): 当前 Android 播放器的层级关系、职责边界和使用方式
+- [current-business-overview.md](./current-business-overview.md): 当前前后端业务功能、最新业务决策和待实现能力说明；后续需求评审优先参考
 - [business-feature-data-mapping.md](./business-feature-data-mapping.md): 业务功能、页面交互与数据库字段/查询需求之间的映射
 - [backend-api-contract.md](./backend-api-contract.md): 后端 HTTP API 契约、统一响应格式与 Android/Server 联调规则
 - [contributing.md](./contributing.md): 当前仓库的基础工作规约

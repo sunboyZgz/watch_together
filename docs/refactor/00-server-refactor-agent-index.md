@@ -22,8 +22,10 @@ For any server refactor agent, read these files first:
 9. docs/refactor/08-server-broadcast-runtime.md
 10. docs/refactor/09-server-redis-room-state-cache.md
 11. docs/refactor/10-server-refactor-next-plan.md
-12. docs/sync/00-index.md
-13. docs/sync/07-agent-brief-checklists-and-anti-patterns.md
+12. docs/refactor/11-backend-risk-hardening-requirements.md
+13. docs/current-business-overview.md
+14. docs/sync/00-index.md
+15. docs/sync/07-agent-brief-checklists-and-anti-patterns.md
 ```
 
 When changing timeline structs, transitions, or WebSocket behavior, also read:
