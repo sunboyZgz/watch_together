@@ -790,27 +790,7 @@ func (h *WebSocketHandler) handleControlEvent(
 	envelope := buildEnvelope(state)
 	h.cacheRoomState(state)
 	stats, err := h.broadcaster.Broadcast(ctx, roomClientWriters(clients), envelope)
-	if h.debugSync {
-		log.Printf(
-			"sync broadcast type=%s room=%s seq=%d clients=%d failed=%d timed_out=%d closed=%d coalesced=%d max_queue_depth=%d pos=%d paused=%t rate=%.2f duration_us=%d slowest_user=%s slowest_us=%d err=%v",
-			eventType,
-			roomID,
-			state.Seq,
-			stats.Clients,
-			stats.FailedClients,
-			stats.TimedOutClients,
-			stats.ClosedClients,
-			stats.CoalescedClients,
-			stats.MaxQueueDepth,
-			state.PositionMs,
-			state.Paused,
-			state.PlaybackRate,
-			stats.Duration.Microseconds(),
-			stats.SlowestUserID,
-			stats.SlowestDuration.Microseconds(),
-			err,
-		)
-	}
+	h.logBroadcastStats(eventType, roomID, state.Seq, &state, stats, err)
 	return err
 }
 
@@ -881,12 +861,67 @@ func (h *WebSocketHandler) logTimelineTransition(
 	)
 }
 
+func (h *WebSocketHandler) logBroadcastStats(
+	eventType string,
+	roomID string,
+	seq int64,
+	state *room.State,
+	stats broadcastStats,
+	err error,
+) {
+	if !h.debugSync {
+		return
+	}
+	if state != nil {
+		log.Printf(
+			"sync broadcast type=%s room=%s seq=%d clients=%d failed=%d timed_out=%d closed=%d coalesced=%d queue_pressure=%d max_queue_depth=%d pos=%d paused=%t rate=%.2f duration_us=%d slowest_user=%s slowest_us=%d err=%v",
+			eventType,
+			roomID,
+			seq,
+			stats.Clients,
+			stats.FailedClients,
+			stats.TimedOutClients,
+			stats.ClosedClients,
+			stats.CoalescedClients,
+			stats.QueuePressureClients,
+			stats.MaxQueueDepth,
+			state.PositionMs,
+			state.Paused,
+			state.PlaybackRate,
+			stats.Duration.Microseconds(),
+			stats.SlowestUserID,
+			stats.SlowestDuration.Microseconds(),
+			err,
+		)
+		return
+	}
+	log.Printf(
+		"sync broadcast type=%s room=%s seq=%d clients=%d failed=%d timed_out=%d closed=%d coalesced=%d queue_pressure=%d max_queue_depth=%d duration_us=%d slowest_user=%s slowest_us=%d err=%v",
+		eventType,
+		roomID,
+		seq,
+		stats.Clients,
+		stats.FailedClients,
+		stats.TimedOutClients,
+		stats.ClosedClients,
+		stats.CoalescedClients,
+		stats.QueuePressureClients,
+		stats.MaxQueueDepth,
+		stats.Duration.Microseconds(),
+		stats.SlowestUserID,
+		stats.SlowestDuration.Microseconds(),
+		err,
+	)
+}
+
 func (h *WebSocketHandler) broadcastEnvelope(
 	ctx context.Context,
+	roomID string,
 	clients []*room.ClientConnection,
 	envelope protocol.Envelope,
 ) error {
-	_, err := h.broadcaster.Broadcast(ctx, roomClientWriters(clients), envelope)
+	stats, err := h.broadcaster.Broadcast(ctx, roomClientWriters(clients), envelope)
+	h.logBroadcastStats(envelope.Type, roomID, 0, nil, stats, err)
 	return err
 }
 
@@ -908,7 +943,7 @@ func (h *WebSocketHandler) broadcastRoomState(result room.RemoveClientResult) {
 	defer cancel()
 
 	h.cacheRoomState(result.State)
-	_ = h.broadcastEnvelope(ctx, result.Remaining, protocol.Envelope{
+	_ = h.broadcastEnvelope(ctx, result.State.RoomID, result.Remaining, protocol.Envelope{
 		Type:    protocol.TypeRoomState,
 		Payload: mustJSONRaw(roomStatePayload(result.State)),
 	})
@@ -1089,7 +1124,7 @@ func (h *WebSocketHandler) broadcastRoomMembersChangedToOthers(
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
-	_ = h.broadcastEnvelope(ctx, targets, protocol.Envelope{
+	_ = h.broadcastEnvelope(ctx, roomID, targets, protocol.Envelope{
 		Type: protocol.TypeRoomMembersChanged,
 		Payload: mustJSONRaw(protocol.RoomMembersChangedPayload{
 			RoomID: roomID,

@@ -70,8 +70,12 @@ func TestBoundedBroadcasterClosesTimedOutClient(t *testing.T) {
 		CloseOnEnqueueTimeout: true,
 	})
 	client := &fakeBroadcastClient{
-		userID:       "user_a",
+		userID:        "user_a",
 		blockUntilCtx: true,
+		enqueueResult: room.EnqueueResult{
+			QueueDepth:    10,
+			QueueCapacity: 10,
+		},
 	}
 
 	stats, err := broadcaster.Broadcast(context.Background(), []clientWriter{client}, protocol.Envelope{
@@ -86,6 +90,12 @@ func TestBoundedBroadcasterClosesTimedOutClient(t *testing.T) {
 	}
 	if stats.ClosedClients != 1 {
 		t.Fatalf("expected 1 closed client, got %d", stats.ClosedClients)
+	}
+	if stats.QueuePressureClients != 1 {
+		t.Fatalf("expected 1 queue pressure client, got %d", stats.QueuePressureClients)
+	}
+	if stats.MaxQueueDepth != 10 {
+		t.Fatalf("expected max queue depth 10, got %d", stats.MaxQueueDepth)
 	}
 	if !client.isClosed() {
 		t.Fatalf("expected client to be closed")
@@ -109,7 +119,8 @@ func TestBoundedBroadcasterReportsCoalescedClientsAndMaxQueueDepth(t *testing.T)
 		&fakeBroadcastClient{
 			userID: "user_b",
 			enqueueResult: room.EnqueueResult{
-				QueueDepth: 5,
+				QueueDepth:    5,
+				QueueCapacity: 8,
 			},
 		},
 	}
@@ -126,6 +137,41 @@ func TestBoundedBroadcasterReportsCoalescedClientsAndMaxQueueDepth(t *testing.T)
 	}
 	if stats.MaxQueueDepth != 5 {
 		t.Fatalf("expected max queue depth 5, got %d", stats.MaxQueueDepth)
+	}
+}
+
+func TestBoundedBroadcasterReportsQueuePressureClients(t *testing.T) {
+	broadcaster := newBoundedBroadcaster(broadcastConfig{
+		ConcurrencyLimit:      2,
+		EnqueueTimeout:        time.Second,
+		CloseOnEnqueueTimeout: true,
+	})
+	clients := []clientWriter{
+		&fakeBroadcastClient{
+			userID: "user_a",
+			enqueueResult: room.EnqueueResult{
+				QueueDepth:    8,
+				QueueCapacity: 10,
+			},
+		},
+		&fakeBroadcastClient{
+			userID: "user_b",
+			enqueueResult: room.EnqueueResult{
+				QueueDepth:    7,
+				QueueCapacity: 10,
+			},
+		},
+	}
+
+	stats, err := broadcaster.Broadcast(context.Background(), clients, protocol.Envelope{
+		Type: protocol.TypeRoomState,
+	})
+
+	if err != nil {
+		t.Fatalf("broadcast: %v", err)
+	}
+	if stats.QueuePressureClients != 1 {
+		t.Fatalf("expected 1 queue pressure client, got %d", stats.QueuePressureClients)
 	}
 }
 
@@ -262,12 +308,12 @@ func (c *fakeBroadcastClient) EnqueueJSON(ctx context.Context, message any) (roo
 	}
 	if c.blockUntilCtx {
 		<-ctx.Done()
-		return room.EnqueueResult{}, ctx.Err()
+		return enqueueResult, ctx.Err()
 	}
 	if c.blockUntil != nil {
 		select {
 		case <-ctx.Done():
-			return room.EnqueueResult{}, ctx.Err()
+			return enqueueResult, ctx.Err()
 		case <-c.blockUntil:
 		}
 	}

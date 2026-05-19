@@ -38,9 +38,12 @@ func TestClientConnectionEnqueueJSONRespectsContextWhenOutboxIsFull(t *testing.T
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	_, err := client.EnqueueJSON(ctx, map[string]string{"type": "room_state"})
+	result, err := client.EnqueueJSON(ctx, map[string]string{"type": "room_state"})
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected context canceled, got %v", err)
+	}
+	if result.QueueDepth != 1 || result.QueueCapacity != 1 {
+		t.Fatalf("expected full queue snapshot, got %+v", result)
 	}
 }
 

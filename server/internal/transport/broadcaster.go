@@ -24,15 +24,16 @@ type roomBroadcaster interface {
 }
 
 type broadcastStats struct {
-	Clients         int
-	FailedClients   int
-	TimedOutClients int
-	ClosedClients   int
-	CoalescedClients int
-	MaxQueueDepth    int
-	Duration        time.Duration
-	SlowestUserID   string
-	SlowestDuration time.Duration
+	Clients              int
+	FailedClients        int
+	TimedOutClients      int
+	ClosedClients        int
+	CoalescedClients     int
+	QueuePressureClients int
+	MaxQueueDepth        int
+	Duration             time.Duration
+	SlowestUserID        string
+	SlowestDuration      time.Duration
 }
 
 type broadcastConfig struct {
@@ -131,13 +132,12 @@ func (b *boundedBroadcaster) Broadcast(
 				if enqueueResult.Coalesced {
 					stats.CoalescedClients++
 				}
-				if enqueueResult.QueueDepth > stats.MaxQueueDepth {
-					stats.MaxQueueDepth = enqueueResult.QueueDepth
-				}
+				recordQueueStatsLocked(&stats, enqueueResult)
 				return
 			}
 
 			stats.FailedClients++
+			recordQueueStatsLocked(&stats, enqueueResult)
 			if firstErr == nil {
 				firstErr = err
 			}
@@ -179,4 +179,17 @@ func roomClientWriters(clients []*room.ClientConnection) []clientWriter {
 
 func isEnqueueTimeout(parentCtx context.Context, enqueueCtx context.Context) bool {
 	return parentCtx.Err() == nil && errors.Is(enqueueCtx.Err(), context.DeadlineExceeded)
+}
+
+func enqueueQueueUnderPressure(result room.EnqueueResult) bool {
+	return result.QueueCapacity > 0 && result.QueueDepth*100 >= result.QueueCapacity*80
+}
+
+func recordQueueStatsLocked(stats *broadcastStats, result room.EnqueueResult) {
+	if enqueueQueueUnderPressure(result) {
+		stats.QueuePressureClients++
+	}
+	if result.QueueDepth > stats.MaxQueueDepth {
+		stats.MaxQueueDepth = result.QueueDepth
+	}
 }

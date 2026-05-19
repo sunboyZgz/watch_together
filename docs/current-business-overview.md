@@ -144,14 +144,14 @@ Android 当前能力：
 - 使用 `github.com/coder/websocket`。
 - 每个连接有独立写循环和出站队列。
 - 出站队列有容量限制，`room_state` 支持 coalescing。
-- 广播层有并发限制、超时、慢客户端统计和超时关闭策略。
+- 广播层有并发限制、超时、队列压力统计、慢客户端统计和超时关闭策略。
 - 服务端发送 `heartbeat`，客户端回 `heartbeat_ack`。
 - 支持 `clock_sync.ping / clock_sync.pong`。
 - 支持 `requestId` 控制事件去重，当前是进程内 sharded bounded map。
 
 待实现或待加固：
 
-- 需要定义慢客户端策略：优先合并/丢弃可恢复消息，让客户端通过 `room_state.request` 恢复；长期不可写或心跳超时再关闭连接。
+- 慢客户端策略已进入实现：`room_state` 可合并，控制事件不合并；长期不可写、队列持续阻塞或心跳超时后关闭连接，客户端可通过 `room_state.request` 恢复。
 - 需要补充面向 100+ 人房间的压测和指标。
 
 ## 9. 房主与控制权
@@ -244,7 +244,7 @@ Android 当前能力：
 
 - 控制请求 `seq` 字段后续改名为 `expectedSeq`。
 - 持久化成员列表和在线成员列表的 UI 展示边界。
-- 慢客户端策略完善和压测。
+- 慢客户端策略压测。
 - HLS 短期授权访问。
 - 面向 100+ 人房间的广播、心跳、重连和 goroutine 泄漏测试。
 

@@ -33,8 +33,9 @@ func DefaultClientOutboxCapacity() int {
 }
 
 type EnqueueResult struct {
-	QueueDepth int
-	Coalesced  bool
+	QueueDepth    int
+	QueueCapacity int
+	Coalesced     bool
 }
 
 type ClientConnectionOptions struct {
@@ -74,8 +75,9 @@ func (o *clientOutbox) enqueue(ctx context.Context, message any) (EnqueueResult,
 		if queued.coalesceKey != "" {
 			if o.coalesceLatestLocked(queued) {
 				result := EnqueueResult{
-					QueueDepth: len(o.queue),
-					Coalesced:  true,
+					QueueDepth:    len(o.queue),
+					QueueCapacity: o.capacity,
+					Coalesced:     true,
 				}
 				o.signalLocked()
 				o.mu.Unlock()
@@ -84,7 +86,10 @@ func (o *clientOutbox) enqueue(ctx context.Context, message any) (EnqueueResult,
 		}
 		if len(o.queue) < o.capacity {
 			o.queue = append(o.queue, queued)
-			result := EnqueueResult{QueueDepth: len(o.queue)}
+			result := EnqueueResult{
+				QueueDepth:    len(o.queue),
+				QueueCapacity: o.capacity,
+			}
 			o.signalLocked()
 			o.mu.Unlock()
 			return result, nil
@@ -94,9 +99,19 @@ func (o *clientOutbox) enqueue(ctx context.Context, message any) (EnqueueResult,
 
 		select {
 		case <-ctx.Done():
-			return EnqueueResult{}, ctx.Err()
+			return o.snapshot(), ctx.Err()
 		case <-notify:
 		}
+	}
+}
+
+func (o *clientOutbox) snapshot() EnqueueResult {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+
+	return EnqueueResult{
+		QueueDepth:    len(o.queue),
+		QueueCapacity: o.capacity,
 	}
 }
 
