@@ -184,10 +184,11 @@
 
 - `room.Leave` 已实现 `host_left`。
 - `JoinWithLimit` 已支持 owner reclaim。
+- 代码字段已从泛化的 `HostChanged` 收敛为 `HostReclaimed`，避免误读为自动 host transfer。
 
 目标行为：
 
-- 文档、协议、测试和 UI 文案都不再表达“自动 host transfer”。
+- 当前有效文档、协议、测试和 UI 文案都不再表达“自动 host transfer”。
 - 普通成员不能在 host unavailable 状态控制播放。
 - 原房主重连后广播最新 `room_state`。
 
@@ -395,7 +396,7 @@
 1. WebSocket token 鉴权和连接身份绑定。已完成第一轮加固。
 2. stale seq 拒绝和拒绝后的 `room_state` 恢复。已完成第一轮加固。
 3. 断线、重连、主动离开和 5 分钟 grace period。已完成第一轮加固。
-4. host transfer 旧语义清理，确保只保留 owner reclaim。
+4. host transfer 旧语义清理，确保只保留 owner reclaim。已完成第一轮加固。
 
 第二批稳定性增强：
 

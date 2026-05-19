@@ -252,8 +252,8 @@ func TestRoomOriginalHostCanReclaimAfterHostLeave(t *testing.T) {
 	if result.Err != nil {
 		t.Fatalf("host rejoin: %v", result.Err)
 	}
-	if !result.HostChanged {
-		t.Fatalf("expected host changed on original host rejoin")
+	if !result.HostReclaimed {
+		t.Fatalf("expected host reclaimed on original host rejoin")
 	}
 	if result.State.HostUserID != "user_a" {
 		t.Fatalf("expected original host to reclaim control, got %s", result.State.HostUserID)

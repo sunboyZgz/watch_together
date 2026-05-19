@@ -58,7 +58,7 @@ type JoinResult struct {
 	Clients           []*ClientConnection
 	ReplacedClient    *ClientConnection
 	MembershipChanged bool
-	HostChanged       bool
+	HostReclaimed     bool
 	Err               error
 }
 
@@ -189,7 +189,7 @@ func (r *Room) JoinWithLimit(client *ClientConnection, maxClients int) JoinResul
 		Clients:           r.clientsSnapshotLocked(),
 		ReplacedClient:    replacedClient,
 		MembershipChanged: membershipChanged,
-		HostChanged:       previousHostUserID != r.state.HostUserID,
+		HostReclaimed:     previousHostUserID == "" && r.state.HostUserID == r.ownerUserID && r.state.HostUserID != "",
 	}
 }
 

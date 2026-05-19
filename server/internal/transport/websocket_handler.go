@@ -519,7 +519,7 @@ func (h *WebSocketHandler) handleJoinRoom(
 		return err
 	}
 	h.cacheRoomState(joinResult.State)
-	if joinResult.HostChanged {
+	if joinResult.HostReclaimed {
 		h.broadcastRoomState(room.RemoveClientResult{
 			State:     joinResult.State,
 			Remaining: clientsWithout(joinResult.Clients, client),

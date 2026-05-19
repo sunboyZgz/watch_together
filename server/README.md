@@ -19,7 +19,7 @@
 - `set_playback_rate` 的最小控制事件处理与广播
 - `ended` completed state 的最小权威语义与广播
 - 应用层 heartbeat 与静默连接超时清理
-- host disconnect 后的 immediate host transfer
+- host disconnect 后的 owner unavailable / original host reclaim
 - same-user repeated join 的单有效连接收敛
 - 房间最后一个成员离开后的 grace-period lifecycle 规则
 - 最小 `Room / ClientConnection / RoomManager` 内存结构
@@ -313,14 +313,14 @@ server/
 - 非 host 发出的控制事件会返回 `error`
 - 服务端会周期性发送 `heartbeat`，客户端需返回 `heartbeat_ack`
 - 超时未 ack 的连接会进入现有断连清理流程
-- host 断开连接后，剩余成员会收到新的 `room_state` 且 host 身份立即转移
-- former host 在 host transfer 后重新 join room 时，会作为普通成员回到房间，不会隐式拿回 host 身份
+- host 断开连接后，剩余成员会收到新的 `room_state`，房间进入无在线 host 状态且不会自动转移控制权
+- 原房主在房间保留期内重新 `join_room` 时，会通过 owner reclaim 恢复 host 身份
 - 同一 `userId` repeated join 同一房间时，新连接会替换旧连接并重新收到基于 authority timeline 结算后的最新 `room_state`
 - repeated join / reconnect 在视频已播完时，会收到 `ended=true` 的稳定 `room_state`
 - 最后一个成员异常断开后，房间不会立即销毁，而是进入 5 分钟 grace period；若期间有人重新加入则继续保留，否则自动销毁
 - 主动 `leave_room` 会立即退出成员关系；若房间因此为空，则立即销毁，不进入 grace period
 
-其中 `POST /rooms`、`join_room`、`play / pause / seek / set_playback_rate / ended` 与 host transfer 的最小同步路径已通过基础测试验证。
+其中 `POST /rooms`、`join_room`、`play / pause / seek / set_playback_rate / ended` 与 owner reclaim 的最小同步路径已通过基础测试验证。
 
 ## Mediactl
 

@@ -772,6 +772,81 @@ func TestWebSocketLeaveRoomBroadcastsMembershipChanged(t *testing.T) {
 	}
 }
 
+func TestWebSocketHostLeaveRoomDoesNotTransferControl(t *testing.T) {
+	roomManager := room.NewManager()
+	createdRoom, err := roomManager.CreateRoom("user_a", "sample_001")
+	if err != nil {
+		t.Fatalf("create room: %v", err)
+	}
+	mux := http.NewServeMux()
+	mux.Handle("/ws", NewWebSocketHandler(roomManager, true))
+
+	httpServer := httptest.NewServer(mux)
+	defer httpServer.Close()
+
+	wsURL := "ws" + httpServer.URL[len("http"):] + "/ws"
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	hostConn := mustDialWebSocket(t, ctx, wsURL)
+	defer hostConn.Close(websocket.StatusNormalClosure, "test done")
+	viewerConn := mustDialWebSocket(t, ctx, wsURL, "user_b")
+	defer viewerConn.Close(websocket.StatusNormalClosure, "test done")
+
+	mustJoinRoom(t, ctx, hostConn, createdRoom.ID(), "user_a")
+	mustReadEnvelope(t, ctx, hostConn)
+	mustJoinRoom(t, ctx, viewerConn, createdRoom.ID(), "user_b")
+	mustReadEnvelope(t, ctx, viewerConn)
+	mustReadEnvelope(t, ctx, hostConn)
+
+	mustSendEnvelope(t, ctx, hostConn, protocol.Envelope{
+		Type: protocol.TypeLeaveRoom,
+		Payload: mustJSONRaw(protocol.LeaveRoomPayload{
+			RoomID: createdRoom.ID(),
+			UserID: "user_a",
+		}),
+	})
+
+	roomStateEnvelope := mustReadEnvelope(t, ctx, viewerConn)
+	if roomStateEnvelope.Type != protocol.TypeRoomState {
+		t.Fatalf("expected room_state after host leave_room, got %s", roomStateEnvelope.Type)
+	}
+	var roomState protocol.RoomStatePayload
+	if err := json.Unmarshal(roomStateEnvelope.Payload, &roomState); err != nil {
+		t.Fatalf("unmarshal room_state payload: %v", err)
+	}
+	if roomState.HostUserID != "" {
+		t.Fatalf("expected no online host after host leave_room, got %s", roomState.HostUserID)
+	}
+	if roomState.Reason != "host_left" {
+		t.Fatalf("expected host_left reason, got %s", roomState.Reason)
+	}
+
+	membersChanged := mustReadEnvelope(t, ctx, viewerConn)
+	if membersChanged.Type != protocol.TypeRoomMembersChanged {
+		t.Fatalf("expected room_members_changed after host leave_room, got %s", membersChanged.Type)
+	}
+
+	mustSendEnvelope(t, ctx, viewerConn, protocol.Envelope{
+		Type: protocol.TypePlay,
+		Payload: mustJSONRaw(protocol.PlayPayload{
+			RoomID:     createdRoom.ID(),
+			UserID:     "user_b",
+			PositionMs: 9_000,
+			Seq:        roomState.Seq,
+		}),
+	})
+
+	var errorEnvelope protocol.ErrorEnvelope
+	readMessageAs(t, ctx, viewerConn, &errorEnvelope)
+	if errorEnvelope.Type != protocol.TypeError {
+		t.Fatalf("expected viewer control to be rejected, got %s", errorEnvelope.Type)
+	}
+	if errorEnvelope.Payload.Message != "only host can control playback" {
+		t.Fatalf("expected host control rejection, got %s", errorEnvelope.Payload.Message)
+	}
+}
+
 /*
 *
 它验证的是下面这条链路：
