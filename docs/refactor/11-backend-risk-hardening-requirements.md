@@ -138,6 +138,7 @@
 - 连接身份在握手后绑定到 `ClientConnection`。
 - `join_room`、`room_state.request` 和控制事件不再信任 payload `userId` 推进权限。
 - 控制事件使用连接身份做房主校验。
+- 控制事件还要求连接是当前 active room device，避免同一账号多设备同时推进房间状态。
 
 实现前需确认：
 

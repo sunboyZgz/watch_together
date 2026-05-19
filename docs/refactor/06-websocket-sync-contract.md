@@ -23,6 +23,30 @@ Authorization: Bearer <accessToken>
 
 The server verifies the token during the WebSocket handshake and binds the authenticated user id to the connection. Payload `userId` is kept only for protocol compatibility and mismatch detection; it is not trusted for room membership, host authorization, or control authority.
 
+## Active Room Device
+
+One account can log in on multiple devices, but only one WebSocket connection can be the active room device for that `userId`.
+
+If a second device sends `join_room` while the user already has an active room device:
+
+```text
+the new device does not enter the room immediately
+the new device receives room_device.waiting
+the current active device receives room_device.switch_request
+the current active device replies with room_device.switch_reply
+only approve=true switches active room participation to the new device
+reject, timeout, or active-device disconnect keeps the new device inactive
+```
+
+Host control authorization checks both:
+
+```text
+authenticated user is the host
+the WebSocket connection is the current active room device
+```
+
+This is process-local in the current single-instance MVP. A future multi-instance deployment should move the active device lease to Redis or another shared coordination layer.
+
 ## Authority Model
 
 The server owns the room timeline vector:
@@ -326,6 +350,10 @@ clock_sync: server-time estimation
 | `leave_room` | client -> server |
 | `room_state` | server -> client |
 | `room_state.request` | client -> server |
+| `room_device.waiting` | server -> pending client |
+| `room_device.switch_request` | server -> current active client |
+| `room_device.switch_reply` | current active client -> server |
+| `room_device.switch_result` | server -> pending/current clients |
 | `play` | client -> server, server -> clients |
 | `pause` | client -> server, server -> clients |
 | `seek` | client -> server, server -> clients |

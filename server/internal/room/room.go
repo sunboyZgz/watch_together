@@ -9,9 +9,10 @@ import (
 )
 
 var (
-	ErrNotHost     = errors.New("only host can control playback")
-	ErrRoomFull    = errors.New("room is full")
-	ErrSeqMismatch = errors.New("control seq does not match current room state")
+	ErrNotHost             = errors.New("only host can control playback")
+	ErrRoomFull            = errors.New("room is full")
+	ErrSeqMismatch         = errors.New("control seq does not match current room state")
+	ErrNotActiveRoomDevice = errors.New("not active room device")
 )
 
 const (
@@ -60,6 +61,12 @@ type JoinResult struct {
 	MembershipChanged bool
 	HostReclaimed     bool
 	Err               error
+}
+
+type SwitchClientResult struct {
+	State   State
+	Clients []*ClientConnection
+	Err     error
 }
 
 // New creates a room with a minimal default playback state.
@@ -191,6 +198,56 @@ func (r *Room) JoinWithLimit(client *ClientConnection, maxClients int) JoinResul
 		MembershipChanged: membershipChanged,
 		HostReclaimed:     previousHostUserID == "" && r.state.HostUserID == r.ownerUserID && r.state.HostUserID != "",
 	}
+}
+
+// SwitchClient replaces the active connection for the same logical user without
+// changing room membership or the authoritative playback timeline.
+func (r *Room) SwitchClient(activeClient *ClientConnection, nextClient *ClientConnection) SwitchClientResult {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if activeClient == nil || nextClient == nil || activeClient.UserID() == "" ||
+		activeClient.UserID() != nextClient.UserID() {
+		return SwitchClientResult{
+			State: r.currentStateLocked(r.now()),
+			Err:   ErrNotActiveRoomDevice,
+		}
+	}
+	if current := r.clientsByUser[activeClient.UserID()]; current != activeClient {
+		return SwitchClientResult{
+			State: r.currentStateLocked(r.now()),
+			Err:   ErrNotActiveRoomDevice,
+		}
+	}
+
+	delete(r.clients, activeClient)
+	r.clients[nextClient] = struct{}{}
+	r.clientsByUser[nextClient.UserID()] = nextClient
+	return SwitchClientResult{
+		State:   r.currentStateLocked(r.now()),
+		Clients: r.clientsSnapshotLocked(),
+	}
+}
+
+// ActiveClientForUser returns the current active room connection for a logical user.
+func (r *Room) ActiveClientForUser(userID string) (*ClientConnection, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	client, ok := r.clientsByUser[userID]
+	return client, ok
+}
+
+// IsActiveClient reports whether the connection is the authoritative room device
+// for its logical user.
+func (r *Room) IsActiveClient(client *ClientConnection) bool {
+	if client == nil {
+		return false
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	return r.clientsByUser[client.UserID()] == client
 }
 
 // Leave removes a client and pauses playback if the current host disconnects.

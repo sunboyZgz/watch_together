@@ -16,19 +16,21 @@ import (
 )
 
 type WebSocketHandler struct {
-	roomManager       *room.Manager
-	debugSync         bool
-	heartbeatInterval time.Duration
-	heartbeatTimeout  time.Duration
-	clock             realtime.Clock
-	broadcaster       roomBroadcaster
-	clientOptions     room.ClientConnectionOptions
-	connectionLimit   *semaphore.Weighted
-	maxRoomClients    int
-	roomStateWriter   latestRoomStateWriter
-	roomLeaver        roomMembershipLeaver
-	controlDeduper    *controlRequestDeduper
-	tokenVerifier     accessTokenVerifier
+	roomManager         *room.Manager
+	debugSync           bool
+	heartbeatInterval   time.Duration
+	heartbeatTimeout    time.Duration
+	clock               realtime.Clock
+	broadcaster         roomBroadcaster
+	clientOptions       room.ClientConnectionOptions
+	connectionLimit     *semaphore.Weighted
+	maxRoomClients      int
+	roomStateWriter     latestRoomStateWriter
+	roomLeaver          roomMembershipLeaver
+	controlDeduper      *controlRequestDeduper
+	tokenVerifier       accessTokenVerifier
+	deviceSwitches      *roomDeviceSwitchRegistry
+	deviceSwitchTimeout time.Duration
 }
 
 const (
@@ -47,6 +49,7 @@ type WebSocketRuntimeConfig struct {
 	ClientOutboxCapacity      int
 	MaxConnections            int64
 	MaxRoomClients            int
+	RoomDeviceSwitchTimeout   time.Duration
 }
 
 type latestRoomStateWriter interface {
@@ -184,7 +187,9 @@ func newWebSocketHandlerWithClock(
 			defaultControlRequestDedupMaxEntries,
 			defaultControlRequestDedupShards,
 		),
-		tokenVerifier: defaultAccessTokenVerifier,
+		tokenVerifier:       defaultAccessTokenVerifier,
+		deviceSwitches:      newRoomDeviceSwitchRegistry(),
+		deviceSwitchTimeout: config.RoomDeviceSwitchTimeout,
 	}
 }
 
@@ -200,6 +205,9 @@ func normalizeWebSocketRuntimeConfig(config WebSocketRuntimeConfig) WebSocketRun
 	}
 	if config.ClientOutboxCapacity <= 0 {
 		config.ClientOutboxCapacity = room.DefaultClientOutboxCapacity()
+	}
+	if config.RoomDeviceSwitchTimeout <= 0 {
+		config.RoomDeviceSwitchTimeout = defaultRoomDeviceSwitchTimeout
 	}
 	return config
 }
@@ -259,6 +267,7 @@ func (h *WebSocketHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if removeResult.HostUnavailable {
 			h.broadcastRoomState(removeResult)
 		}
+		h.cancelRoomDeviceSwitchesForClient(client, "active_disconnected")
 		_ = client.Close(websocket.StatusNormalClosure, "connection closed")
 	}()
 	go h.runHeartbeatLoop(ctx, client)
@@ -333,6 +342,8 @@ func (h *WebSocketHandler) handleMessage(
 		return h.handleLeaveRoom(ctx, client, envelope)
 	case protocol.TypeRoomStateRequest:
 		return h.handleRoomStateRequest(ctx, client, envelope)
+	case protocol.TypeRoomDeviceSwitchReply:
+		return h.handleRoomDeviceSwitchReply(ctx, client, envelope)
 	case protocol.TypePlay:
 		return h.handlePlay(ctx, client, envelope)
 	case protocol.TypePause:
@@ -369,6 +380,11 @@ func (h *WebSocketHandler) handleLeaveRoom(
 			roomID:  payload.RoomID,
 			message: "room identity mismatch",
 		}
+	}
+	if existingRoom, ok := h.roomManager.Get(payload.RoomID); ok && !existingRoom.IsActiveClient(client) {
+		h.cancelRoomDeviceSwitchesForClient(client, "left pending room device switch")
+		client.SetIdentity("", "")
+		return client.Close(websocket.StatusNormalClosure, "left pending room device switch")
 	}
 
 	h.persistRoomLeave(payload.RoomID, payload.UserID)
@@ -453,6 +469,12 @@ func (h *WebSocketHandler) handleRoomStateRequest(
 			message: "room not found",
 		}
 	}
+	if !existingRoom.IsActiveClient(client) {
+		return protocolMessageError{
+			roomID:  payload.RoomID,
+			message: "active room device required",
+		}
+	}
 
 	state := existingRoom.StateSnapshot()
 	if h.debugSync {
@@ -498,6 +520,37 @@ func (h *WebSocketHandler) handleJoinRoom(
 
 	// We persist identity on the connection first so disconnect cleanup can find the room later.
 	client.SetIdentity(authUserID, payload.RoomID)
+	if activeLookup, ok := h.roomManager.ActiveClientForUser(authUserID); ok && activeLookup.Client != nil && activeLookup.Client != client {
+		switchRequest, created := h.deviceSwitches.create(
+			authUserID,
+			payload.RoomID,
+			activeLookup.RoomID,
+			activeLookup.Client,
+			client,
+			h.clock.Now().Add(h.deviceSwitchTimeout),
+		)
+		if !created {
+			client.SetIdentity("", "")
+			return protocolMessageError{
+				roomID:  payload.RoomID,
+				message: "device switch already pending",
+			}
+		}
+		if err := h.writeRoomDeviceWaiting(ctx, client, switchRequest); err != nil {
+			h.deviceSwitches.take(switchRequest.RequestID)
+			client.SetIdentity("", "")
+			return err
+		}
+		if err := h.notifyRoomDeviceSwitchRequest(ctx, activeLookup.Client, switchRequest); err != nil {
+			h.deviceSwitches.take(switchRequest.RequestID)
+			_ = h.writeRoomDeviceSwitchResult(context.Background(), client, switchRequest, false, "switch request delivery failed")
+			client.SetIdentity("", "")
+			_ = client.Close(websocket.StatusPolicyViolation, "device switch request delivery failed")
+			return err
+		}
+		h.scheduleRoomDeviceSwitchTimeout(switchRequest)
+		return nil
+	}
 	joinResult := existingRoom.JoinWithLimit(client, h.maxRoomClients)
 	if joinResult.Err != nil {
 		client.SetIdentity("", "")
@@ -529,6 +582,178 @@ func (h *WebSocketHandler) handleJoinRoom(
 		h.broadcastRoomMembersChangedToOthers(payload.RoomID, joinResult.Clients, client, "join")
 	}
 	return nil
+}
+
+func (h *WebSocketHandler) handleRoomDeviceSwitchReply(
+	ctx context.Context,
+	client *room.ClientConnection,
+	envelope protocol.Envelope,
+) error {
+	payload, err := protocol.DecodeRoomDeviceSwitchReply(envelope)
+	if err != nil {
+		return err
+	}
+	client.MarkHeartbeatAck(h.clock.Now())
+	if client.RoomID() != payload.RoomID || client.UserID() == "" || client.UserID() != payload.UserID {
+		return protocolMessageError{
+			roomID:  payload.RoomID,
+			message: "room identity mismatch",
+		}
+	}
+
+	pending, ok := h.deviceSwitches.get(payload.RequestID)
+	if !ok || pending.ActiveRoomID != payload.RoomID || pending.UserID != payload.UserID {
+		return protocolMessageError{
+			roomID:  payload.RoomID,
+			message: "device switch not found",
+		}
+	}
+	if pending.ActiveClient != client {
+		return protocolMessageError{
+			roomID:  payload.RoomID,
+			message: "device switch reply from inactive client",
+		}
+	}
+	if h.clock.Now().After(pending.ExpiresAt) {
+		h.deviceSwitches.take(payload.RequestID)
+		_ = h.writeRoomDeviceSwitchResult(ctx, pending.PendingClient, pending, false, "device switch expired")
+		_ = pending.PendingClient.Close(websocket.StatusPolicyViolation, "device switch expired")
+		return nil
+	}
+	if !payload.Approve {
+		h.deviceSwitches.take(payload.RequestID)
+		_ = h.writeRoomDeviceSwitchResult(ctx, pending.PendingClient, pending, false, "device switch rejected")
+		_ = h.writeRoomDeviceSwitchResult(ctx, pending.ActiveClient, pending, false, "device switch rejected")
+		_ = pending.PendingClient.Close(websocket.StatusPolicyViolation, "device switch rejected")
+		return nil
+	}
+
+	switchResult := h.roomManager.SwitchActiveClient(pending.TargetRoomID, pending.ActiveClient, pending.PendingClient, h.maxRoomClients)
+	if switchResult.Err != nil {
+		h.deviceSwitches.take(payload.RequestID)
+		_ = h.writeRoomDeviceSwitchResult(ctx, pending.PendingClient, pending, false, switchResult.Err.Error())
+		_ = pending.PendingClient.Close(websocket.StatusPolicyViolation, switchResult.Err.Error())
+		return switchResult.Err
+	}
+	h.deviceSwitches.take(payload.RequestID)
+	h.cacheRoomState(switchResult.State)
+	h.roomManager.MarkRoomActive(pending.TargetRoomID)
+	_ = h.writeRoomDeviceSwitchResult(ctx, pending.PendingClient, pending, true, "")
+	_ = h.writeRoomDeviceSwitchResult(ctx, pending.ActiveClient, pending, true, "")
+	_ = h.writeRoomState(ctx, pending.PendingClient, switchResult.State)
+	if switchResult.CrossRoom && switchResult.PreviousRoomID != "" {
+		h.broadcastRoomState(room.RemoveClientResult{
+			State:           switchResult.PreviousRoomState,
+			Remaining:       switchResult.PreviousRoomRemaining,
+			HostUnavailable: switchResult.PreviousHostUnavailable,
+		})
+		if len(switchResult.PreviousRoomRemaining) > 0 {
+			h.broadcastRoomMembersChangedToOthers(
+				switchResult.PreviousRoomID,
+				switchResult.PreviousRoomRemaining,
+				pending.ActiveClient,
+				"leave",
+			)
+		}
+	}
+	if switchResult.MembershipChanged {
+		h.broadcastRoomMembersChangedToOthers(
+			pending.TargetRoomID,
+			switchResult.Clients,
+			pending.ActiveClient,
+			"join",
+		)
+	}
+	_ = pending.ActiveClient.Close(websocket.StatusNormalClosure, "device switched")
+	return nil
+}
+
+func (h *WebSocketHandler) writeRoomDeviceWaiting(
+	ctx context.Context,
+	client *room.ClientConnection,
+	pending roomDeviceSwitch,
+) error {
+	return client.WriteJSON(ctx, protocol.Envelope{
+		Type: protocol.TypeRoomDeviceWaiting,
+		Payload: mustJSONRaw(protocol.RoomDeviceSwitchRequestPayload{
+			RoomID:       pending.TargetRoomID,
+			TargetRoomID: pending.TargetRoomID,
+			UserID:       pending.UserID,
+			RequestID:    pending.RequestID,
+			ExpiresAtMs:  pending.ExpiresAt.UnixMilli(),
+		}),
+	})
+}
+
+func (h *WebSocketHandler) notifyRoomDeviceSwitchRequest(
+	ctx context.Context,
+	client *room.ClientConnection,
+	pending roomDeviceSwitch,
+) error {
+	return client.WriteJSON(ctx, protocol.Envelope{
+		Type: protocol.TypeRoomDeviceSwitchRequest,
+		Payload: mustJSONRaw(protocol.RoomDeviceSwitchRequestPayload{
+			RoomID:       pending.ActiveRoomID,
+			TargetRoomID: pending.TargetRoomID,
+			UserID:       pending.UserID,
+			RequestID:    pending.RequestID,
+			ExpiresAtMs:  pending.ExpiresAt.UnixMilli(),
+		}),
+	})
+}
+
+func (h *WebSocketHandler) writeRoomDeviceSwitchResult(
+	ctx context.Context,
+	client *room.ClientConnection,
+	pending roomDeviceSwitch,
+	approved bool,
+	reason string,
+) error {
+	if client == nil {
+		return nil
+	}
+	return client.WriteJSON(ctx, protocol.Envelope{
+		Type: protocol.TypeRoomDeviceSwitchResult,
+		Payload: mustJSONRaw(protocol.RoomDeviceSwitchResultPayload{
+			RoomID:    pending.TargetRoomID,
+			UserID:    pending.UserID,
+			RequestID: pending.RequestID,
+			Approved:  approved,
+			Reason:    reason,
+		}),
+	})
+}
+
+func (h *WebSocketHandler) scheduleRoomDeviceSwitchTimeout(pending roomDeviceSwitch) {
+	timeout := time.Until(pending.ExpiresAt)
+	if timeout <= 0 {
+		timeout = h.deviceSwitchTimeout
+	}
+	go func() {
+		timer := time.NewTimer(timeout)
+		defer timer.Stop()
+		<-timer.C
+
+		expired, ok := h.deviceSwitches.take(pending.RequestID)
+		if !ok {
+			return
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		_ = h.writeRoomDeviceSwitchResult(ctx, expired.PendingClient, expired, false, "device switch timeout")
+		_ = expired.PendingClient.Close(websocket.StatusPolicyViolation, "device switch timeout")
+	}()
+}
+
+func (h *WebSocketHandler) cancelRoomDeviceSwitchesForClient(client *room.ClientConnection, reason string) {
+	for _, pending := range h.deviceSwitches.cancelForClient(client) {
+		if pending.ActiveClient == client {
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			_ = h.writeRoomDeviceSwitchResult(ctx, pending.PendingClient, pending, false, reason)
+			cancel()
+			_ = pending.PendingClient.Close(websocket.StatusPolicyViolation, reason)
+		}
+	}
 }
 
 // handlePlay validates one play control event, applies it to the room authority state,
@@ -724,6 +949,12 @@ func (h *WebSocketHandler) handleControlEvent(
 		return protocolMessageError{
 			roomID:  roomID,
 			message: "room not found",
+		}
+	}
+	if !existingRoom.IsActiveClient(client) {
+		return protocolMessageError{
+			roomID:  roomID,
+			message: "active room device required",
 		}
 	}
 

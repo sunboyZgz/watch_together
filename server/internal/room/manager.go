@@ -45,6 +45,24 @@ type RemoveClientResult struct {
 	RoomRemoved     bool
 }
 
+type ActiveClientLookup struct {
+	RoomID string
+	Client *ClientConnection
+}
+
+type SwitchActiveClientResult struct {
+	State                   State
+	Clients                 []*ClientConnection
+	MembershipChanged       bool
+	HostReclaimed           bool
+	PreviousRoomID          string
+	PreviousRoomState       State
+	PreviousRoomRemaining   []*ClientConnection
+	PreviousHostUnavailable bool
+	CrossRoom               bool
+	Err                     error
+}
+
 // NewManager creates the top-level in-memory registry for all active rooms.
 func NewManager() *Manager {
 	return newManagerWithClock(time.Now, defaultEmptyRoomGracePeriod)
@@ -136,6 +154,99 @@ func (m *Manager) GetOrCreate(roomID string) *Room {
 	room := New(roomID)
 	m.rooms[roomID] = room
 	return room
+}
+
+// ActiveClientForUser scans active rooms for the current authoritative room
+// connection of one logical user. It is intentionally process-local for the MVP.
+func (m *Manager) ActiveClientForUser(userID string) (ActiveClientLookup, bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	for roomID, existingRoom := range m.rooms {
+		if client, ok := existingRoom.ActiveClientForUser(userID); ok {
+			return ActiveClientLookup{
+				RoomID: roomID,
+				Client: client,
+			}, true
+		}
+	}
+	return ActiveClientLookup{}, false
+}
+
+// SwitchActiveClient moves the active room participation from activeClient to
+// nextClient after the active device explicitly approves the switch.
+func (m *Manager) SwitchActiveClient(
+	targetRoomID string,
+	activeClient *ClientConnection,
+	nextClient *ClientConnection,
+	maxClients int,
+) SwitchActiveClientResult {
+	if activeClient == nil || nextClient == nil || activeClient.UserID() == "" ||
+		activeClient.UserID() != nextClient.UserID() {
+		return SwitchActiveClientResult{Err: ErrNotActiveRoomDevice}
+	}
+
+	m.mu.Lock()
+	targetRoom, ok := m.rooms[targetRoomID]
+	if !ok {
+		m.mu.Unlock()
+		return SwitchActiveClientResult{Err: errors.New("room not found")}
+	}
+
+	activeRoomID := ""
+	var activeRoom *Room
+	for roomID, existingRoom := range m.rooms {
+		if existingRoom.IsActiveClient(activeClient) {
+			activeRoomID = roomID
+			activeRoom = existingRoom
+			break
+		}
+	}
+	if activeRoom == nil {
+		m.mu.Unlock()
+		return SwitchActiveClientResult{Err: ErrNotActiveRoomDevice}
+	}
+
+	if activeRoomID == targetRoomID {
+		switchResult := targetRoom.SwitchClient(activeClient, nextClient)
+		m.mu.Unlock()
+		return SwitchActiveClientResult{
+			State:   switchResult.State,
+			Clients: switchResult.Clients,
+			Err:     switchResult.Err,
+		}
+	}
+
+	if maxClients > 0 && targetRoom.ClientCount() >= maxClients {
+		m.mu.Unlock()
+		return SwitchActiveClientResult{Err: ErrRoomFull}
+	}
+
+	leaveResult := activeRoom.Leave(activeClient)
+	joinResult := targetRoom.JoinWithLimit(nextClient, maxClients)
+	if joinResult.Err != nil {
+		m.mu.Unlock()
+		return SwitchActiveClientResult{Err: joinResult.Err}
+	}
+	delete(m.emptySince, targetRoomID)
+	if leaveResult.RoomEmpty {
+		if _, existed := m.emptySince[activeRoomID]; !existed {
+			m.emptySince[activeRoomID] = m.now()
+		}
+	}
+	m.mu.Unlock()
+
+	return SwitchActiveClientResult{
+		State:                   joinResult.State,
+		Clients:                 joinResult.Clients,
+		MembershipChanged:       joinResult.MembershipChanged,
+		HostReclaimed:           joinResult.HostReclaimed,
+		PreviousRoomID:          activeRoomID,
+		PreviousRoomState:       leaveResult.State,
+		PreviousRoomRemaining:   leaveResult.Remaining,
+		PreviousHostUnavailable: leaveResult.HostUnavailable,
+		CrossRoom:               true,
+	}
 }
 
 // RemoveClient removes a client from its room, prunes empty rooms, and reports

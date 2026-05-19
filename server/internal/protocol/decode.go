@@ -78,6 +78,28 @@ func DecodeRoomStateRequest(envelope Envelope) (RoomStateRequestPayload, error) 
 	return payload, nil
 }
 
+// DecodeRoomDeviceSwitchReply validates and decodes one room device switch reply event.
+func DecodeRoomDeviceSwitchReply(envelope Envelope) (RoomDeviceSwitchReplyPayload, error) {
+	if envelope.Type != TypeRoomDeviceSwitchReply {
+		return RoomDeviceSwitchReplyPayload{}, fmt.Errorf("%w: %s", ErrUnsupportedMessageType, envelope.Type)
+	}
+
+	var payload RoomDeviceSwitchReplyPayload
+	if err := json.Unmarshal(envelope.Payload, &payload); err != nil {
+		return RoomDeviceSwitchReplyPayload{}, err
+	}
+	if payload.RoomID == "" {
+		return RoomDeviceSwitchReplyPayload{}, errors.New("missing roomId")
+	}
+	if payload.UserID == "" {
+		return RoomDeviceSwitchReplyPayload{}, errors.New("missing userId")
+	}
+	if payload.RequestID == "" {
+		return RoomDeviceSwitchReplyPayload{}, errors.New("missing requestId")
+	}
+	return payload, nil
+}
+
 // DecodePlay validates and decodes a play control event.
 func DecodePlay(envelope Envelope) (PlayPayload, error) {
 	if envelope.Type != TypePlay {

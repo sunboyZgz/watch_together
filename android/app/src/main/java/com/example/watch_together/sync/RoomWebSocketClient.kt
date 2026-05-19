@@ -7,6 +7,9 @@ import com.example.watch_together.sync.protocol.EndedPayload
 import com.example.watch_together.sync.protocol.PausePayload
 import com.example.watch_together.sync.protocol.PlayPayload
 import com.example.watch_together.sync.protocol.RoomMembersChangedPayload
+import com.example.watch_together.sync.protocol.RoomDeviceSwitchReplyPayload
+import com.example.watch_together.sync.protocol.RoomDeviceSwitchRequestPayload
+import com.example.watch_together.sync.protocol.RoomDeviceSwitchResultPayload
 import com.example.watch_together.sync.protocol.SeekPayload
 import com.example.watch_together.sync.protocol.SetPlaybackRatePayload
 import com.example.watch_together.sync.protocol.toEnvelope
@@ -21,6 +24,9 @@ interface RoomWebSocketListener {
     fun onLog(message: String)
     fun onRoomState(payload: RoomSyncState)
     fun onRoomMembersChanged(payload: RoomMembersChangedPayload)
+    fun onRoomDeviceWaiting(payload: RoomDeviceSwitchRequestPayload)
+    fun onRoomDeviceSwitchRequest(payload: RoomDeviceSwitchRequestPayload)
+    fun onRoomDeviceSwitchResult(payload: RoomDeviceSwitchResultPayload)
     fun onPlay(payload: PlayPayload)
     fun onPause(payload: PausePayload)
     fun onSeek(payload: SeekPayload)
@@ -102,6 +108,9 @@ class RoomWebSocketClient(
                     when (val message = decoder.decode(text)) {
                         is SyncMessage.RoomState -> listener.onRoomState(message.payload.toRoomSyncState())
                         is SyncMessage.RoomMembersChanged -> listener.onRoomMembersChanged(message.payload)
+                        is SyncMessage.RoomDeviceWaiting -> listener.onRoomDeviceWaiting(message.payload)
+                        is SyncMessage.RoomDeviceSwitchRequest -> listener.onRoomDeviceSwitchRequest(message.payload)
+                        is SyncMessage.RoomDeviceSwitchResult -> listener.onRoomDeviceSwitchResult(message.payload)
                         is SyncMessage.Play -> listener.onPlay(message.payload)
                         is SyncMessage.Pause -> listener.onPause(message.payload)
                         is SyncMessage.Seek -> listener.onSeek(message.payload)
@@ -195,6 +204,17 @@ class RoomWebSocketClient(
         )
     }
 
+    fun sendRoomDeviceSwitchReply(requestId: String, approve: Boolean): Boolean {
+        return sendControl(
+            RoomDeviceSwitchReplyPayload(
+                roomId = activeRoomId ?: return false,
+                userId = activeUserId ?: return false,
+                requestId = requestId,
+                approve = approve
+            ).toEnvelope()
+        )
+    }
+
     fun close() {
         sessionGeneration++
         val roomId = activeRoomId
@@ -251,6 +271,13 @@ class RoomWebSocketClient(
             is LeaveRoomPayload -> mapOf(
                 "roomId" to payload.roomId,
                 "userId" to payload.userId
+            )
+
+            is RoomDeviceSwitchReplyPayload -> mapOf(
+                "roomId" to payload.roomId,
+                "userId" to payload.userId,
+                "requestId" to payload.requestId,
+                "approve" to payload.approve
             )
 
             is PlayPayload -> mapOf(

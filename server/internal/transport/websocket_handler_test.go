@@ -982,7 +982,7 @@ func TestWebSocketHeartbeatTimeoutRemovesSilentClient(t *testing.T) {
 	})
 }
 
-func TestWebSocketRepeatedJoinReplacesPreviousConnectionForSameUser(t *testing.T) {
+func TestWebSocketRepeatedJoinRequiresActiveDeviceApproval(t *testing.T) {
 	roomManager := room.NewManager()
 	createdRoom, err := roomManager.CreateRoom("user_a", "sample_001")
 	if err != nil {
@@ -1009,10 +1009,7 @@ func TestWebSocketRepeatedJoinReplacesPreviousConnectionForSameUser(t *testing.T
 	}
 
 	mustJoinRoom(t, ctx, secondConn, createdRoom.ID(), "user_b")
-	secondRoomState := mustReadEnvelope(t, ctx, secondConn)
-	if secondRoomState.Type != protocol.TypeRoomState {
-		t.Fatalf("expected room_state on repeated join, got %s", secondRoomState.Type)
-	}
+	_ = mustApproveRoomDeviceSwitch(t, ctx, firstConn, secondConn, createdRoom.ID(), "user_b")
 
 	waitFor(t, time.Second, func() bool {
 		return roomManager.ClientCount(createdRoom.ID()) == 1
@@ -1053,12 +1050,17 @@ func TestWebSocketRepeatedJoinKeepsHostIdentityStable(t *testing.T) {
 	}
 
 	mustJoinRoom(t, ctx, hostConn2, createdRoom.ID(), "user_a")
-	secondRoomState := mustReadEnvelope(t, ctx, hostConn2)
-	if secondRoomState.Type != protocol.TypeRoomState {
-		t.Fatalf("expected room_state on repeated host join, got %s", secondRoomState.Type)
-	}
+	secondRoomState := mustApproveRoomDeviceSwitch(t, ctx, hostConn1, hostConn2, createdRoom.ID(), "user_a")
 
 	readUntilClosed(t, ctx, hostConn1)
+
+	var payload protocol.RoomStatePayload
+	if err := json.Unmarshal(secondRoomState.Payload, &payload); err != nil {
+		t.Fatalf("unmarshal room_state payload: %v", err)
+	}
+	if payload.HostUserID != "user_a" {
+		t.Fatalf("expected host room_state to stay user_a, got %s", payload.HostUserID)
+	}
 
 	state := createdRoom.StateSnapshot()
 	if state.HostUserID != "user_a" {
@@ -1115,10 +1117,7 @@ func TestWebSocketRepeatedJoinReturnsCurrentEffectiveRoomState(t *testing.T) {
 	time.Sleep(40 * time.Millisecond)
 
 	mustJoinRoom(t, ctx, viewerConn2, createdRoom.ID(), "user_b")
-	rejoinEnvelope := mustReadEnvelope(t, ctx, viewerConn2)
-	if rejoinEnvelope.Type != protocol.TypeRoomState {
-		t.Fatalf("expected room_state on repeated join, got %s", rejoinEnvelope.Type)
-	}
+	rejoinEnvelope := mustApproveRoomDeviceSwitch(t, ctx, viewerConn1, viewerConn2, createdRoom.ID(), "user_b")
 
 	readUntilClosed(t, ctx, viewerConn1)
 
@@ -1179,10 +1178,7 @@ func TestWebSocketRepeatedJoinKeepsCurrentPlaybackRateInRoomState(t *testing.T) 
 	assertPlaybackRateBroadcast(t, ctx, viewerConn1, 0, 1.5, 2)
 
 	mustJoinRoom(t, ctx, viewerConn2, createdRoom.ID(), "user_b")
-	rejoinEnvelope := mustReadEnvelope(t, ctx, viewerConn2)
-	if rejoinEnvelope.Type != protocol.TypeRoomState {
-		t.Fatalf("expected room_state on repeated join, got %s", rejoinEnvelope.Type)
-	}
+	rejoinEnvelope := mustApproveRoomDeviceSwitch(t, ctx, viewerConn1, viewerConn2, createdRoom.ID(), "user_b")
 
 	var payload protocol.RoomStatePayload
 	if err := json.Unmarshal(rejoinEnvelope.Payload, &payload); err != nil {
@@ -1242,10 +1238,7 @@ func TestWebSocketEndedBroadcastAndRepeatedJoinState(t *testing.T) {
 	}
 
 	mustJoinRoom(t, ctx, viewerConn2, createdRoom.ID(), "user_b")
-	rejoinEnvelope := mustReadEnvelope(t, ctx, viewerConn2)
-	if rejoinEnvelope.Type != protocol.TypeRoomState {
-		t.Fatalf("expected room_state on repeated join, got %s", rejoinEnvelope.Type)
-	}
+	rejoinEnvelope := mustApproveRoomDeviceSwitch(t, ctx, viewerConn1, viewerConn2, createdRoom.ID(), "user_b")
 
 	var payload protocol.RoomStatePayload
 	if err := json.Unmarshal(rejoinEnvelope.Payload, &payload); err != nil {
@@ -1490,6 +1483,71 @@ func mustJoinRoom(
 			UserID: userID,
 		}),
 	})
+}
+
+func mustApproveRoomDeviceSwitch(
+	t *testing.T,
+	ctx context.Context,
+	activeConn *websocket.Conn,
+	pendingConn *websocket.Conn,
+	roomID string,
+	userID string,
+) protocol.Envelope {
+	t.Helper()
+
+	waitingEnvelope := mustReadEnvelope(t, ctx, pendingConn)
+	if waitingEnvelope.Type != protocol.TypeRoomDeviceWaiting {
+		t.Fatalf("expected room_device.waiting, got %s", waitingEnvelope.Type)
+	}
+	var waitingPayload protocol.RoomDeviceSwitchRequestPayload
+	if err := json.Unmarshal(waitingEnvelope.Payload, &waitingPayload); err != nil {
+		t.Fatalf("unmarshal room_device.waiting payload: %v", err)
+	}
+	if waitingPayload.RoomID != roomID || waitingPayload.UserID != userID || waitingPayload.RequestID == "" {
+		t.Fatalf("unexpected room_device.waiting payload: %+v", waitingPayload)
+	}
+
+	requestEnvelope := mustReadEnvelopeSkippingMembershipChanged(t, ctx, activeConn)
+	if requestEnvelope.Type != protocol.TypeRoomDeviceSwitchRequest {
+		t.Fatalf("expected room_device.switch_request, got %s", requestEnvelope.Type)
+	}
+	var requestPayload protocol.RoomDeviceSwitchRequestPayload
+	if err := json.Unmarshal(requestEnvelope.Payload, &requestPayload); err != nil {
+		t.Fatalf("unmarshal room_device.switch_request payload: %v", err)
+	}
+	if requestPayload.UserID != userID ||
+		requestPayload.TargetRoomID != roomID ||
+		requestPayload.RequestID != waitingPayload.RequestID {
+		t.Fatalf("unexpected room_device.switch_request payload: %+v", requestPayload)
+	}
+
+	mustSendEnvelope(t, ctx, activeConn, protocol.Envelope{
+		Type: protocol.TypeRoomDeviceSwitchReply,
+		Payload: mustJSONRaw(protocol.RoomDeviceSwitchReplyPayload{
+			RoomID:    requestPayload.RoomID,
+			UserID:    userID,
+			RequestID: requestPayload.RequestID,
+			Approve:   true,
+		}),
+	})
+
+	resultEnvelope := mustReadEnvelope(t, ctx, pendingConn)
+	if resultEnvelope.Type != protocol.TypeRoomDeviceSwitchResult {
+		t.Fatalf("expected room_device.switch_result, got %s", resultEnvelope.Type)
+	}
+	var resultPayload protocol.RoomDeviceSwitchResultPayload
+	if err := json.Unmarshal(resultEnvelope.Payload, &resultPayload); err != nil {
+		t.Fatalf("unmarshal room_device.switch_result payload: %v", err)
+	}
+	if !resultPayload.Approved || resultPayload.RequestID != requestPayload.RequestID {
+		t.Fatalf("unexpected room_device.switch_result payload: %+v", resultPayload)
+	}
+
+	roomStateEnvelope := mustReadEnvelope(t, ctx, pendingConn)
+	if roomStateEnvelope.Type != protocol.TypeRoomState {
+		t.Fatalf("expected room_state after device switch approval, got %s", roomStateEnvelope.Type)
+	}
+	return roomStateEnvelope
 }
 
 func mustSendEnvelope(

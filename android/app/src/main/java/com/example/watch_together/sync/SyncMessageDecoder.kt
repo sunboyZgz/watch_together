@@ -7,6 +7,8 @@ import com.example.watch_together.sync.protocol.PausePayload
 import com.example.watch_together.sync.protocol.PlayPayload
 import com.example.watch_together.sync.protocol.ProtocolEventType
 import com.example.watch_together.sync.protocol.RoomMembersChangedPayload
+import com.example.watch_together.sync.protocol.RoomDeviceSwitchRequestPayload
+import com.example.watch_together.sync.protocol.RoomDeviceSwitchResultPayload
 import com.example.watch_together.sync.protocol.RoomStatePayload
 import com.example.watch_together.sync.protocol.SetPlaybackRatePayload
 import com.example.watch_together.sync.protocol.SeekPayload
@@ -15,6 +17,9 @@ import org.json.JSONObject
 sealed interface SyncMessage {
     data class RoomState(val payload: RoomStatePayload) : SyncMessage
     data class RoomMembersChanged(val payload: RoomMembersChangedPayload) : SyncMessage
+    data class RoomDeviceWaiting(val payload: RoomDeviceSwitchRequestPayload) : SyncMessage
+    data class RoomDeviceSwitchRequest(val payload: RoomDeviceSwitchRequestPayload) : SyncMessage
+    data class RoomDeviceSwitchResult(val payload: RoomDeviceSwitchResultPayload) : SyncMessage
     data class Play(val payload: PlayPayload) : SyncMessage
     data class Pause(val payload: PausePayload) : SyncMessage
     data class Seek(val payload: SeekPayload) : SyncMessage
@@ -53,6 +58,26 @@ class SyncMessageDecoder {
                 SyncMessage.RoomMembersChanged(
                     RoomMembersChangedPayload(
                         roomId = payload.getString("roomId"),
+                        reason = payload.optString("reason")
+                    )
+                )
+            }
+
+            ProtocolEventType.RoomDeviceWaiting.wireName -> {
+                SyncMessage.RoomDeviceWaiting(payload.toRoomDeviceSwitchRequestPayload())
+            }
+
+            ProtocolEventType.RoomDeviceSwitchRequest.wireName -> {
+                SyncMessage.RoomDeviceSwitchRequest(payload.toRoomDeviceSwitchRequestPayload())
+            }
+
+            ProtocolEventType.RoomDeviceSwitchResult.wireName -> {
+                SyncMessage.RoomDeviceSwitchResult(
+                    RoomDeviceSwitchResultPayload(
+                        roomId = payload.getString("roomId"),
+                        userId = payload.getString("userId"),
+                        requestId = payload.getString("requestId"),
+                        approved = payload.getBoolean("approved"),
                         reason = payload.optString("reason")
                     )
                 )
@@ -134,4 +159,15 @@ class SyncMessageDecoder {
             else -> error("Unsupported sync message type: $type")
         }
     }
+}
+
+private fun JSONObject.toRoomDeviceSwitchRequestPayload(): RoomDeviceSwitchRequestPayload {
+    val roomId = getString("roomId")
+    return RoomDeviceSwitchRequestPayload(
+        roomId = roomId,
+        targetRoomId = optString("targetRoomId", roomId),
+        userId = getString("userId"),
+        requestId = getString("requestId"),
+        expiresAtMs = getLong("expiresAtMs")
+    )
 }

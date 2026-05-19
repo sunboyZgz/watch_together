@@ -145,6 +145,8 @@ Android 当前能力：
 - 每个连接有独立写循环和出站队列。
 - 出站队列有容量限制，`room_state` 支持 coalescing。
 - 广播层有并发限制、超时、队列压力统计、慢客户端统计和超时关闭策略。
+- 同一 `userId` 的房间活跃设备需要审批切换，未批准前旧设备仍是权威 active room device。
+- `join_room` 命中已有活跃设备时，服务端先向旧设备发 `room_device.switch_request`，新设备先停在等待态。
 - 服务端发送 `heartbeat`，客户端回 `heartbeat_ack`。
 - 支持 `clock_sync.ping / clock_sync.pong`。
 - 支持 `requestId` 控制事件去重，当前是进程内 sharded bounded map。
@@ -162,6 +164,8 @@ Android 当前能力：
 - 房主身份来自创建房间的原始 owner。
 - 房主断开后，房间时间轴暂停，`hostUserId` 置空，其他成员不能控制播放。
 - 原房主在房间保留期间重连后，可以恢复房主身份。
+- 房主控制必须来自当前 active room device，不能只凭 `userId` 通过。
+- 同一账号允许多设备登录，但同步观影房间内只允许一个 active room device。
 - 未来如果支持转移房主，必须是显式手动操作，不由断线自动触发。
 
 当前实现状态：

@@ -120,6 +120,29 @@ type RoomMembersChangedPayload struct {
 	Reason string `json:"reason"`
 }
 
+type RoomDeviceSwitchRequestPayload struct {
+	RoomID       string `json:"roomId"`
+	TargetRoomID string `json:"targetRoomId,omitempty"`
+	UserID       string `json:"userId"`
+	RequestID    string `json:"requestId"`
+	ExpiresAtMs  int64  `json:"expiresAtMs"`
+}
+
+type RoomDeviceSwitchReplyPayload struct {
+	RoomID    string `json:"roomId"`
+	UserID    string `json:"userId"`
+	RequestID string `json:"requestId"`
+	Approve   bool   `json:"approve"`
+}
+
+type RoomDeviceSwitchResultPayload struct {
+	RoomID    string `json:"roomId"`
+	UserID    string `json:"userId"`
+	RequestID string `json:"requestId"`
+	Approved  bool   `json:"approved"`
+	Reason    string `json:"reason,omitempty"`
+}
+
 type ErrorPayload struct {
 	RoomID  string `json:"roomId"`
 	Message string `json:"message"`

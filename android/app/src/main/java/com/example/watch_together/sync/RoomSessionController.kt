@@ -62,6 +62,10 @@ class RoomSessionController(
         return roomWebSocketClient.sendEnded(positionMs = positionMs, seq = seq)
     }
 
+    fun sendRoomDeviceSwitchReply(requestId: String, approve: Boolean): Boolean {
+        return roomWebSocketClient.sendRoomDeviceSwitchReply(requestId = requestId, approve = approve)
+    }
+
     fun diagnostics(): String {
         return roomWebSocketClient.diagnostics()
     }

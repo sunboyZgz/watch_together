@@ -26,6 +26,29 @@ data class RoomMembersChangedPayload(
     val reason: String
 ) : ProtocolPayload
 
+data class RoomDeviceSwitchRequestPayload(
+    val roomId: String,
+    val targetRoomId: String,
+    val userId: String,
+    val requestId: String,
+    val expiresAtMs: Long
+) : ProtocolPayload
+
+data class RoomDeviceSwitchReplyPayload(
+    val roomId: String,
+    val userId: String,
+    val requestId: String,
+    val approve: Boolean
+) : ProtocolPayload
+
+data class RoomDeviceSwitchResultPayload(
+    val roomId: String,
+    val userId: String,
+    val requestId: String,
+    val approved: Boolean,
+    val reason: String
+) : ProtocolPayload
+
 data class PlayPayload(
     val roomId: String,
     val userId: String,
@@ -93,6 +116,13 @@ fun LeaveRoomPayload.toEnvelope(): ProtocolEnvelope<LeaveRoomPayload> {
 fun RoomStatePayload.toEnvelope(): ProtocolEnvelope<RoomStatePayload> {
     return ProtocolEnvelope(
         type = ProtocolEventType.RoomState.wireName,
+        payload = this
+    )
+}
+
+fun RoomDeviceSwitchReplyPayload.toEnvelope(): ProtocolEnvelope<RoomDeviceSwitchReplyPayload> {
+    return ProtocolEnvelope(
+        type = ProtocolEventType.RoomDeviceSwitchReply.wireName,
         payload = this
     )
 }

@@ -11,7 +11,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -46,6 +48,8 @@ import com.example.watch_together.sync.RoomWebSocketListener
 import com.example.watch_together.sync.protocol.EndedPayload
 import com.example.watch_together.sync.protocol.PausePayload
 import com.example.watch_together.sync.protocol.PlayPayload
+import com.example.watch_together.sync.protocol.RoomDeviceSwitchRequestPayload
+import com.example.watch_together.sync.protocol.RoomDeviceSwitchResultPayload
 import com.example.watch_together.sync.protocol.RoomMembersChangedPayload
 import com.example.watch_together.sync.protocol.SeekPayload
 import com.example.watch_together.sync.protocol.SetPlaybackRatePayload
@@ -84,6 +88,7 @@ fun RoomTheaterScreen(
     var isApplyingRemoteEvent by remember { mutableStateOf(false) }
     var roomBootstrapStatus by remember { mutableStateOf(roomBootstrapInitialStatus(autoCreateAsHost, autoJoinAsViewer, initialRoomCode)) }
     var pendingPostSeekCalibrationJob by remember { mutableStateOf<Job?>(null) }
+    var pendingRoomDeviceSwitchRequest by remember { mutableStateOf<RoomDeviceSwitchRequestPayload?>(null) }
     val playerLogs = remember { mutableStateListOf<String>() }
     val currentActiveRoomUserId by rememberUpdatedState(activeRoomUserId)
     val currentPlayerState by rememberUpdatedState(playerState)
@@ -185,6 +190,48 @@ fun RoomTheaterScreen(
             override fun onRoomMembersChanged(payload: RoomMembersChangedPayload) {
                 coroutineScope.launch {
                     appendPlayerLog(playerLogs, "members changed reason=${payload.reason}", maxSize = 10)
+                }
+            }
+
+            override fun onRoomDeviceWaiting(payload: RoomDeviceSwitchRequestPayload) {
+                coroutineScope.launch {
+                    roomBootstrapStatus = "等待旧设备确认房间切换..."
+                    appendPlayerLog(
+                        playerLogs,
+                        "device switch waiting requestId=${payload.requestId} target=${payload.targetRoomId}",
+                        maxSize = 10
+                    )
+                }
+            }
+
+            override fun onRoomDeviceSwitchRequest(payload: RoomDeviceSwitchRequestPayload) {
+                coroutineScope.launch {
+                    pendingRoomDeviceSwitchRequest = payload
+                    appendPlayerLog(
+                        playerLogs,
+                        "device switch request requestId=${payload.requestId} target=${payload.targetRoomId}",
+                        maxSize = 10
+                    )
+                }
+            }
+
+            override fun onRoomDeviceSwitchResult(payload: RoomDeviceSwitchResultPayload) {
+                coroutineScope.launch {
+                    appendPlayerLog(
+                        playerLogs,
+                        "device switch result requestId=${payload.requestId} approved=${payload.approved} reason=${payload.reason}",
+                        maxSize = 10
+                    )
+                    if (!payload.approved) {
+                        roomBootstrapStatus = if (payload.reason.isBlank()) {
+                            "房间设备切换被拒绝"
+                        } else {
+                            "房间设备切换失败：${payload.reason}"
+                        }
+                    }
+                    if (pendingRoomDeviceSwitchRequest?.requestId == payload.requestId) {
+                        pendingRoomDeviceSwitchRequest = null
+                    }
                 }
             }
 
@@ -382,6 +429,33 @@ fun RoomTheaterScreen(
             )
             delay(500L)
         }
+    }
+
+    pendingRoomDeviceSwitchRequest?.let { request ->
+        AlertDialog(
+            onDismissRequest = {
+                roomSessionController.sendRoomDeviceSwitchReply(request.requestId, approve = false)
+                pendingRoomDeviceSwitchRequest = null
+            },
+            title = { Text(text = "切换房间设备") },
+            text = { Text(text = "设备 ${request.targetRoomId} 请求接管当前房间。是否允许切换？") },
+            confirmButton = {
+                TextButton(onClick = {
+                    roomSessionController.sendRoomDeviceSwitchReply(request.requestId, approve = true)
+                    pendingRoomDeviceSwitchRequest = null
+                }) {
+                    Text(text = "允许")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    roomSessionController.sendRoomDeviceSwitchReply(request.requestId, approve = false)
+                    pendingRoomDeviceSwitchRequest = null
+                }) {
+                    Text(text = "拒绝")
+                }
+            }
+        )
     }
 
     RoomTheaterPage(
