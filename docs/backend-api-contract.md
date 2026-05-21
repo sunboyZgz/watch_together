@@ -415,6 +415,7 @@ Android 联调状态：
 - `GET /media/tags` 已落地，对应 `INT-119`
 - `GET /media/items` 已落地，对应 `INT-120`
 - `GET /media/items` 已迁移为 episode-backed 查询
+- `GET /media/items` 当前要求 `Authorization: Bearer <accessToken>`，因为响应会暴露可播放 `mediaUrl`
 - 标签目录仍来自 `media_tags`
 - 媒体列表数据来自 `media_seasons / media_episodes / media_season_tags`
 - `featuredTags` 当前返回最多 5 个 `is_featured = true` 且 `is_active = true` 的标签
@@ -487,6 +488,12 @@ limit=20
 cursor=...
 ```
 
+请求必须携带：
+
+```http
+Authorization: Bearer <accessToken>
+```
+
 说明：
 
 - `query` 可为空；为空时返回默认媒体列表。
@@ -534,12 +541,14 @@ cursor=...
 错误：
 
 - `400 VALIDATION_ERROR`: `limit` 或 `cursor` 格式不合法
+- `401 UNAUTHORIZED`: 缺少 token 或 token 无效
 - `503 INTERNAL_ERROR`: 服务端未连接数据库，media service 不可用
 
 Android 联调状态：
 
 - `INT-128` 已接入 Android `02A 选择视频`
 - Android 默认进入页面后会调用 `GET /media/items?limit=20`
+- Android 调用 `GET /media/items` 时会携带登录后的 `accessToken`
 - 搜索框变化后会用 `query` 重新请求媒体列表
 - 标签变化后会用 `tag=<media_tags.slug>` 重新请求媒体列表
 - Android 当前会展示接口返回的 `title` 和 `subtitle / episodeLabel / description` 中的首个可用描述
@@ -693,6 +702,7 @@ Accept: application/json
 当前实现状态：
 
 - `GET /rooms/{roomCode}` 已落地，对应 `INT-123`
+- `GET /rooms/{roomCode}` 当前要求 `Authorization: Bearer <accessToken>`，因为响应会返回放映室可播放 `media.mediaUrl`
 - 数据来自 PostgreSQL `rooms / room_members / users / media_episodes / media_seasons`
 - 响应只包含业务主数据，不包含实时 `positionMs / playbackRate / paused / ended / seq`
 - 实时同步状态仍必须等待 WebSocket `room_state`
@@ -701,6 +711,7 @@ Accept: application/json
 
 ```http
 GET /rooms/A7K2M9
+Authorization: Bearer <accessToken>
 Accept: application/json
 ```
 
@@ -747,7 +758,7 @@ Accept: application/json
 - 该接口不会替代 WebSocket `join_room`。
 - 如果需要播放同步，客户端仍必须连接 `/ws` 并等待 `room_state`。
 - Android `INT-130` 已接入该接口。
-- Android 在进入或加入放映室时会调用 `GET /rooms/{roomCode}` 补齐业务首屏数据。
+- Android 在进入或加入放映室时会携带 `accessToken` 调用 `GET /rooms/{roomCode}` 补齐业务首屏数据。
 - Android 会先尽量加载 room detail，再启动 WebSocket `join_room`，避免 `room_state.mediaId` 到达时缺少真实 `media.mediaUrl`。
 - Android 使用该接口返回的 `media.title / media.episodeLabel / media.mediaUrl` 展示和载入影片。
 - WebSocket `room_state` 仍是 `positionMs / playbackRate / paused / ended / seq` 的实时权威。
@@ -755,6 +766,7 @@ Accept: application/json
 错误：
 
 - `400 VALIDATION_ERROR`: 房间码格式不合法
+- `401 UNAUTHORIZED`: 缺少 token 或 token 无效
 - `404 NOT_FOUND`: 房间不存在、已销毁或不可加入
 - `503 INTERNAL_ERROR`: 服务端未连接数据库，room service 不可用
 
@@ -920,25 +932,29 @@ curl -s http://127.0.0.1:8080/media/tags
 默认媒体列表：
 
 ```bash
-curl -s 'http://127.0.0.1:8080/media/items?limit=20'
+curl -s 'http://127.0.0.1:8080/media/items?limit=20' \
+  -H 'Authorization: Bearer <accessToken>'
 ```
 
 按搜索词检索：
 
 ```bash
-curl -s 'http://127.0.0.1:8080/media/items?query=紫罗兰&limit=20'
+curl -s 'http://127.0.0.1:8080/media/items?query=紫罗兰&limit=20' \
+  -H 'Authorization: Bearer <accessToken>'
 ```
 
 按标签筛选：
 
 ```bash
-curl -s 'http://127.0.0.1:8080/media/items?tag=healing&limit=20'
+curl -s 'http://127.0.0.1:8080/media/items?tag=healing&limit=20' \
+  -H 'Authorization: Bearer <accessToken>'
 ```
 
 分页：
 
 ```bash
-curl -s 'http://127.0.0.1:8080/media/items?limit=20&cursor=<nextCursor>'
+curl -s 'http://127.0.0.1:8080/media/items?limit=20&cursor=<nextCursor>' \
+  -H 'Authorization: Bearer <accessToken>'
 ```
 
 Android 联调注意：
@@ -970,7 +986,8 @@ curl -s -X POST http://127.0.0.1:8080/rooms/A7K2M9/join \
 获取放映室首屏数据：
 
 ```bash
-curl -s http://127.0.0.1:8080/rooms/A7K2M9
+curl -s http://127.0.0.1:8080/rooms/A7K2M9 \
+  -H 'Authorization: Bearer <accessToken>'
 ```
 
 Android 联调注意：

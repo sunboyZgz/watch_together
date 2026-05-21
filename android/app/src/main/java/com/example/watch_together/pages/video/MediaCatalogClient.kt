@@ -38,9 +38,10 @@ data class MediaItemsPage(
 class MediaCatalogClient(
     private val okHttpClient: OkHttpClient = OkHttpClient()
 ) {
-    fun fetchTags(): MediaCatalogTags {
+    fun fetchTags(accessToken: String): MediaCatalogTags {
         val request = Request.Builder()
             .url(AppConfig.mediaTagsUrl())
+            .header("Authorization", "Bearer $accessToken")
             .get()
             .build()
 
@@ -62,6 +63,7 @@ class MediaCatalogClient(
     }
 
     fun fetchItems(
+        accessToken: String,
         query: String,
         tagSlug: String?,
         limit: Int = 20,
@@ -80,6 +82,7 @@ class MediaCatalogClient(
 
         val request = Request.Builder()
             .url(url)
+            .header("Authorization", "Bearer $accessToken")
             .get()
             .build()
 

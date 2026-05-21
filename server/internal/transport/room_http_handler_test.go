@@ -192,6 +192,7 @@ func TestRoomDetailFlow(t *testing.T) {
 	}
 	handler := NewRoomHTTPHandler(room.NewManager(), roomapi.NewService(store))
 	request := httptest.NewRequest(http.MethodGet, "/rooms/A7K2M9", nil)
+	request.Header.Set("Authorization", testAuthorizationHeader("user_b"))
 	recorder := httptest.NewRecorder()
 
 	handler.DetailByCode(recorder, request)
@@ -217,6 +218,18 @@ func TestRoomDetailFlow(t *testing.T) {
 	}
 	if response.Data.Members[0].Role != "host" {
 		t.Fatalf("expected host role, got %q", response.Data.Members[0].Role)
+	}
+}
+
+func TestRoomDetailRequiresAccessToken(t *testing.T) {
+	handler := NewRoomHTTPHandler(room.NewManager(), roomapi.NewService(&fakeRoomStore{}))
+	request := httptest.NewRequest(http.MethodGet, "/rooms/A7K2M9", nil)
+	recorder := httptest.NewRecorder()
+
+	handler.DetailByCode(recorder, request)
+
+	if recorder.Code != http.StatusUnauthorized {
+		t.Fatalf("expected status %d, got %d", http.StatusUnauthorized, recorder.Code)
 	}
 }
 

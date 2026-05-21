@@ -73,6 +73,8 @@ Android 的播放入口来自后端 API 返回的：
 - `media.coverUrl`
 
 Android 不应该直接读取对象存储 bucket、endpoint、access key、secret key，也不应该根据供应商拼接播放地址。
+当前第一层公网前加固已经要求 `GET /media/items` 和 `GET /rooms/{roomCode}` 携带登录 token，避免匿名枚举播放 URL。
+这还不是完整的对象存储保护；生产前仍需要 signed URL / signed cookie / CDN 鉴权或服务端签名播放入口。
 
 当前 Server / CLI 侧统一使用这些环境变量：
 

@@ -9,7 +9,8 @@ import (
 )
 
 type MediaHTTPHandler struct {
-	mediaService *media.Service
+	mediaService  *media.Service
+	tokenVerifier accessTokenVerifier
 }
 
 type mediaTagsResponse struct {
@@ -42,7 +43,17 @@ type mediaItemResponse struct {
 
 // NewMediaHTTPHandler builds the HTTP entrypoint for media catalog APIs.
 func NewMediaHTTPHandler(mediaService *media.Service) *MediaHTTPHandler {
-	return &MediaHTTPHandler{mediaService: mediaService}
+	return NewMediaHTTPHandlerWithTokenVerifier(mediaService, nil)
+}
+
+func NewMediaHTTPHandlerWithTokenVerifier(
+	mediaService *media.Service,
+	tokenVerifier accessTokenVerifier,
+) *MediaHTTPHandler {
+	return &MediaHTTPHandler{
+		mediaService:  mediaService,
+		tokenVerifier: tokenVerifier,
+	}
 }
 
 // Tags handles GET /media/tags for the video-selection tag row and expanded panel.
@@ -70,6 +81,10 @@ func (h *MediaHTTPHandler) Items(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.Method != http.MethodGet {
 		writeAPIError(w, http.StatusMethodNotAllowed, "VALIDATION_ERROR", "method not allowed", nil)
+		return
+	}
+	if _, ok := userIDFromAuthorization(r.Header.Get("Authorization"), h.tokenVerifier); !ok {
+		writeAPIError(w, http.StatusUnauthorized, "UNAUTHORIZED", "missing or invalid access token", nil)
 		return
 	}
 

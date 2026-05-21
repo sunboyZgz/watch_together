@@ -139,6 +139,7 @@ private val sampleVideos = listOf(
 fun VideoSelectionPage(
     onBackClick: () -> Unit,
     onCreateRoomClick: (episode: MediaEpisode) -> Unit,
+    accessToken: String,
     modifier: Modifier = Modifier,
     enableRemoteLoad: Boolean = true
 ) {
@@ -154,14 +155,18 @@ fun VideoSelectionPage(
     var isItemsLoading by rememberSaveable { mutableStateOf(false) }
     var catalogError by rememberSaveable { mutableStateOf<String?>(null) }
 
-    LaunchedEffect(enableRemoteLoad) {
+    LaunchedEffect(enableRemoteLoad, accessToken) {
         if (!enableRemoteLoad) return@LaunchedEffect
+        if (accessToken.isBlank()) {
+            catalogError = "请先登录后再加载媒体列表"
+            return@LaunchedEffect
+        }
 
         isTagsLoading = true
         catalogError = null
         runCatching {
             withContext(Dispatchers.IO) {
-                mediaCatalogClient.fetchTags()
+                mediaCatalogClient.fetchTags(accessToken = accessToken)
             }
         }.onSuccess { tags ->
             featuredTags = tags.featuredTags
@@ -172,8 +177,12 @@ fun VideoSelectionPage(
         isTagsLoading = false
     }
 
-    LaunchedEffect(query, selectedTagSlug, enableRemoteLoad) {
+    LaunchedEffect(query, selectedTagSlug, enableRemoteLoad, accessToken) {
         if (!enableRemoteLoad) return@LaunchedEffect
+        if (accessToken.isBlank()) {
+            catalogError = "请先登录后再加载媒体列表"
+            return@LaunchedEffect
+        }
 
         delay(300)
         isItemsLoading = true
@@ -181,6 +190,7 @@ fun VideoSelectionPage(
         runCatching {
             withContext(Dispatchers.IO) {
                 mediaCatalogClient.fetchItems(
+                    accessToken = accessToken,
                     query = query,
                     tagSlug = selectedTagSlug,
                     limit = 20
@@ -801,6 +811,7 @@ private fun VideoSelectionPagePreview() {
         VideoSelectionPage(
             onBackClick = {},
             onCreateRoomClick = {},
+            accessToken = "preview-token",
             enableRemoteLoad = false
         )
     }

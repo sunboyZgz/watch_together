@@ -13,8 +13,8 @@ import (
 func TestMediaTagsReturnsFeaturedAndAllTags(t *testing.T) {
 	handler := NewMediaHTTPHandler(media.NewService(&fakeMediaStore{
 		tags: media.TagList{
-			FeaturedTags: []media.Tag{{ID: "tag_1", Slug: "healing", Name: "治愈"}},
-			AllTags:      []media.Tag{{ID: "tag_2", Slug: "campus", Name: "校园"}},
+			FeaturedTags: []media.Tag{{ID: "tag_1", Slug: "healing", Name: "Healing"}},
+			AllTags:      []media.Tag{{ID: "tag_2", Slug: "campus", Name: "Campus"}},
 		},
 	}))
 
@@ -45,17 +45,18 @@ func TestMediaItemsSearchesWithQueryTagAndPagination(t *testing.T) {
 		items: []media.Item{
 			{
 				ID:         "media_1",
-				Title:      "紫罗兰永恒花园",
+				Title:      "Violet Evergarden",
 				MediaURL:   "http://127.0.0.1:9000/media/tmp/media/show/hls/master.m3u8",
 				DurationMs: &durationMs,
-				Tags:       []media.ItemTag{{Slug: "healing", Name: "治愈"}},
+				Tags:       []media.ItemTag{{Slug: "healing", Name: "Healing"}},
 			},
-			{ID: "media_2", Title: "葬送的芙莉莲"},
+			{ID: "media_2", Title: "Frieren"},
 		},
 	}
 	handler := NewMediaHTTPHandler(media.NewService(store))
 
-	request := httptest.NewRequest(http.MethodGet, "/media/items?query=紫罗兰&tag=healing&limit=1&cursor=2", nil)
+	request := httptest.NewRequest(http.MethodGet, "/media/items?query=violet&tag=healing&limit=1&cursor=2", nil)
+	request.Header.Set("Authorization", testAuthorizationHeader("user_a"))
 	recorder := httptest.NewRecorder()
 
 	handler.Items(recorder, request)
@@ -63,8 +64,8 @@ func TestMediaItemsSearchesWithQueryTagAndPagination(t *testing.T) {
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("expected status %d, got %d", http.StatusOK, recorder.Code)
 	}
-	if store.lastSearch.Query != "紫罗兰" {
-		t.Fatalf("expected query 紫罗兰, got %q", store.lastSearch.Query)
+	if store.lastSearch.Query != "violet" {
+		t.Fatalf("expected query violet, got %q", store.lastSearch.Query)
 	}
 	if store.lastSearch.Tag != "healing" {
 		t.Fatalf("expected tag healing, got %q", store.lastSearch.Tag)
@@ -100,12 +101,25 @@ func TestMediaItemsSearchesWithQueryTagAndPagination(t *testing.T) {
 func TestMediaItemsRejectsInvalidCursor(t *testing.T) {
 	handler := NewMediaHTTPHandler(media.NewService(&fakeMediaStore{}))
 	request := httptest.NewRequest(http.MethodGet, "/media/items?cursor=nope", nil)
+	request.Header.Set("Authorization", testAuthorizationHeader("user_a"))
 	recorder := httptest.NewRecorder()
 
 	handler.Items(recorder, request)
 
 	if recorder.Code != http.StatusBadRequest {
 		t.Fatalf("expected status %d, got %d", http.StatusBadRequest, recorder.Code)
+	}
+}
+
+func TestMediaItemsRequiresAccessToken(t *testing.T) {
+	handler := NewMediaHTTPHandler(media.NewService(&fakeMediaStore{}))
+	request := httptest.NewRequest(http.MethodGet, "/media/items", nil)
+	recorder := httptest.NewRecorder()
+
+	handler.Items(recorder, request)
+
+	if recorder.Code != http.StatusUnauthorized {
+		t.Fatalf("expected status %d, got %d", http.StatusUnauthorized, recorder.Code)
 	}
 }
 

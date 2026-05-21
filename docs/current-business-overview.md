@@ -47,6 +47,7 @@
 
 - Android 选片页通过 `GET /media/tags` 获取 featured / active 标签。
 - 通过 `GET /media/items?query=&tag=&limit=&cursor=` 检索 episode-backed 媒体。
+- `GET /media/items` 需要登录态，因为响应包含可播放 `mediaUrl`。
 - 媒体主模型是 `media_seasons + media_episodes + media_tags + media_season_tags`。
 - `media_episodes.id` 是当前创建房间使用的媒体 ID。
 - 旧的扁平媒体表已经不再作为目标模型。
@@ -66,6 +67,7 @@
 - 创建房间后会把持久化房间注册到内存 `room.Manager`，用于实时同步。
 - `POST /rooms/{roomCode}/join` 支持通过房间码加入业务房间。
 - `GET /rooms/{roomCode}` 提供放映室首屏业务数据，包括房间、媒体和成员。
+- `GET /rooms/{roomCode}` 需要登录态，因为响应包含放映室媒体播放 URL。
 - Android 当前在进入放映室前会尽量加载 room detail，避免收到实时状态时缺少真实 `mediaUrl`。
 - Android WebSocket 握手已携带 `Authorization: Bearer <accessToken>`。
 

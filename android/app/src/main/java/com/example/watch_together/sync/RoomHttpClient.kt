@@ -141,10 +141,11 @@ class RoomHttpClient(
 
     // getRoomDetail reads business bootstrap data for the theater page.
     // Runtime playback authority still comes from WebSocket room_state.
-    fun getRoomDetail(roomCode: String): RoomDetailResult {
+    fun getRoomDetail(accessToken: String, roomCode: String): RoomDetailResult {
         val normalizedRoomCode = roomCode.trim().uppercase()
         val request = Request.Builder()
             .url(AppConfig.roomDetailUrl(normalizedRoomCode))
+            .header("Authorization", "Bearer $accessToken")
             .get()
             .build()
 

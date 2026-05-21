@@ -74,6 +74,7 @@ fun WatchTogetherApp() {
 
         AppScreen.VideoSelection -> VideoSelectionPage(
             onBackClick = { currentScreen = AppScreen.Home },
+            accessToken = sessionAccessToken,
             onCreateRoomClick = { episode ->
                 selectedEpisodeId = episode.episodeId
                 selectedEpisodeTitle = episode.title

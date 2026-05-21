@@ -145,7 +145,7 @@ fun RoomTheaterScreen(
         runCatching {
             withContext(Dispatchers.IO) {
                 val joinResult = roomHttpClient.joinRoomByCode(accessToken = accessToken, roomCode = normalizedRoomCode)
-                val detail = roomHttpClient.getRoomDetail(joinResult.roomCode)
+                val detail = roomHttpClient.getRoomDetail(accessToken = accessToken, roomCode = joinResult.roomCode)
                 joinResult to detail
             }
         }.onSuccess { (joinResult, detail) ->

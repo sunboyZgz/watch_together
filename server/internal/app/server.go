@@ -81,7 +81,7 @@ func NewServer(config Config) *Server {
 	roomHTTPHandler := transport.NewRoomHTTPHandlerWithTokenVerifier(roomManager, roomService, tokenManager)
 	authHTTPHandler := transport.NewAuthHTTPHandler(newAuthService(db, tokenManager))
 	homeHTTPHandler := transport.NewHomeHTTPHandlerWithTokenVerifier(newHomeService(db), tokenManager)
-	mediaHTTPHandler := transport.NewMediaHTTPHandler(newMediaService(db))
+	mediaHTTPHandler := transport.NewMediaHTTPHandlerWithTokenVerifier(newMediaService(db), tokenManager)
 	progressHTTPHandler := transport.NewProgressHTTPHandlerWithTokenVerifier(newProgressService(db), tokenManager)
 	router := newGinRouter(
 		roomManager,

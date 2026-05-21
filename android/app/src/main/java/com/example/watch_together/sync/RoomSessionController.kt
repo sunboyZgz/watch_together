@@ -15,8 +15,8 @@ class RoomSessionController(
         return roomHttpClient.createRoom(accessToken = accessToken, episodeId = episodeId)
     }
 
-    suspend fun getRoomDetail(roomCode: String): RoomDetailResult {
-        return roomHttpClient.getRoomDetail(roomCode = roomCode)
+    suspend fun getRoomDetail(accessToken: String, roomCode: String): RoomDetailResult {
+        return roomHttpClient.getRoomDetail(accessToken = accessToken, roomCode = roomCode)
     }
 
     suspend fun joinRoomByCode(accessToken: String, roomCode: String): JoinRoomResult {

@@ -204,6 +204,10 @@ func (h *RoomHTTPHandler) DetailByCode(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusMethodNotAllowed, "VALIDATION_ERROR", "method not allowed", nil)
 		return
 	}
+	if _, ok := userIDFromAuthorization(r.Header.Get("Authorization"), h.tokenVerifier); !ok {
+		writeAPIError(w, http.StatusUnauthorized, "UNAUTHORIZED", "missing or invalid access token", nil)
+		return
+	}
 
 	roomCode, ok := roomCodeFromDetailPath(r.URL.Path)
 	if !ok {

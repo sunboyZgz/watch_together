@@ -410,8 +410,8 @@
 
 第三批公网前必须做：
 
-1. HLS signed URL / signed cookie。
-2. 媒体 URL 从 public URL 向可授权资源标识演进。
+1. HLS signed URL / signed cookie。已完成第一层入口收紧：`GET /media/items` 和 `GET /rooms/{roomCode}` 不再匿名暴露 `mediaUrl`。
+2. 媒体 URL 从 public URL 向可授权资源标识演进。下一步仍需把对象存储/CDN 直链替换为服务端签名播放入口。
 3. CDN / 对象存储缓存策略。
 4. 基础 metrics、日志持久化和告警。
 
