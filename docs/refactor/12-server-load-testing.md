@@ -65,6 +65,22 @@ k6 run \
   server/scripts/load/ws_room_load.js
 ```
 
+Run a seek-frequency guardrail check:
+
+```bash
+k6 run \
+  -e BASE_URL=http://127.0.0.1:8080 \
+  -e MEDIA_ID=<existing_media_episode_id> \
+  -e VUS=20 \
+  -e DURATION=60s \
+  -e HOLD_OPEN_MS=60000 \
+  -e CONTROL_PATTERN=seek \
+  -e CONTROL_INTERVAL_MS=100 \
+  server/scripts/load/ws_room_load.js
+```
+
+With the default `WS_SEEK_MIN_INTERVAL_MS=250`, the server should reject excess seek controls by returning the latest `room_state` to the host instead of broadcasting every seek to the room.
+
 Use an existing room and existing tokens:
 
 ```bash
@@ -86,6 +102,7 @@ In k6 output:
 - `join_latency_ms`: p95 should stay below 2s locally.
 - `room_state_received`: should be at least the number of joined clients.
 - `control_broadcasts`: should grow with host controls multiplied by active clients.
+- Under `CONTROL_PATTERN=seek` and `CONTROL_INTERVAL_MS < WS_SEEK_MIN_INTERVAL_MS`, accepted seek broadcasts should be lower than attempted host controls.
 
 In server logs when `DEBUG_SYNC=true`:
 

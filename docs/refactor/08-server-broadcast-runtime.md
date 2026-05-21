@@ -75,7 +75,11 @@ WS_BROADCAST_ENQUEUE_TIMEOUT_MS
 WS_CLIENT_OUTBOX_CAPACITY
 WS_MAX_CONNECTIONS
 ROOM_MAX_CLIENTS
+WS_SEEK_MIN_INTERVAL_MS
 ```
+
+`WS_SEEK_MIN_INTERVAL_MS` protects large rooms from rapid repeated seek broadcasts.
+The current default is 250ms per room; set `-1` only for controlled diagnostics.
 
 Timeout policy:
 

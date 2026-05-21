@@ -300,6 +300,74 @@ func TestWebSocketControlSyncFlow(t *testing.T) {
 	}
 }
 
+func TestWebSocketSeekRateLimitReturnsLatestRoomState(t *testing.T) {
+	roomManager := room.NewManager()
+	createdRoom, err := roomManager.CreateRoom("user_a", "sample_001")
+	if err != nil {
+		t.Fatalf("create room: %v", err)
+	}
+	mux := http.NewServeMux()
+	mux.Handle("/ws", NewWebSocketHandlerWithConfig(roomManager, true, WebSocketRuntimeConfig{
+		SeekMinInterval: 250 * time.Millisecond,
+	}))
+
+	httpServer := httptest.NewServer(mux)
+	defer httpServer.Close()
+
+	wsURL := "ws" + httpServer.URL[len("http"):] + "/ws"
+	ctx := context.Background()
+
+	hostConn := mustDialWebSocket(t, ctx, wsURL)
+	defer hostConn.Close(websocket.StatusNormalClosure, "test done")
+
+	mustJoinRoom(t, ctx, hostConn, createdRoom.ID(), "user_a")
+	mustReadEnvelope(t, ctx, hostConn)
+
+	mustSendEnvelope(t, ctx, hostConn, protocol.Envelope{
+		Type: protocol.TypeSeek,
+		Payload: mustJSONRaw(protocol.SeekPayload{
+			RoomID:     createdRoom.ID(),
+			UserID:     "user_a",
+			PositionMs: 10_000,
+			Seq:        1,
+		}),
+	})
+	assertControlBroadcast(t, ctx, hostConn, protocol.TypeSeek, 10_000, 2)
+
+	mustSendEnvelope(t, ctx, hostConn, protocol.Envelope{
+		Type: protocol.TypeSeek,
+		Payload: mustJSONRaw(protocol.SeekPayload{
+			RoomID:     createdRoom.ID(),
+			UserID:     "user_a",
+			PositionMs: 20_000,
+			Seq:        2,
+		}),
+	})
+
+	envelope := mustReadEnvelope(t, ctx, hostConn)
+	if envelope.Type != protocol.TypeRoomState {
+		t.Fatalf("expected rate-limited seek to return room_state, got %s", envelope.Type)
+	}
+	var payload protocol.RoomStatePayload
+	if err := json.Unmarshal(envelope.Payload, &payload); err != nil {
+		t.Fatalf("unmarshal room_state payload: %v", err)
+	}
+	if payload.PositionMs != 10_000 {
+		t.Fatalf("expected room_state to keep previous seek position, got %d", payload.PositionMs)
+	}
+	if payload.Seq != 2 {
+		t.Fatalf("expected room_state seq 2 after rate-limited seek, got %d", payload.Seq)
+	}
+
+	state := createdRoom.StateSnapshot()
+	if state.PositionMs != 10_000 {
+		t.Fatalf("expected room state to remain at first seek position, got %d", state.PositionMs)
+	}
+	if state.Seq != 2 {
+		t.Fatalf("expected room seq to remain 2, got %d", state.Seq)
+	}
+}
+
 func TestWebSocketRoomStateRequestReturnsLatestSnapshot(t *testing.T) {
 	roomManager := room.NewManager()
 	createdRoom, err := roomManager.CreateRoom("user_a", "sample_001")

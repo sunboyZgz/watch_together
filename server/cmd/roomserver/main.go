@@ -54,6 +54,7 @@ func main() {
 			ClientOutboxCapacity:      runtimeConfig.WebSocket.ClientOutboxCapacity,
 			MaxConnections:            runtimeConfig.WebSocket.MaxConnections,
 			MaxRoomClients:            runtimeConfig.WebSocket.MaxRoomClients,
+			SeekMinInterval:           time.Duration(runtimeConfig.WebSocket.SeekMinIntervalMs) * time.Millisecond,
 		},
 	})
 

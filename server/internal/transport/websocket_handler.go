@@ -28,6 +28,7 @@ type WebSocketHandler struct {
 	roomStateWriter     latestRoomStateWriter
 	roomLeaver          roomMembershipLeaver
 	controlDeduper      *controlRequestDeduper
+	seekRateLimiter     *controlRateLimiter
 	tokenVerifier       accessTokenVerifier
 	deviceSwitches      *roomDeviceSwitchRegistry
 	deviceSwitchTimeout time.Duration
@@ -40,6 +41,7 @@ const (
 	defaultBroadcastTimeout          = 5 * time.Second
 	defaultBroadcastEnqueueTimeout   = 3 * time.Second
 	defaultControlRequestDedupTTL    = 2 * time.Minute
+	defaultSeekMinInterval           = 250 * time.Millisecond
 )
 
 type WebSocketRuntimeConfig struct {
@@ -50,6 +52,7 @@ type WebSocketRuntimeConfig struct {
 	MaxConnections            int64
 	MaxRoomClients            int
 	RoomDeviceSwitchTimeout   time.Duration
+	SeekMinInterval           time.Duration
 }
 
 type latestRoomStateWriter interface {
@@ -187,6 +190,7 @@ func newWebSocketHandlerWithClock(
 			defaultControlRequestDedupMaxEntries,
 			defaultControlRequestDedupShards,
 		),
+		seekRateLimiter:     newControlRateLimiter(config.SeekMinInterval, defaultControlRateLimitMaxEntries, defaultControlRateLimitShards),
 		tokenVerifier:       defaultAccessTokenVerifier,
 		deviceSwitches:      newRoomDeviceSwitchRegistry(),
 		deviceSwitchTimeout: config.RoomDeviceSwitchTimeout,
@@ -208,6 +212,9 @@ func normalizeWebSocketRuntimeConfig(config WebSocketRuntimeConfig) WebSocketRun
 	}
 	if config.RoomDeviceSwitchTimeout <= 0 {
 		config.RoomDeviceSwitchTimeout = defaultRoomDeviceSwitchTimeout
+	}
+	if config.SeekMinInterval == 0 {
+		config.SeekMinInterval = defaultSeekMinInterval
 	}
 	return config
 }
@@ -990,9 +997,35 @@ func (h *WebSocketHandler) handleControlEvent(
 		return h.writeRoomState(ctx, client, previous)
 	}
 
+	var seekRateReservation time.Time
+	if eventType == protocol.TypeSeek && h.seekRateLimiter != nil {
+		now := h.clock.Now()
+		seekRateReservation = now
+		if !h.seekRateLimiter.Reserve(roomID, now) {
+			h.forgetControlRequest(roomID, meta.RequestID)
+			if h.debugSync {
+				log.Printf(
+					"sync control_rate_limited room=%s type=%s user=%s request_id=%q client_seq=%d server_seq=%d min_interval_ms=%d",
+					roomID,
+					eventType,
+					meta.UserID,
+					meta.RequestID,
+					meta.ClientSeq,
+					previous.Seq,
+					h.seekRateLimiter.interval.Milliseconds(),
+				)
+			}
+			h.cacheRoomState(previous)
+			return h.writeRoomState(ctx, client, previous)
+		}
+	}
+
 	state, clients, err := apply(existingRoom)
 	if err != nil {
 		h.forgetControlRequest(roomID, meta.RequestID)
+		if eventType == protocol.TypeSeek && !seekRateReservation.IsZero() {
+			h.seekRateLimiter.ForgetReservation(roomID, seekRateReservation)
+		}
 		if errors.Is(err, room.ErrSeqMismatch) {
 			if h.debugSync {
 				log.Printf(

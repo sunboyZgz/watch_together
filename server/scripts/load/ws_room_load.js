@@ -13,6 +13,7 @@ const autoRegister = (__ENV.AUTO_REGISTER || 'true').toLowerCase() !== 'false';
 const accountPrefix = __ENV.ACCOUNT_PREFIX || `load_${Date.now()}`;
 const password = __ENV.PASSWORD || 'LoadTest123!';
 const controlIntervalMs = Number(__ENV.CONTROL_INTERVAL_MS || '1500');
+const controlPattern = (__ENV.CONTROL_PATTERN || 'mixed').toLowerCase();
 const holdOpenMs = Number(__ENV.HOLD_OPEN_MS || '60000');
 
 export const options = {
@@ -229,6 +230,18 @@ function authUserFromResponse(response) {
 
 function nextControl(roomId, userId, seq, index) {
   const positionMs = (index + 1) * 1000;
+  if (controlPattern === 'seek') {
+    return {
+      type: 'seek',
+      payload: {
+        roomId,
+        userId,
+        positionMs,
+        seq,
+        requestId: `load-seek-${__VU}-${index}`,
+      },
+    };
+  }
   if (index % 5 === 2) {
     return {
       type: 'seek',

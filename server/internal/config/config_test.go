@@ -66,6 +66,9 @@ func TestLoadServerRuntimeConfigFallsBackToDefaults(t *testing.T) {
 	if cfg.WebSocket.MaxRoomClients != 0 {
 		t.Fatalf("expected default room max clients unlimited, got %d", cfg.WebSocket.MaxRoomClients)
 	}
+	if cfg.WebSocket.SeekMinIntervalMs != 250 {
+		t.Fatalf("expected default seek min interval 250ms, got %d", cfg.WebSocket.SeekMinIntervalMs)
+	}
 }
 
 func TestLoadServerRuntimeConfigSupportsAppEnvSpecificDebugSync(t *testing.T) {
@@ -143,7 +146,7 @@ func TestLoadServerRuntimeConfigLoadsWebSocketRuntimeSettings(t *testing.T) {
 	mustWriteConfigFile(
 		t,
 		filepath.Join(configDir, ".env"),
-		"WS_BROADCAST_CONCURRENCY_LIMIT=128\nWS_BROADCAST_TIMEOUT_MS=7000\nWS_BROADCAST_ENQUEUE_TIMEOUT_MS=1500\nWS_CLIENT_OUTBOX_CAPACITY=32\nWS_MAX_CONNECTIONS=1000\nROOM_MAX_CLIENTS=25\n",
+		"WS_BROADCAST_CONCURRENCY_LIMIT=128\nWS_BROADCAST_TIMEOUT_MS=7000\nWS_BROADCAST_ENQUEUE_TIMEOUT_MS=1500\nWS_CLIENT_OUTBOX_CAPACITY=32\nWS_MAX_CONNECTIONS=1000\nROOM_MAX_CLIENTS=25\nWS_SEEK_MIN_INTERVAL_MS=100\n",
 	)
 
 	cfg, err := LoadServerRuntimeConfig(configDir)
@@ -168,6 +171,9 @@ func TestLoadServerRuntimeConfigLoadsWebSocketRuntimeSettings(t *testing.T) {
 	}
 	if cfg.WebSocket.MaxRoomClients != 25 {
 		t.Fatalf("expected room max clients 25, got %d", cfg.WebSocket.MaxRoomClients)
+	}
+	if cfg.WebSocket.SeekMinIntervalMs != 100 {
+		t.Fatalf("expected seek min interval 100ms, got %d", cfg.WebSocket.SeekMinIntervalMs)
 	}
 }
 

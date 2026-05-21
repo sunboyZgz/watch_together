@@ -28,6 +28,9 @@ func TestNormalizeWebSocketRuntimeConfigAppliesDefaults(t *testing.T) {
 	if config.MaxRoomClients != 0 {
 		t.Fatalf("expected max room clients to stay unlimited, got %d", config.MaxRoomClients)
 	}
+	if config.SeekMinInterval != defaultSeekMinInterval {
+		t.Fatalf("expected default seek min interval, got %s", config.SeekMinInterval)
+	}
 }
 
 func TestNormalizeWebSocketRuntimeConfigKeepsExplicitLimits(t *testing.T) {
@@ -38,6 +41,7 @@ func TestNormalizeWebSocketRuntimeConfigKeepsExplicitLimits(t *testing.T) {
 		ClientOutboxCapacity:      7,
 		MaxConnections:            20,
 		MaxRoomClients:            3,
+		SeekMinInterval:           100 * time.Millisecond,
 	})
 
 	if config.BroadcastConcurrencyLimit != 12 {
@@ -57,5 +61,18 @@ func TestNormalizeWebSocketRuntimeConfigKeepsExplicitLimits(t *testing.T) {
 	}
 	if config.MaxRoomClients != 3 {
 		t.Fatalf("expected explicit max room clients, got %d", config.MaxRoomClients)
+	}
+	if config.SeekMinInterval != 100*time.Millisecond {
+		t.Fatalf("expected explicit seek min interval, got %s", config.SeekMinInterval)
+	}
+}
+
+func TestNormalizeWebSocketRuntimeConfigCanDisableSeekRateLimit(t *testing.T) {
+	config := normalizeWebSocketRuntimeConfig(WebSocketRuntimeConfig{
+		SeekMinInterval: -1 * time.Millisecond,
+	})
+
+	if config.SeekMinInterval >= 0 {
+		t.Fatalf("expected negative seek min interval to remain disabled, got %s", config.SeekMinInterval)
 	}
 }

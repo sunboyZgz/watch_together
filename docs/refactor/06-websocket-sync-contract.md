@@ -209,6 +209,8 @@ cross-instance Redis dedup is deferred until multi-instance room authority is de
 
 Client `seq` on control requests is the expected authoritative server seq. The server accepts a control only when client `seq == current room_state.seq`; any mismatch returns the latest `room_state` to the requester, does not advance the timeline, does not broadcast a control event, and does not reserve `requestId`.
 
+`seek` has an additional room-scoped frequency guard. If a seek arrives inside `WS_SEEK_MIN_INTERVAL_MS`, the server returns the latest `room_state` to the requester and does not advance seq or broadcast the seek.
+
 Known server reasons in this branch:
 
 ```text

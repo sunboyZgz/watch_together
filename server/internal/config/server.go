@@ -38,6 +38,7 @@ type WebSocketConfig struct {
 	ClientOutboxCapacity      int
 	MaxConnections            int64
 	MaxRoomClients            int
+	SeekMinIntervalMs         int
 }
 
 func LoadServerRuntimeConfig(configDir string) (ServerRuntimeConfig, error) {
@@ -55,6 +56,7 @@ func LoadServerRuntimeConfig(configDir string) (ServerRuntimeConfig, error) {
 		"WS_CLIENT_OUTBOX_CAPACITY":       64,
 		"WS_MAX_CONNECTIONS":              0,
 		"ROOM_MAX_CLIENTS":                0,
+		"WS_SEEK_MIN_INTERVAL_MS":         250,
 	}
 	keys := []string{
 		"APP_ENV",
@@ -77,6 +79,7 @@ func LoadServerRuntimeConfig(configDir string) (ServerRuntimeConfig, error) {
 		"WS_CLIENT_OUTBOX_CAPACITY",
 		"WS_MAX_CONNECTIONS",
 		"ROOM_MAX_CLIENTS",
+		"WS_SEEK_MIN_INTERVAL_MS",
 	}
 
 	loader, err := newLoader(configDir, defaults, keys)
@@ -110,6 +113,7 @@ func LoadServerRuntimeConfig(configDir string) (ServerRuntimeConfig, error) {
 			ClientOutboxCapacity:      intFromConfig(loader, "WS_CLIENT_OUTBOX_CAPACITY"),
 			MaxConnections:            int64FromConfig(loader, "WS_MAX_CONNECTIONS"),
 			MaxRoomClients:            intFromConfig(loader, "ROOM_MAX_CLIENTS"),
+			SeekMinIntervalMs:         intFromConfig(loader, "WS_SEEK_MIN_INTERVAL_MS"),
 		},
 	}, nil
 }
