@@ -60,6 +60,7 @@ func NewServer(config Config) *Server {
 	}
 	db := newPostgresDB(config.DatabaseURL)
 	roomService, roomStore := newRoomService(db)
+	installRoomLifecycleHooks(roomManager, roomStore, roomStateCache)
 	if roomStore != nil {
 		now := time.Now()
 		backfilled, err := roomStore.MarkAllActiveRoomsGracePeriod(
@@ -72,27 +73,10 @@ func NewServer(config Config) *Server {
 		} else if backfilled > 0 {
 			log.Printf("backfilled %d active rooms into grace_period on startup", backfilled)
 		}
-		roomManager.SetLifecycleHooks(room.LifecycleHooks{
-			OnRoomBecameEmpty: func(roomID string, emptySince time.Time, destroyAfter time.Time) {
-				if err := roomStore.MarkRoomGracePeriod(context.Background(), roomID, emptySince, destroyAfter); err != nil {
-					log.Printf("failed to mark room %s grace_period: %v", roomID, err)
-				}
-			},
-			OnRoomReactivated: func(roomID string) {
-				if err := roomStore.MarkRoomActive(context.Background(), roomID); err != nil {
-					log.Printf("failed to reactivate room %s: %v", roomID, err)
-				}
-			},
-			OnRoomDestroyed: func(roomID string) {
-				if err := roomStore.DestroyRoom(context.Background(), roomID); err != nil {
-					log.Printf("failed to destroy room %s: %v", roomID, err)
-				}
-			},
-		})
 	}
 	go roomManager.StartCleanupLoop(serverCtx, room.DefaultCleanupInterval())
 	if roomStore != nil {
-		go startPersistentRoomCleanupLoop(serverCtx, room.DefaultCleanupInterval(), roomStore)
+		go startPersistentRoomCleanupLoop(serverCtx, room.DefaultCleanupInterval(), roomStore, roomStateCache)
 	}
 	roomHTTPHandler := transport.NewRoomHTTPHandlerWithTokenVerifier(roomManager, roomService, tokenManager)
 	authHTTPHandler := transport.NewAuthHTTPHandler(newAuthService(db, tokenManager))
@@ -242,6 +226,7 @@ func startPersistentRoomCleanupLoop(
 	ctx context.Context,
 	interval time.Duration,
 	roomStore *store.PostgresRoomStore,
+	roomStateCache *cache.RoomStateCache,
 ) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -251,15 +236,61 @@ func startPersistentRoomCleanupLoop(
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			removed, err := roomStore.CleanupExpiredRooms(context.Background(), time.Now())
+			roomCodes, err := roomStore.CleanupExpiredRoomCodes(context.Background(), time.Now())
 			if err != nil {
 				log.Printf("failed to cleanup expired rooms in postgres: %v", err)
 				continue
 			}
-			if removed > 0 {
-				log.Printf("cleaned up %d expired rooms from postgres", removed)
+			for _, roomCode := range roomCodes {
+				deleteRoomStateCache(context.Background(), roomStateCache, roomCode)
+			}
+			if len(roomCodes) > 0 {
+				log.Printf("cleaned up %d expired rooms from postgres", len(roomCodes))
 			}
 		}
+	}
+}
+
+func installRoomLifecycleHooks(
+	roomManager *room.Manager,
+	roomStore *store.PostgresRoomStore,
+	roomStateCache *cache.RoomStateCache,
+) {
+	if roomManager == nil {
+		return
+	}
+	roomManager.SetLifecycleHooks(room.LifecycleHooks{
+		OnRoomBecameEmpty: func(roomID string, emptySince time.Time, destroyAfter time.Time) {
+			if roomStore != nil {
+				if err := roomStore.MarkRoomGracePeriod(context.Background(), roomID, emptySince, destroyAfter); err != nil {
+					log.Printf("failed to mark room %s grace_period: %v", roomID, err)
+				}
+			}
+		},
+		OnRoomReactivated: func(roomID string) {
+			if roomStore != nil {
+				if err := roomStore.MarkRoomActive(context.Background(), roomID); err != nil {
+					log.Printf("failed to reactivate room %s: %v", roomID, err)
+				}
+			}
+		},
+		OnRoomDestroyed: func(roomID string) {
+			if roomStore != nil {
+				if err := roomStore.DestroyRoom(context.Background(), roomID); err != nil {
+					log.Printf("failed to destroy room %s: %v", roomID, err)
+				}
+			}
+			deleteRoomStateCache(context.Background(), roomStateCache, roomID)
+		},
+	})
+}
+
+func deleteRoomStateCache(ctx context.Context, roomStateCache *cache.RoomStateCache, roomID string) {
+	if roomStateCache == nil || strings.TrimSpace(roomID) == "" {
+		return
+	}
+	if err := roomStateCache.DeleteRoomState(ctx, roomID); err != nil && !errors.Is(err, cache.ErrRedisDisabled) {
+		log.Printf("failed to delete room_state cache room=%s err=%v", roomID, err)
 	}
 }
 

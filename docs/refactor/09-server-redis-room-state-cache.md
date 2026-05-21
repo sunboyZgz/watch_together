@@ -19,6 +19,7 @@ transport writes best-effort latest room_state cache
 ```
 
 If Redis is unavailable or the cache write fails, the room transition still succeeds.
+When a room is truly destroyed, the Redis cache should also be deleted; the grace period is only for reconnect recovery, not for keeping stale cache forever.
 
 ## Current Cache
 
@@ -45,6 +46,8 @@ TTL:
 ```text
 10 minutes
 ```
+
+The TTL is only a safety net. Final room destruction must still trigger explicit cache deletion.
 
 ## Write Points
 

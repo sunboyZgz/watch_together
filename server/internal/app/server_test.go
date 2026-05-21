@@ -1,10 +1,12 @@
 package app
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"watch_together/server/internal/cache"
 	"watch_together/server/internal/room"
@@ -75,6 +77,31 @@ func TestRoomStateRedisConfigPinsDBZero(t *testing.T) {
 	}
 }
 
+func TestRoomLifecycleHookDeletesRoomStateCacheOnDestroy(t *testing.T) {
+	roomManager := room.NewManager()
+	jsonStore := &fakeAppJSONStore{}
+	roomStateCache := cache.NewRoomStateCache(jsonStore, 0)
+	installRoomLifecycleHooks(roomManager, nil, roomStateCache)
+
+	registeredRoom := roomManager.RegisterCreatedRoom("ROOM01", "user-1", "media-1")
+	client := room.NewClientConnection(nil)
+	client.SetIdentity("user-1", "ROOM01")
+	registeredRoom.Join(client)
+	roomManager.MarkRoomActive("ROOM01")
+
+	result := roomManager.LeaveClient(client)
+
+	if !result.RoomRemoved {
+		t.Fatalf("expected intentional leave to destroy empty room")
+	}
+	if len(jsonStore.deletedKeys) != 1 {
+		t.Fatalf("expected one deleted redis key, got %d", len(jsonStore.deletedKeys))
+	}
+	if jsonStore.deletedKeys[0] != "wt:room:state:ROOM01:v1" {
+		t.Fatalf("unexpected deleted key %q", jsonStore.deletedKeys[0])
+	}
+}
+
 func newTestGinRouter() http.Handler {
 	roomManager := room.NewManager()
 	return newGinRouter(
@@ -89,4 +116,21 @@ func newTestGinRouter() http.Handler {
 		transport.NewMediaHTTPHandler(nil),
 		transport.NewProgressHTTPHandler(nil),
 	)
+}
+
+type fakeAppJSONStore struct {
+	deletedKeys []string
+}
+
+func (s *fakeAppJSONStore) GetJSON(ctx context.Context, key string, dest any) (bool, error) {
+	return false, nil
+}
+
+func (s *fakeAppJSONStore) SetJSON(ctx context.Context, key string, value any, ttl time.Duration) error {
+	return nil
+}
+
+func (s *fakeAppJSONStore) Delete(ctx context.Context, keys ...string) error {
+	s.deletedKeys = append(s.deletedKeys, keys...)
+	return nil
 }

@@ -418,15 +418,24 @@ func (s *PostgresRoomStore) MarkAllActiveRoomsGracePeriod(
 }
 
 func (s *PostgresRoomStore) CleanupExpiredRooms(ctx context.Context, now time.Time) (int64, error) {
+	roomCodes, err := s.CleanupExpiredRoomCodes(ctx, now)
+	if err != nil {
+		return 0, err
+	}
+	return int64(len(roomCodes)), nil
+}
+
+func (s *PostgresRoomStore) CleanupExpiredRoomCodes(ctx context.Context, now time.Time) ([]string, error) {
 	const query = `
 		DELETE FROM rooms
 		WHERE status = 'grace_period'
 			AND destroy_after IS NOT NULL
 			AND destroy_after <= ?
+		RETURNING room_code
 	`
-	result := s.db.WithContext(ctx).Exec(query, now)
-	if result.Error != nil {
-		return 0, fmt.Errorf("cleanup expired rooms: %w", result.Error)
+	var roomCodes []string
+	if err := s.db.WithContext(ctx).Raw(query, now).Scan(&roomCodes).Error; err != nil {
+		return nil, fmt.Errorf("cleanup expired rooms: %w", err)
 	}
-	return result.RowsAffected, nil
+	return roomCodes, nil
 }
