@@ -14,6 +14,7 @@ const (
 )
 
 var ErrInvalidPagination = errors.New("invalid pagination")
+var ErrMediaNotFound = errors.New("media not found")
 
 type Tag struct {
 	ID   string
@@ -39,6 +40,11 @@ type Item struct {
 	Tags         []ItemTag
 }
 
+type PlaybackItem struct {
+	ID       string
+	MediaURL string
+}
+
 type TagList struct {
 	FeaturedTags []Tag
 	AllTags      []Tag
@@ -60,6 +66,7 @@ type SearchParams struct {
 type Store interface {
 	ListTags(ctx context.Context, allLimit int) (TagList, error)
 	SearchItems(ctx context.Context, params StoreSearchParams) ([]Item, error)
+	FindPlaybackItem(ctx context.Context, episodeID string) (PlaybackItem, error)
 }
 
 type StoreSearchParams struct {
@@ -114,6 +121,14 @@ func (s *Service) Search(ctx context.Context, params SearchParams) (ItemSearchRe
 		Limit:      limit,
 		NextCursor: nextCursor,
 	}, nil
+}
+
+func (s *Service) PlaybackItem(ctx context.Context, episodeID string) (PlaybackItem, error) {
+	episodeID = strings.TrimSpace(episodeID)
+	if episodeID == "" {
+		return PlaybackItem{}, ErrMediaNotFound
+	}
+	return s.store.FindPlaybackItem(ctx, episodeID)
 }
 
 func normalizeLimit(limit int) int {

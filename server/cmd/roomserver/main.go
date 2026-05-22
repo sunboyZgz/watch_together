@@ -56,6 +56,19 @@ func main() {
 			MaxRoomClients:            runtimeConfig.WebSocket.MaxRoomClients,
 			SeekMinInterval:           time.Duration(runtimeConfig.WebSocket.SeekMinIntervalMs) * time.Millisecond,
 		},
+		Media: app.MediaPlaybackConfig{
+			DeliveryMode:           runtimeConfig.Media.DeliveryMode,
+			SigningSecret:          runtimeConfig.Media.SigningSecret,
+			URLTTL:                 time.Duration(runtimeConfig.Media.URLTTLSeconds) * time.Second,
+			PublicBaseURL:          runtimeConfig.Media.PublicBaseURL,
+			InternalBaseURL:        runtimeConfig.Media.InternalBaseURL,
+			StorageEndpoint:        runtimeConfig.Media.StorageEndpoint,
+			StorageBucket:          runtimeConfig.Media.StorageBucket,
+			StorageRegion:          runtimeConfig.Media.StorageRegion,
+			StorageAccessKeyID:     runtimeConfig.Media.StorageAccessKeyID,
+			StorageSecretAccessKey: runtimeConfig.Media.StorageSecretAccessKey,
+			StorageForcePathStyle:  runtimeConfig.Media.StorageForcePathStyle,
+		},
 	})
 
 	log.Printf("room server listening on %s", server.Address())

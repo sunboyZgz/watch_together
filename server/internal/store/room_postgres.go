@@ -147,6 +147,24 @@ func (s *PostgresRoomStore) LeaveRoomByCode(ctx context.Context, params roomapi.
 	return nil
 }
 
+func (s *PostgresRoomStore) IsActiveMemberByCode(ctx context.Context, roomCode string, userID string) (bool, error) {
+	const query = `
+		SELECT 1
+		FROM room_members
+		INNER JOIN rooms ON rooms.id = room_members.room_id
+		WHERE rooms.room_code = ?
+			AND rooms.status IN ('active', 'grace_period')
+			AND room_members.user_id = ?
+			AND room_members.is_active = true
+		LIMIT 1
+	`
+	active, err := rowExists(ctx, s.db, query, roomCode, userID)
+	if err != nil {
+		return false, fmt.Errorf("check active room member: %w", err)
+	}
+	return active, nil
+}
+
 // GetRoomDetail loads the persisted room, media, and active members for the theater page.
 func (s *PostgresRoomStore) GetRoomDetail(ctx context.Context, roomCode string) (roomapi.DetailResult, error) {
 	var result roomapi.DetailResult

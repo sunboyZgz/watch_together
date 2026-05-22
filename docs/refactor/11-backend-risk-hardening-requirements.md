@@ -159,17 +159,18 @@
 
 - HTTP join 会写 PostgreSQL 成员关系。
 - WS join 会把连接加入内存房间。
-- 当前 WS join 是否必须先 HTTP join 需要重新确认。
+- 最新路线已确认是“HTTP join 后 WS join”。
+- WS join 已接入 active member 校验，未加入房间的连接不能进入内存房间。
 
 目标行为：
 
 - WS join 至少要求已登录用户和有效 roomCode。
-- 如果保留 HTTP join，则 WS join 应校验用户已经是 active member。
-- 如果允许 WS 首次加入，则 WS join 应通过服务层补齐成员关系或触发明确的加入流程。
+- WS join 必须校验用户已经是 active member。
+- WS join 不负责首次加入业务关系，首次加入仍走 `POST /rooms/{roomCode}/join`。
 
 实现前需确认：
 
-- 最新阶段是“HTTP join 后 WS join”，还是“WS join 可直接加入公开房间并补齐成员”。
+- 已确认：当前阶段是“HTTP join 后 WS join”。
 
 优先级：P1。
 
@@ -375,8 +376,10 @@
 
 当前状态：
 
-- 本地和对象存储 URL 主要是可直接播放 URL。
-- HLS 分发安全仍待实现。
+- 已完成第二层入口加固：`GET /media/items`、`POST /rooms`、`GET /rooms/{roomCode}` 返回的 `mediaUrl` 不再直接使用数据库中的永久 HLS URL，而是后端签发的短期 `/media/playback/{episodeId}/master.m3u8?expires=...&sig=...`。
+- `/media/playback/{episodeId}/master.m3u8` 会校验 HMAC 签名和过期时间，再解析数据库中的真实 HLS 地址并跳转。
+- 当前签名播放入口保护的是“播放入口 URL”，还没有完成 CDN signed cookie、Nginx secure_link 或私有对象存储 presign 对 playlist / segment 字节的完整保护。
+- 已实现媒体分发模式配置：支持 `signed_redirect / minio_presign / nginx_auth_request`；不提供 `public_direct`，避免把低安全直链作为正式模式。
 
 目标行为：
 
@@ -387,8 +390,8 @@
 
 实现前需确认：
 
-- 第一版使用对象存储 presign、Nginx secure_link 还是 CDN token auth。
-- 房间媒体访问是否仅要求登录，还是要求已加入房间。
+- `minio_presign` 后续需要补充真实 MinIO 集成测试，验证 master playlist、variant playlist 和 segment presign 在 Android Media3 中完整可播。
+- `nginx_auth_request` 后续需要补充 Nginx 配置模板，验证 Cookie / auth_request 在 HLS 多级请求中的传递效果。
 
 优先级：P1。
 
@@ -410,8 +413,8 @@
 
 第三批公网前必须做：
 
-1. HLS signed URL / signed cookie。已完成第一层入口收紧：`GET /media/items` 和 `GET /rooms/{roomCode}` 不再匿名暴露 `mediaUrl`。
-2. 媒体 URL 从 public URL 向可授权资源标识演进。下一步仍需把对象存储/CDN 直链替换为服务端签名播放入口。
+1. HLS signed URL / signed cookie。已完成前两层入口收紧：列表/房间详情需要鉴权，API 返回短期签名播放入口；仍需补齐 playlist / segment 字节层的 CDN / Nginx / 对象存储鉴权。
+2. 媒体 URL 从 public URL 向可授权资源标识演进。已开始使用 episode id 作为签名播放入口资源身份，并已落地三种媒体分发模式配置；后续仍需把 `media_episodes.media_url` 从永久 public URL 迁移为内部 object key 或 signable resource。
 3. CDN / 对象存储缓存策略。
 4. 基础 metrics、日志持久化和告警。
 

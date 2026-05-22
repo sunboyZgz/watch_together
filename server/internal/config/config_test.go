@@ -69,6 +69,12 @@ func TestLoadServerRuntimeConfigFallsBackToDefaults(t *testing.T) {
 	if cfg.WebSocket.SeekMinIntervalMs != 250 {
 		t.Fatalf("expected default seek min interval 250ms, got %d", cfg.WebSocket.SeekMinIntervalMs)
 	}
+	if cfg.Media.URLTTLSeconds != 7200 {
+		t.Fatalf("expected default media playback url ttl 7200s, got %d", cfg.Media.URLTTLSeconds)
+	}
+	if cfg.Media.DeliveryMode != "signed_redirect" {
+		t.Fatalf("expected default media delivery mode signed_redirect, got %q", cfg.Media.DeliveryMode)
+	}
 }
 
 func TestLoadServerRuntimeConfigSupportsAppEnvSpecificDebugSync(t *testing.T) {
@@ -174,6 +180,54 @@ func TestLoadServerRuntimeConfigLoadsWebSocketRuntimeSettings(t *testing.T) {
 	}
 	if cfg.WebSocket.SeekMinIntervalMs != 100 {
 		t.Fatalf("expected seek min interval 100ms, got %d", cfg.WebSocket.SeekMinIntervalMs)
+	}
+}
+
+func TestLoadServerRuntimeConfigLoadsMediaPlaybackSettings(t *testing.T) {
+	configDir := t.TempDir()
+	mustWriteConfigFile(
+		t,
+		filepath.Join(configDir, ".env"),
+		"MEDIA_DELIVERY_MODE=minio_presign\nMEDIA_PLAYBACK_SIGNING_SECRET=media-secret\nMEDIA_PLAYBACK_URL_TTL_SECONDS=900\nMEDIA_PUBLIC_BASE_URL=http://127.0.0.1:9100/watch-together-media\nMEDIA_INTERNAL_BASE_URL=http://minio:9000/watch-together-media\nMEDIA_STORAGE_ENDPOINT=http://127.0.0.1:9100\nMEDIA_STORAGE_BUCKET=watch-together-media\nMEDIA_STORAGE_REGION=auto\nMEDIA_STORAGE_ACCESS_KEY_ID=minioadmin\nMEDIA_STORAGE_SECRET_ACCESS_KEY=miniosecret\nMEDIA_STORAGE_FORCE_PATH_STYLE=false\n",
+	)
+
+	cfg, err := LoadServerRuntimeConfig(configDir)
+	if err != nil {
+		t.Fatalf("load runtime config: %v", err)
+	}
+
+	if cfg.Media.DeliveryMode != "minio_presign" {
+		t.Fatalf("expected media delivery mode minio_presign, got %q", cfg.Media.DeliveryMode)
+	}
+	if cfg.Media.SigningSecret != "media-secret" {
+		t.Fatalf("expected media signing secret, got %q", cfg.Media.SigningSecret)
+	}
+	if cfg.Media.URLTTLSeconds != 900 {
+		t.Fatalf("expected media playback ttl 900s, got %d", cfg.Media.URLTTLSeconds)
+	}
+	if cfg.Media.PublicBaseURL != "http://127.0.0.1:9100/watch-together-media" {
+		t.Fatalf("expected media public base url, got %q", cfg.Media.PublicBaseURL)
+	}
+	if cfg.Media.InternalBaseURL != "http://minio:9000/watch-together-media" {
+		t.Fatalf("expected media internal base url, got %q", cfg.Media.InternalBaseURL)
+	}
+	if cfg.Media.StorageEndpoint != "http://127.0.0.1:9100" {
+		t.Fatalf("expected media storage endpoint, got %q", cfg.Media.StorageEndpoint)
+	}
+	if cfg.Media.StorageBucket != "watch-together-media" {
+		t.Fatalf("expected media storage bucket, got %q", cfg.Media.StorageBucket)
+	}
+	if cfg.Media.StorageRegion != "auto" {
+		t.Fatalf("expected media storage region, got %q", cfg.Media.StorageRegion)
+	}
+	if cfg.Media.StorageAccessKeyID != "minioadmin" {
+		t.Fatalf("expected media storage access key, got %q", cfg.Media.StorageAccessKeyID)
+	}
+	if cfg.Media.StorageSecretAccessKey != "miniosecret" {
+		t.Fatalf("expected media storage secret key, got %q", cfg.Media.StorageSecretAccessKey)
+	}
+	if cfg.Media.StorageForcePathStyle {
+		t.Fatalf("expected media storage force path style false")
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"gorm.io/gorm"
@@ -13,6 +14,27 @@ import (
 
 type PostgresMediaStore struct {
 	db *gorm.DB
+}
+
+// FindPlaybackItem resolves the raw HLS playback URL for a signed playback entrypoint.
+func (s *PostgresMediaStore) FindPlaybackItem(ctx context.Context, episodeID string) (media.PlaybackItem, error) {
+	const query = `
+		SELECT episode.id::text, episode.media_url
+		FROM media_episodes AS episode
+		INNER JOIN media_seasons AS season ON season.id = episode.season_id
+		WHERE episode.id = ?
+			AND episode.status = 'active'
+			AND season.status = 'active'
+		LIMIT 1
+	`
+	var item media.PlaybackItem
+	if err := s.db.WithContext(ctx).Raw(query, episodeID).Row().Scan(&item.ID, &item.MediaURL); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return media.PlaybackItem{}, media.ErrMediaNotFound
+		}
+		return media.PlaybackItem{}, fmt.Errorf("find media playback item: %w", err)
+	}
+	return item, nil
 }
 
 // NewPostgresMediaStore creates the PostgreSQL-backed repository for media catalog data.

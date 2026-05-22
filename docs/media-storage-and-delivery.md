@@ -4,12 +4,12 @@
 
 ## 背景
 
-当前项目的测试资源主要放在仓库 `media/` 目录下，Android 通过后端返回的 `media_episodes.media_url` 或本地 `MEDIA_BASE_URL` 播放 HLS。
+当前项目的测试资源主要放在仓库 `media/` 目录下。数据库中的 `media_episodes.media_url` 保存真实 HLS 地址；Android 通过后端返回的短期签名 `mediaUrl` 播放 HLS，本地联调时仍可通过 `MEDIA_BASE_URL` 做地址改写。
 
 随着项目进入真实业务联调，媒体资源会逐步从本地样例迁移到云端对象存储和 CDN。这里需要提前确定三个边界：
 
 - HLS 文件、封面图等大文件不进入 PostgreSQL。
-- PostgreSQL 只保存媒体业务元数据和可播放 URL。
+- PostgreSQL 只保存媒体业务元数据和真实 HLS 地址或后续可签名资源身份。
 - Android 只消费后端 API 返回的 `mediaUrl / coverUrl`，不关心底层对象存储供应商。
 
 ## 阶段性选型
@@ -73,8 +73,44 @@ Android 的播放入口来自后端 API 返回的：
 - `media.coverUrl`
 
 Android 不应该直接读取对象存储 bucket、endpoint、access key、secret key，也不应该根据供应商拼接播放地址。
-当前第一层公网前加固已经要求 `GET /media/items` 和 `GET /rooms/{roomCode}` 携带登录 token，避免匿名枚举播放 URL。
-这还不是完整的对象存储保护；生产前仍需要 signed URL / signed cookie / CDN 鉴权或服务端签名播放入口。
+当前公网前加固已经要求 `GET /media/items` 和 `GET /rooms/{roomCode}` 携带登录 token，避免匿名枚举播放 URL；API 返回的 `mediaUrl` 也已改为短期签名播放入口 `/media/playback/{episodeId}/master.m3u8?expires=...&sig=...`，不再直接暴露 `media_episodes.media_url`。
+这还不是完整的对象存储保护；生产前仍需要让真实 HLS playlist / segment 字节层接入 signed URL / signed cookie / CDN 鉴权。
+后续如果支持用户读取自己的本地目录，媒体保护边界会不同：本地目录模式不需要对象存储 signed URL，服务端只同步媒体指纹、展示名、时长和播放时间轴；客户端负责在自己的本地库中找到对应文件。
+
+## 媒体分发模式配置方案
+
+作为开源自托管项目，媒体分发不应该只有一种“最安全但部署最重”的方案。后续 Server 应明确支持多种 delivery mode，让部署者在安全性、部署复杂度和带宽成本之间做取舍。
+
+建议配置项：
+
+```text
+MEDIA_DELIVERY_MODE=signed_redirect|minio_presign|nginx_auth_request
+MEDIA_PLAYBACK_SIGNING_SECRET=...
+MEDIA_PLAYBACK_URL_TTL_SECONDS=7200
+MEDIA_PUBLIC_BASE_URL=...
+MEDIA_INTERNAL_BASE_URL=...
+```
+
+| Mode | 适用场景 | 是否需要 Nginx | 安全性 | Go 是否转发视频字节 | 说明 |
+| -- | -- | -- | -- | -- | -- |
+| `signed_redirect` | 当前已实现的过渡方案 | 否 | 中低 | 否 | API 返回短期签名播放入口，Go 校验后 302 到真实 HLS URL。能避免 API 直接暴露永久 URL，但跳转后的真实 URL 仍可能被看到。 |
+| `minio_presign` | 只有 MinIO、不想部署 Nginx，但希望 bucket 私有 | 否 | 中 | 否 | Go 读取并重写 HLS playlist，把 variant playlist 继续指向 Go 签名入口，把 segment 改成 MinIO presigned URL；Go 不转发视频分片。 |
+| `nginx_auth_request` | 无 CDN 的公网部署、希望 MinIO 私有且 Go 不承载字节流 | 是 | 高 | 否 | 推荐的无 CDN 生产方案：客户端先访问 Go 签名播放入口，Go 下发访问 cookie/凭证后跳转到 Nginx；Nginx 对外承载 HLS 字节流，再反代到私有 MinIO。 |
+
+当前代码状态：
+
+- 已实现 `MEDIA_DELIVERY_MODE` 分支配置，支持 `signed_redirect / minio_presign / nginx_auth_request`。
+- `signed_redirect` 已可直接使用。
+- `minio_presign` 已接入 S3-compatible client：playlist 文本由 Go 读取和重写，segment URL 由 MinIO presign 承担。
+- `nginx_auth_request` 已接入 Go 侧签发、播放入口跳转和 `/media/internal/auth` 校验入口；仍需要补充 Nginx 部署模板。
+- 不再提供 `public_direct` 作为正式模式；真实 HLS URL 直出安全性过低，不进入项目推荐配置。
+
+无 CDN 推荐演进路线：
+
+1. 当前阶段继续使用 `signed_redirect`，先保证 Android、房间、播放链路稳定。
+2. 把 `media_episodes.media_url` 从公开 URL 迁移为对象 key / storage identity，例如 `media/show/season-01/episode-01/hls/master.m3u8`。
+3. 如果部署者不想上 Nginx，使用 `minio_presign`，并在文档中明确它的 playlist 重写和 presigned segment 边界。
+4. 如果部署者愿意做公网加固，提供 MinIO 私有 bucket + Nginx `auth_request` / `secure_link` + Go 签发访问凭证。
 
 当前 Server / CLI 侧统一使用这些环境变量：
 
@@ -159,7 +195,7 @@ object key 必须稳定、可预测，并且不包含用户本地文件名。
 
 - `MEDIA_OBJECT_KEY_PREFIX` 默认是 `media`。
 - `{sourceKeyWithoutExt}` 由媒体库相对路径自动推导，例如 `sample-show/season-01/episode-01`。
-- `media_episodes.media_url` 指向 `hls/master.m3u8` 的公开 URL。
+- `media_episodes.media_url` 当前指向真实 `hls/master.m3u8` 地址；REST API 返回给 Android 的 `mediaUrl` 会先包装成短期签名播放入口。
 - `media_episode_variants` 记录同一个 episode 下的 `720p-fast / 720p-high / 1080p` variant playlist URL、分辨率、带宽和 segment 健康信息。
 - `media_episodes.cover_url` 或 `media_seasons.cover_url` 指向封面 URL。
 

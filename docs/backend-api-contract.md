@@ -501,7 +501,7 @@ Authorization: Bearer <accessToken>
 - `tag` 使用 `media_tags.slug`，可为空。
 - `limit` 默认 20，最大 50。
 - `cursor` 对客户端不透明；Android 只需要原样带回下一页请求。
-- `items[].mediaUrl` 来自 `media_episodes.media_url`，应指向 HLS `master.m3u8`；Android 播放器以该 URL 加载同一个 episode 的 ABR/手动清晰度轨道。
+- `items[].mediaUrl` 是后端签发的短期播放入口，格式为 `/media/playback/{episodeId}/master.m3u8?expires=...&sig=...`。数据库中的 `media_episodes.media_url` 仍保存真实 HLS `master.m3u8` 地址，但不再直接暴露给列表 API。
 
 响应：
 
@@ -515,7 +515,7 @@ Authorization: Bearer <accessToken>
         "subtitle": "治愈冒险",
         "description": "适合慢慢看",
         "coverUrl": "https://example.com/cover.jpg",
-        "mediaUrl": "https://example.com/media/show/season-01/episode-09/hls/master.m3u8",
+        "mediaUrl": "https://api.example.com/media/playback/episode_uuid/master.m3u8?expires=1779364800&sig=...",
         "durationMs": 1458000,
         "seasonLabel": "第 1 季",
         "episodeLabel": "第 09 集",
@@ -543,6 +543,32 @@ Authorization: Bearer <accessToken>
 - `400 VALIDATION_ERROR`: `limit` 或 `cursor` 格式不合法
 - `401 UNAUTHORIZED`: 缺少 token 或 token 无效
 - `503 INTERNAL_ERROR`: 服务端未连接数据库，media service 不可用
+
+#### `GET /media/playback/{episodeId}/{assetPath}`
+
+用途：短期签名播放入口。客户端不需要自己拼接对象存储地址，也不直接拿数据库中的永久 HLS URL。
+
+查询参数：
+
+```text
+expires=1779364800
+sig=<hmac-sha256-signature>
+```
+
+说明：
+
+- `mediaUrl` 由 `GET /media/items`、`POST /rooms` 或 `GET /rooms/{roomCode}` 返回，客户端直接交给播放器。
+- 默认 `mediaUrl` 指向 `/media/playback/{episodeId}/master.m3u8`。
+- 服务端校验 `expires / sig` 后，按 `MEDIA_DELIVERY_MODE` 处理播放入口。
+- `signed_redirect`：校验后 `302` 到真实 HLS `master.m3u8`。
+- `minio_presign`：Go 读取并重写 HLS playlist，把 segment 改成 MinIO presigned URL；Go 不转发视频分片。
+- `nginx_auth_request`：Go 下发访问 cookie/凭证后跳转到 Nginx，由 Nginx 承载 HLS 字节流并通过 `/media/internal/auth` 校验。
+
+错误：
+
+- `401 UNAUTHORIZED`: 签名缺失、签名错误或 URL 已过期
+- `404 NOT_FOUND`: episode 不存在或已下架
+- `503 INTERNAL_ERROR`: media service 不可用
 
 Android 联调状态：
 
@@ -606,7 +632,7 @@ Accept: application/json
     "media": {
       "id": "episode_uuid",
       "title": "紫罗兰永恒花园",
-      "mediaUrl": "https://example.com/index.m3u8",
+      "mediaUrl": "https://api.example.com/media/playback/episode_uuid/master.m3u8?expires=1779364800&sig=...",
       "durationMs": 1458000,
       "seasonLabel": "第 1 季",
       "episodeLabel": "第 09 集"
@@ -687,6 +713,7 @@ Accept: application/json
 - 如果用户之前离开过但房间仍存在，接口会恢复成员关系并将其作为 `member`。
 - 该接口只处理业务成员关系，不替代 WebSocket `join_room`。
 - Android 调用成功后仍需连接 `/ws` 并发送 `join_room`，其中 `roomId` 当前传 `room.roomCode`。
+- WebSocket `join_room` 会校验当前用户已经是该房间 active member；未先完成 HTTP join 的连接会收到 `room membership required` 错误。
 
 错误：
 
@@ -703,6 +730,7 @@ Accept: application/json
 
 - `GET /rooms/{roomCode}` 已落地，对应 `INT-123`
 - `GET /rooms/{roomCode}` 当前要求 `Authorization: Bearer <accessToken>`，因为响应会返回放映室可播放 `media.mediaUrl`
+- `GET /rooms/{roomCode}` 还要求当前用户已经是该房间 active member；未加入者必须先调用 `POST /rooms/{roomCode}/join`
 - 数据来自 PostgreSQL `rooms / room_members / users / media_episodes / media_seasons`
 - 响应只包含业务主数据，不包含实时 `positionMs / playbackRate / paused / ended / seq`
 - 实时同步状态仍必须等待 WebSocket `room_state`
@@ -730,7 +758,7 @@ Accept: application/json
       "id": "episode_uuid",
       "title": "紫罗兰永恒花园",
       "subtitle": "和搭子一起继续看到第 09 集",
-      "mediaUrl": "https://example.com/index.m3u8",
+      "mediaUrl": "https://api.example.com/media/playback/episode_uuid/master.m3u8?expires=1779364800&sig=...",
       "durationMs": 1458000,
       "seasonLabel": "第 1 季",
       "episodeLabel": "第 09 集"
@@ -759,6 +787,7 @@ Accept: application/json
 - 如果需要播放同步，客户端仍必须连接 `/ws` 并等待 `room_state`。
 - Android `INT-130` 已接入该接口。
 - Android 在进入或加入放映室时会携带 `accessToken` 调用 `GET /rooms/{roomCode}` 补齐业务首屏数据。
+- Android 首页加入房间弹窗现在先调用 `POST /rooms/{roomCode}/join` 校验并建立成员关系，再进入放映室。
 - Android 会先尽量加载 room detail，再启动 WebSocket `join_room`，避免 `room_state.mediaId` 到达时缺少真实 `media.mediaUrl`。
 - Android 使用该接口返回的 `media.title / media.episodeLabel / media.mediaUrl` 展示和载入影片。
 - WebSocket `room_state` 仍是 `positionMs / playbackRate / paused / ended / seq` 的实时权威。
@@ -767,6 +796,7 @@ Accept: application/json
 
 - `400 VALIDATION_ERROR`: 房间码格式不合法
 - `401 UNAUTHORIZED`: 缺少 token 或 token 无效
+- `403 FORBIDDEN`: 当前用户不是该房间 active member
 - `404 NOT_FOUND`: 房间不存在、已销毁或不可加入
 - `503 INTERNAL_ERROR`: 服务端未连接数据库，room service 不可用
 
@@ -995,6 +1025,7 @@ Android 联调注意：
 - 创建房间接口使用选片页返回的 `media.id` 作为 `mediaItemId`。
 - 创建成功后，右上角展示 `room.roomCode`，而不是 `room.id`。
 - 加入房间弹窗输入的是 6 位 `roomCode`。
+- 加入房间弹窗确认时会先调用 `POST /rooms/{roomCode}/join`，成功后再进入放映室。
 - 当前 WebSocket `join_room.payload.roomId` 继续传 `room.roomCode`，这样能复用已经稳定的运行时同步链路。
 - HTTP `room.id` 是数据库 UUID，只用于后续业务 API 和持久化关联，不直接作为当前 WebSocket join key。
 - HTTP create/join 成功不代表已经进入实时同步；Android 仍需建立 `/ws` 并等待 `room_state`。

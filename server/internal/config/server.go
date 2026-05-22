@@ -15,6 +15,7 @@ type ServerRuntimeConfig struct {
 	Auth        AuthConfig
 	Redis       RedisConfig
 	WebSocket   WebSocketConfig
+	Media       MediaPlaybackConfig
 }
 
 type AuthConfig struct {
@@ -41,6 +42,20 @@ type WebSocketConfig struct {
 	SeekMinIntervalMs         int
 }
 
+type MediaPlaybackConfig struct {
+	DeliveryMode           string
+	SigningSecret          string
+	URLTTLSeconds          int
+	PublicBaseURL          string
+	InternalBaseURL        string
+	StorageEndpoint        string
+	StorageBucket          string
+	StorageRegion          string
+	StorageAccessKeyID     string
+	StorageSecretAccessKey string
+	StorageForcePathStyle  bool
+}
+
 func LoadServerRuntimeConfig(configDir string) (ServerRuntimeConfig, error) {
 	defaults := map[string]any{
 		"APP_ENV":                         "local",
@@ -57,6 +72,9 @@ func LoadServerRuntimeConfig(configDir string) (ServerRuntimeConfig, error) {
 		"WS_MAX_CONNECTIONS":              0,
 		"ROOM_MAX_CLIENTS":                0,
 		"WS_SEEK_MIN_INTERVAL_MS":         250,
+		"MEDIA_DELIVERY_MODE":             "signed_redirect",
+		"MEDIA_PLAYBACK_URL_TTL_SECONDS":  7200,
+		"MEDIA_STORAGE_FORCE_PATH_STYLE":  "true",
 	}
 	keys := []string{
 		"APP_ENV",
@@ -80,6 +98,17 @@ func LoadServerRuntimeConfig(configDir string) (ServerRuntimeConfig, error) {
 		"WS_MAX_CONNECTIONS",
 		"ROOM_MAX_CLIENTS",
 		"WS_SEEK_MIN_INTERVAL_MS",
+		"MEDIA_DELIVERY_MODE",
+		"MEDIA_PLAYBACK_SIGNING_SECRET",
+		"MEDIA_PLAYBACK_URL_TTL_SECONDS",
+		"MEDIA_PUBLIC_BASE_URL",
+		"MEDIA_INTERNAL_BASE_URL",
+		"MEDIA_STORAGE_ENDPOINT",
+		"MEDIA_STORAGE_BUCKET",
+		"MEDIA_STORAGE_REGION",
+		"MEDIA_STORAGE_ACCESS_KEY_ID",
+		"MEDIA_STORAGE_SECRET_ACCESS_KEY",
+		"MEDIA_STORAGE_FORCE_PATH_STYLE",
 	}
 
 	loader, err := newLoader(configDir, defaults, keys)
@@ -114,6 +143,19 @@ func LoadServerRuntimeConfig(configDir string) (ServerRuntimeConfig, error) {
 			MaxConnections:            int64FromConfig(loader, "WS_MAX_CONNECTIONS"),
 			MaxRoomClients:            intFromConfig(loader, "ROOM_MAX_CLIENTS"),
 			SeekMinIntervalMs:         intFromConfig(loader, "WS_SEEK_MIN_INTERVAL_MS"),
+		},
+		Media: MediaPlaybackConfig{
+			DeliveryMode:           trimmedString(loader, "MEDIA_DELIVERY_MODE"),
+			SigningSecret:          trimmedString(loader, "MEDIA_PLAYBACK_SIGNING_SECRET"),
+			URLTTLSeconds:          intFromConfig(loader, "MEDIA_PLAYBACK_URL_TTL_SECONDS"),
+			PublicBaseURL:          trimmedString(loader, "MEDIA_PUBLIC_BASE_URL"),
+			InternalBaseURL:        trimmedString(loader, "MEDIA_INTERNAL_BASE_URL"),
+			StorageEndpoint:        trimmedString(loader, "MEDIA_STORAGE_ENDPOINT"),
+			StorageBucket:          trimmedString(loader, "MEDIA_STORAGE_BUCKET"),
+			StorageRegion:          trimmedString(loader, "MEDIA_STORAGE_REGION"),
+			StorageAccessKeyID:     trimmedString(loader, "MEDIA_STORAGE_ACCESS_KEY_ID"),
+			StorageSecretAccessKey: trimmedString(loader, "MEDIA_STORAGE_SECRET_ACCESS_KEY"),
+			StorageForcePathStyle:  boolFromConfig(loader, "MEDIA_STORAGE_FORCE_PATH_STYLE"),
 		},
 	}, nil
 }

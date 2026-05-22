@@ -11,9 +11,11 @@ import (
 )
 
 type RoomHTTPHandler struct {
-	roomManager   *room.Manager
-	roomService   *roomapi.Service
-	tokenVerifier accessTokenVerifier
+	roomManager    *room.Manager
+	roomService    *roomapi.Service
+	tokenVerifier  accessTokenVerifier
+	playbackSigner *mediaPlaybackSigner
+	delivery       *mediaDelivery
 }
 
 type createRoomRequest struct {
@@ -84,11 +86,18 @@ func NewRoomHTTPHandlerWithTokenVerifier(
 	roomManager *room.Manager,
 	roomService *roomapi.Service,
 	tokenVerifier accessTokenVerifier,
+	playbackConfigs ...MediaPlaybackConfig,
 ) *RoomHTTPHandler {
+	playbackConfig := MediaPlaybackConfig{}
+	if len(playbackConfigs) > 0 {
+		playbackConfig = playbackConfigs[0]
+	}
 	return &RoomHTTPHandler{
-		roomManager:   roomManager,
-		roomService:   roomService,
-		tokenVerifier: tokenVerifier,
+		roomManager:    roomManager,
+		roomService:    roomService,
+		tokenVerifier:  tokenVerifier,
+		playbackSigner: newMediaPlaybackSigner(playbackConfig),
+		delivery:       newMediaDelivery(playbackConfig),
 	}
 }
 
@@ -136,7 +145,7 @@ func (h *RoomHTTPHandler) CreateRoom(w http.ResponseWriter, r *http.Request) {
 	state := runtimeRoom.StateSnapshot()
 	writeAPISuccess(w, http.StatusCreated, createRoomResponse{
 		Room:      roomToResponse(result.Room),
-		Media:     roomMediaToResponse(result.Media),
+		Media:     h.roomMediaToResponse(r, result.Media),
 		RoomState: roomStateToResponse(state),
 	})
 }
@@ -204,7 +213,8 @@ func (h *RoomHTTPHandler) DetailByCode(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusMethodNotAllowed, "VALIDATION_ERROR", "method not allowed", nil)
 		return
 	}
-	if _, ok := userIDFromAuthorization(r.Header.Get("Authorization"), h.tokenVerifier); !ok {
+	userID, ok := userIDFromAuthorization(r.Header.Get("Authorization"), h.tokenVerifier)
+	if !ok {
 		writeAPIError(w, http.StatusUnauthorized, "UNAUTHORIZED", "missing or invalid access token", nil)
 		return
 	}
@@ -220,6 +230,10 @@ func (h *RoomHTTPHandler) DetailByCode(w http.ResponseWriter, r *http.Request) {
 		h.writeRoomError(w, err)
 		return
 	}
+	if !roomDetailHasActiveMember(result, userID) {
+		writeAPIError(w, http.StatusForbidden, "FORBIDDEN", "room membership required", nil)
+		return
+	}
 	h.roomManager.RegisterCreatedRoomWithMedia(
 		result.Room.RoomCode,
 		result.Room.HostUserID,
@@ -228,9 +242,18 @@ func (h *RoomHTTPHandler) DetailByCode(w http.ResponseWriter, r *http.Request) {
 	)
 	writeAPISuccess(w, http.StatusOK, roomDetailResponse{
 		Room:    roomToResponse(result.Room),
-		Media:   roomMediaToResponse(result.Media),
+		Media:   h.roomMediaToResponse(r, result.Media),
 		Members: membersToResponse(result.Members),
 	})
+}
+
+func roomDetailHasActiveMember(result roomapi.DetailResult, userID string) bool {
+	for _, member := range result.Members {
+		if member.UserID == userID {
+			return true
+		}
+	}
+	return false
 }
 
 func (h *RoomHTTPHandler) ensureReady(w http.ResponseWriter) bool {
@@ -288,12 +311,12 @@ func roomToResponse(room roomapi.Room) roomResponse {
 	}
 }
 
-func roomMediaToResponse(media roomapi.Media) roomMediaResponse {
+func (h *RoomHTTPHandler) roomMediaToResponse(r *http.Request, media roomapi.Media) roomMediaResponse {
 	return roomMediaResponse{
 		ID:           media.ID,
 		Title:        media.Title,
 		Subtitle:     media.Subtitle,
-		MediaURL:     media.MediaURL,
+		MediaURL:     h.delivery.PlaybackURL(r, media.ID, media.MediaURL),
 		DurationMs:   media.DurationMs,
 		SeasonLabel:  media.SeasonLabel,
 		EpisodeLabel: media.EpisodeLabel,

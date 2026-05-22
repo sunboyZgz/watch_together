@@ -185,6 +185,56 @@ func TestWebSocketJoinRoomMissingRoomReturnsError(t *testing.T) {
 	}
 }
 
+func TestWebSocketJoinRoomRequiresActiveBusinessMembership(t *testing.T) {
+	roomManager := room.NewManager()
+	createdRoom, err := roomManager.CreateRoom("user_a", "sample_001")
+	if err != nil {
+		t.Fatalf("create room: %v", err)
+	}
+	membership := &fakeRoomMembershipStore{
+		active: map[string]bool{
+			roomMembershipKey(createdRoom.ID(), "user_a"): true,
+		},
+	}
+	mux := http.NewServeMux()
+	mux.Handle("/ws", NewWebSocketHandlerWithConfigAndRoomStateWriterAndTokenVerifierAndRoomLeaver(
+		roomManager,
+		true,
+		WebSocketRuntimeConfig{},
+		nil,
+		nil,
+		membership,
+	))
+
+	httpServer := httptest.NewServer(mux)
+	defer httpServer.Close()
+
+	wsURL := "ws" + httpServer.URL[len("http"):] + "/ws"
+	ctx := context.Background()
+	conn, _, err := websocket.Dial(ctx, wsURL, websocketDialOptions("user_b"))
+	if err != nil {
+		t.Fatalf("dial websocket: %v", err)
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "test done")
+
+	mustJoinRoom(t, ctx, conn, createdRoom.ID(), "user_b")
+
+	var envelope protocol.ErrorEnvelope
+	readMessageAs(t, ctx, conn, &envelope)
+	if envelope.Type != protocol.TypeError {
+		t.Fatalf("expected error response, got %s", envelope.Type)
+	}
+	if envelope.Payload.RoomID != createdRoom.ID() {
+		t.Fatalf("expected error roomId %s, got %s", createdRoom.ID(), envelope.Payload.RoomID)
+	}
+	if envelope.Payload.Message != "room membership required" {
+		t.Fatalf("expected room membership required, got %s", envelope.Payload.Message)
+	}
+	if got := roomManager.ClientCount(createdRoom.ID()); got != 0 {
+		t.Fatalf("expected rejected client not to join room, got %d clients", got)
+	}
+}
+
 func TestWebSocketRejectsMissingAccessToken(t *testing.T) {
 	roomManager := room.NewManager()
 	mux := http.NewServeMux()
@@ -1795,4 +1845,23 @@ func readUntilClosed(t *testing.T, ctx context.Context, conn *websocket.Conn) {
 			return
 		}
 	}
+}
+
+type fakeRoomMembershipStore struct {
+	active map[string]bool
+}
+
+func (s *fakeRoomMembershipStore) LeaveRoomByCode(ctx context.Context, roomCode string, userID string) error {
+	if s.active != nil {
+		delete(s.active, roomMembershipKey(roomCode, userID))
+	}
+	return nil
+}
+
+func (s *fakeRoomMembershipStore) IsActiveMemberByCode(ctx context.Context, roomCode string, userID string) (bool, error) {
+	return s.active[roomMembershipKey(roomCode, userID)], nil
+}
+
+func roomMembershipKey(roomCode string, userID string) string {
+	return roomCode + "\x00" + userID
 }

@@ -66,6 +66,17 @@
 - `.env.prod.local` 用于生产机上的本地覆盖值，不提交到仓库。
 - 运行时环境变量可用于覆盖本地文件或后续部署环境中的配置。
 
+当前服务端运行时还包含播放入口签名配置：
+
+- `MEDIA_PLAYBACK_SIGNING_SECRET`: REST API 返回的短期 `mediaUrl` 签名密钥，生产环境必须使用独立长随机值。
+- `MEDIA_PLAYBACK_URL_TTL_SECONDS`: `/media/playback/{episodeId}/master.m3u8` 播放入口有效期，当前默认 7200 秒。
+
+媒体分发模式后续应显式配置，而不是让部署者从代码行为中猜：
+
+- `MEDIA_DELIVERY_MODE`: 支持取值 `signed_redirect / minio_presign / nginx_auth_request`。不提供 `public_direct`，避免把几乎无保护的 HLS 直链作为正式模式。
+- `MEDIA_PUBLIC_BASE_URL`: 面向客户端或 Nginx/CDN 的公开访问根地址。
+- `MEDIA_INTERNAL_BASE_URL`: 面向服务端或 Nginx upstream 的内部访问根地址，适合 MinIO 私有网络。
+
 ### Windows
 
 `windows/` 使用 `.env.example` + `.env.local`。

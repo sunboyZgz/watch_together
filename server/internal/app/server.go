@@ -33,10 +33,12 @@ type Config struct {
 	Auth        auth.TokenConfig
 	Redis       cache.RedisConfig
 	WebSocket   transport.WebSocketRuntimeConfig
+	Media       transport.MediaPlaybackConfig
 }
 
 type RedisConfig = cache.RedisConfig
 type WebSocketRuntimeConfig = transport.WebSocketRuntimeConfig
+type MediaPlaybackConfig = transport.MediaPlaybackConfig
 type AuthTokenConfig = auth.TokenConfig
 
 type Server struct {
@@ -78,10 +80,10 @@ func NewServer(config Config) *Server {
 	if roomStore != nil {
 		go startPersistentRoomCleanupLoop(serverCtx, room.DefaultCleanupInterval(), roomStore, roomStateCache)
 	}
-	roomHTTPHandler := transport.NewRoomHTTPHandlerWithTokenVerifier(roomManager, roomService, tokenManager)
+	roomHTTPHandler := transport.NewRoomHTTPHandlerWithTokenVerifier(roomManager, roomService, tokenManager, config.Media)
 	authHTTPHandler := transport.NewAuthHTTPHandler(newAuthService(db, tokenManager))
 	homeHTTPHandler := transport.NewHomeHTTPHandlerWithTokenVerifier(newHomeService(db), tokenManager)
-	mediaHTTPHandler := transport.NewMediaHTTPHandlerWithTokenVerifier(newMediaService(db), tokenManager)
+	mediaHTTPHandler := transport.NewMediaHTTPHandlerWithTokenVerifier(newMediaService(db), tokenManager, config.Media)
 	progressHTTPHandler := transport.NewProgressHTTPHandlerWithTokenVerifier(newProgressService(db), tokenManager)
 	router := newGinRouter(
 		roomManager,
@@ -166,6 +168,8 @@ func newGinRouter(
 	router.Any("/home/summary", gin.WrapF(homeHTTPHandler.Summary))
 	router.Any("/media/tags", gin.WrapF(mediaHTTPHandler.Tags))
 	router.Any("/media/items", gin.WrapF(mediaHTTPHandler.Items))
+	router.Any("/media/internal/auth", gin.WrapF(mediaHTTPHandler.NginxAuth))
+	router.Any("/media/playback/*playbackPath", gin.WrapF(mediaHTTPHandler.Playback))
 	router.Any("/me/media-progress/*mediaPath", gin.WrapF(progressHTTPHandler.Update))
 	router.Any("/rooms", gin.WrapF(roomHTTPHandler.CreateRoom))
 	router.Any("/rooms/*roomPath", gin.WrapF(roomHTTPHandler.RoomRoute))

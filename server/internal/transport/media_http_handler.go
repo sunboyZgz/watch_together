@@ -9,8 +9,10 @@ import (
 )
 
 type MediaHTTPHandler struct {
-	mediaService  *media.Service
-	tokenVerifier accessTokenVerifier
+	mediaService   *media.Service
+	tokenVerifier  accessTokenVerifier
+	playbackSigner *mediaPlaybackSigner
+	delivery       *mediaDelivery
 }
 
 type mediaTagsResponse struct {
@@ -49,10 +51,18 @@ func NewMediaHTTPHandler(mediaService *media.Service) *MediaHTTPHandler {
 func NewMediaHTTPHandlerWithTokenVerifier(
 	mediaService *media.Service,
 	tokenVerifier accessTokenVerifier,
+	playbackConfigs ...MediaPlaybackConfig,
 ) *MediaHTTPHandler {
+	playbackConfig := MediaPlaybackConfig{}
+	if len(playbackConfigs) > 0 {
+		playbackConfig = playbackConfigs[0]
+	}
+	delivery := newMediaDelivery(playbackConfig)
 	return &MediaHTTPHandler{
-		mediaService:  mediaService,
-		tokenVerifier: tokenVerifier,
+		mediaService:   mediaService,
+		tokenVerifier:  tokenVerifier,
+		playbackSigner: newMediaPlaybackSigner(playbackConfig),
+		delivery:       delivery,
 	}
 }
 
@@ -110,11 +120,59 @@ func (h *MediaHTTPHandler) Items(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeAPISuccessWithPage(w, http.StatusOK, mediaItemsResponse{
-		Items: mediaItemsToResponse(result.Items),
+		Items: h.mediaItemsToResponse(r, result.Items),
 	}, apiPage{
 		Limit:      result.Limit,
 		NextCursor: result.NextCursor,
 	})
+}
+
+// Playback handles signed GET /media/playback/{episodeId}/master.m3u8 requests.
+func (h *MediaHTTPHandler) Playback(w http.ResponseWriter, r *http.Request) {
+	if !h.ensureReady(w) {
+		return
+	}
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		writeAPIError(w, http.StatusMethodNotAllowed, "VALIDATION_ERROR", "method not allowed", nil)
+		return
+	}
+
+	episodeID, assetPath, ok := episodeAssetFromPlaybackPath(r.URL.Path)
+	if !ok {
+		writeAPIError(w, http.StatusNotFound, "NOT_FOUND", "media playback route not found", nil)
+		return
+	}
+	if !h.playbackSigner.VerifyPlayback(episodeID, assetPath, r.URL.Query().Get("expires"), r.URL.Query().Get("sig")) {
+		writeAPIError(w, http.StatusUnauthorized, "UNAUTHORIZED", "media playback URL is invalid or expired", nil)
+		return
+	}
+
+	playbackItem, err := h.mediaService.PlaybackItem(r.Context(), episodeID)
+	if err != nil {
+		if errors.Is(err, media.ErrMediaNotFound) {
+			writeAPIError(w, http.StatusNotFound, "NOT_FOUND", "media item not found", nil)
+			return
+		}
+		writeAPIError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "media playback request failed", nil)
+		return
+	}
+	if h.delivery == nil {
+		writeAPIError(w, http.StatusServiceUnavailable, "INTERNAL_ERROR", "media delivery is unavailable", nil)
+		return
+	}
+	if err := h.delivery.ServePlayback(w, r, episodeID, assetPath, playbackItem.MediaURL); err != nil {
+		writeAPIError(w, http.StatusServiceUnavailable, "INTERNAL_ERROR", "media delivery is unavailable", nil)
+		return
+	}
+}
+
+// NginxAuth handles auth_request checks for nginx_auth_request media delivery mode.
+func (h *MediaHTTPHandler) NginxAuth(w http.ResponseWriter, r *http.Request) {
+	if h == nil || h.delivery == nil || !h.delivery.VerifyNginxAuthRequest(r) {
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (h *MediaHTTPHandler) ensureReady(w http.ResponseWriter) bool {
@@ -156,22 +214,22 @@ func mediaTagListToResponse(tags []media.Tag) []mediaTagResponse {
 	return responses
 }
 
-func mediaItemsToResponse(items []media.Item) []mediaItemResponse {
+func (h *MediaHTTPHandler) mediaItemsToResponse(r *http.Request, items []media.Item) []mediaItemResponse {
 	responses := make([]mediaItemResponse, 0, len(items))
 	for _, item := range items {
-		responses = append(responses, mediaItemToResponse(item))
+		responses = append(responses, h.mediaItemToResponse(r, item))
 	}
 	return responses
 }
 
-func mediaItemToResponse(item media.Item) mediaItemResponse {
+func (h *MediaHTTPHandler) mediaItemToResponse(r *http.Request, item media.Item) mediaItemResponse {
 	return mediaItemResponse{
 		ID:           item.ID,
 		Title:        item.Title,
 		Subtitle:     item.Subtitle,
 		Description:  item.Description,
 		CoverURL:     item.CoverURL,
-		MediaURL:     item.MediaURL,
+		MediaURL:     h.delivery.PlaybackURL(r, item.ID, item.MediaURL),
 		DurationMs:   item.DurationMs,
 		SeasonLabel:  item.SeasonLabel,
 		EpisodeLabel: item.EpisodeLabel,

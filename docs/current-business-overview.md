@@ -47,7 +47,7 @@
 
 - Android 选片页通过 `GET /media/tags` 获取 featured / active 标签。
 - 通过 `GET /media/items?query=&tag=&limit=&cursor=` 检索 episode-backed 媒体。
-- `GET /media/items` 需要登录态，因为响应包含可播放 `mediaUrl`。
+- `GET /media/items` 需要登录态，因为响应包含可播放 `mediaUrl`；当前 `mediaUrl` 是短期签名播放入口，不直接暴露数据库中的永久 HLS URL。
 - 媒体主模型是 `media_seasons + media_episodes + media_tags + media_season_tags`。
 - `media_episodes.id` 是当前创建房间使用的媒体 ID。
 - 旧的扁平媒体表已经不再作为目标模型。
@@ -57,6 +57,12 @@
 - `media_seasons` 保存标题、简介、制作团队、封面、季标签和搜索字段。
 - `media_episodes` 保存集标题、集标签、HLS 播放 URL、时长、source_key 和 source_hash。
 - `media_episode_variants` 保存 HLS variant playlist、分辨率、码率、codecs 和健康信息。
+
+媒体来源演进边界：
+
+- 当前已落地的是 `hosted_hls` 模式：服务端返回平台托管或外部 HLS 播放入口。
+- 后续可扩展 `local_file / local_library` 模式：服务端只同步媒体指纹和播放时间轴，不负责分发用户本地视频文件。
+- HLS signed URL / signed cookie 只针对平台托管或公网对象存储媒体；本地目录模式重点是媒体指纹匹配和客户端本地可用性检查。
 
 ## 5. 房间创建、加入与详情
 
@@ -68,7 +74,9 @@
 - `POST /rooms/{roomCode}/join` 支持通过房间码加入业务房间。
 - `GET /rooms/{roomCode}` 提供放映室首屏业务数据，包括房间、媒体和成员。
 - `GET /rooms/{roomCode}` 需要登录态，因为响应包含放映室媒体播放 URL。
-- Android 当前在进入放映室前会尽量加载 room detail，避免收到实时状态时缺少真实 `mediaUrl`。
+- `GET /rooms/{roomCode}` 需要用户已经是该房间 active member；未加入者必须先走 `POST /rooms/{roomCode}/join`。
+- WebSocket `join_room` 同样要求用户已经是 active member，不再作为首次加入业务关系的入口。
+- Android 当前在进入放映室前会尽量加载 room detail，避免收到实时状态时缺少可播放 `mediaUrl`。
 - Android WebSocket 握手已携带 `Authorization: Bearer <accessToken>`。
 
 当前公开房间规则：
@@ -204,6 +212,7 @@ Android 当前能力：
 - 支持 local / MinIO / S3-compatible 上传抽象。
 - PostgreSQL 只保存媒体元数据和 URL，不保存视频二进制、m3u8 内容或 ts 分片。
 - Android 只消费后端返回的 `mediaUrl / coverUrl`，不关心对象存储供应商。
+- `mediaUrl` 已改为 `/media/playback/{episodeId}/master.m3u8?expires=...&sig=...` 短期签名播放入口；服务端校验后跳转到真实 HLS 地址。
 
 已确认的安全方向：
 
@@ -214,8 +223,8 @@ Android 当前能力：
 
 当前阶段建议：
 
-- 本地开发继续允许 public local URL。
-- 公网测试前补齐媒体访问授权方案。
+- 本地开发继续允许真实 HLS 地址由本地静态服务承载。
+- 公网测试前补齐 playlist / segment 字节层访问授权。
 - 优先评估对象存储 presign、CDN token auth 或 Nginx `secure_link`。
 
 ## 12. 观看进度

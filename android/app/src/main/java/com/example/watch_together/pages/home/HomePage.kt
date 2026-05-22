@@ -279,7 +279,7 @@ fun HomePage(
                         coroutineScope.launch {
                             runCatching {
                                 withContext(Dispatchers.IO) {
-                                    roomHttpClient.getRoomDetail(accessToken = accessToken, roomCode = normalizedRoomCode)
+                                    roomHttpClient.joinRoomByCode(accessToken = accessToken, roomCode = normalizedRoomCode)
                                 }
                             }.onSuccess {
                                 isJoinValidationLoading = false

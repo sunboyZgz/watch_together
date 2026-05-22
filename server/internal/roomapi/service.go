@@ -64,6 +64,7 @@ type Store interface {
 	JoinRoomByCode(ctx context.Context, params JoinRoomParams) (JoinRoomResult, error)
 	LeaveRoomByCode(ctx context.Context, params LeaveRoomParams) error
 	GetRoomDetail(ctx context.Context, roomCode string) (DetailResult, error)
+	IsActiveMemberByCode(ctx context.Context, roomCode string, userID string) (bool, error)
 }
 
 type CreateRoomParams struct {
@@ -142,6 +143,16 @@ func (s *Service) LeaveRoomByCode(ctx context.Context, roomCode string, userID s
 		RoomCode: roomCode,
 		UserID:   userID,
 	})
+}
+
+// IsActiveMemberByCode reports whether a user has an active business membership.
+func (s *Service) IsActiveMemberByCode(ctx context.Context, roomCode string, userID string) (bool, error) {
+	roomCode = strings.ToUpper(strings.TrimSpace(roomCode))
+	userID = strings.TrimSpace(userID)
+	if len(roomCode) != 6 || userID == "" {
+		return false, ErrInvalidInput
+	}
+	return s.store.IsActiveMemberByCode(ctx, roomCode, userID)
 }
 
 // DetailByCode returns the room business data needed to bootstrap the theater page.

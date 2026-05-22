@@ -23,6 +23,8 @@ Authorization: Bearer <accessToken>
 
 The server verifies the token during the WebSocket handshake and binds the authenticated user id to the connection. Payload `userId` is kept only for protocol compatibility and mismatch detection; it is not trusted for room membership, host authorization, or control authority.
 
+`join_room` also requires the authenticated user to already be an active business member of the room. Clients must call `POST /rooms/{roomCode}/join` before WebSocket `join_room`. If membership is missing, the server returns an `error` envelope with `room membership required` and does not add the connection to the runtime room.
+
 ## Active Room Device
 
 One account can log in on multiple devices, but only one WebSocket connection can be the active room device for that `userId`.

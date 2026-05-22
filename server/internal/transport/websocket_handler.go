@@ -13,6 +13,7 @@ import (
 	"watch_together/server/internal/protocol"
 	"watch_together/server/internal/realtime"
 	"watch_together/server/internal/room"
+	"watch_together/server/internal/roomapi"
 )
 
 type WebSocketHandler struct {
@@ -27,6 +28,7 @@ type WebSocketHandler struct {
 	maxRoomClients      int
 	roomStateWriter     latestRoomStateWriter
 	roomLeaver          roomMembershipLeaver
+	roomMemberChecker   roomMembershipChecker
 	controlDeduper      *controlRequestDeduper
 	seekRateLimiter     *controlRateLimiter
 	tokenVerifier       accessTokenVerifier
@@ -61,6 +63,10 @@ type latestRoomStateWriter interface {
 
 type roomMembershipLeaver interface {
 	LeaveRoomByCode(ctx context.Context, roomCode string, userID string) error
+}
+
+type roomMembershipChecker interface {
+	IsActiveMemberByCode(ctx context.Context, roomCode string, userID string) (bool, error)
 }
 
 type protocolMessageError struct {
@@ -129,6 +135,9 @@ func NewWebSocketHandlerWithConfigAndRoomStateWriterAndTokenVerifierAndRoomLeave
 	handler.roomStateWriter = roomStateWriter
 	handler.tokenVerifier = tokenVerifier
 	handler.roomLeaver = roomLeaver
+	if checker, ok := roomLeaver.(roomMembershipChecker); ok {
+		handler.roomMemberChecker = checker
+	}
 	return handler
 }
 
@@ -516,6 +525,9 @@ func (h *WebSocketHandler) handleJoinRoom(
 			message: "room identity mismatch",
 		}
 	}
+	if err := h.ensureActiveRoomMember(ctx, payload.RoomID, authUserID); err != nil {
+		return err
+	}
 
 	existingRoom, ok := h.roomManager.Get(payload.RoomID)
 	if !ok {
@@ -587,6 +599,29 @@ func (h *WebSocketHandler) handleJoinRoom(
 	}
 	if joinResult.MembershipChanged {
 		h.broadcastRoomMembersChangedToOthers(payload.RoomID, joinResult.Clients, client, "join")
+	}
+	return nil
+}
+
+func (h *WebSocketHandler) ensureActiveRoomMember(ctx context.Context, roomID string, userID string) error {
+	if h.roomMemberChecker == nil {
+		return nil
+	}
+	active, err := h.roomMemberChecker.IsActiveMemberByCode(ctx, roomID, userID)
+	if err != nil {
+		if errors.Is(err, roomapi.ErrInvalidInput) {
+			return protocolMessageError{
+				roomID:  roomID,
+				message: "room membership is invalid",
+			}
+		}
+		return err
+	}
+	if !active {
+		return protocolMessageError{
+			roomID:  roomID,
+			message: "room membership required",
+		}
 	}
 	return nil
 }

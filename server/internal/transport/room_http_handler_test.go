@@ -63,6 +63,12 @@ func TestCreateRoomFlow(t *testing.T) {
 	if response.Data.Media.ID != "media_001" {
 		t.Fatalf("expected media media_001, got %q", response.Data.Media.ID)
 	}
+	if !strings.Contains(response.Data.Media.MediaURL, "/media/playback/media_001/master.m3u8") {
+		t.Fatalf("expected signed playback mediaUrl, got %q", response.Data.Media.MediaURL)
+	}
+	if strings.Contains(response.Data.Media.MediaURL, "example.com/index.m3u8") {
+		t.Fatalf("expected create room response not to expose raw HLS url, got %q", response.Data.Media.MediaURL)
+	}
 	if !response.Data.RoomState.Paused {
 		t.Fatalf("expected new room paused=true")
 	}
@@ -181,11 +187,11 @@ func TestRoomDetailFlow(t *testing.T) {
 			},
 			Members: []roomapi.Member{
 				{
-					UserID:     "user_a",
+					UserID:     "user_b",
 					Nickname:   "Xingye",
 					AvatarSeed: "xingye",
 					AvatarURL:  &avatarURL,
-					Role:       "host",
+					Role:       "member",
 				},
 			},
 		},
@@ -213,11 +219,14 @@ func TestRoomDetailFlow(t *testing.T) {
 	if response.Data.Media.ID != "media_001" {
 		t.Fatalf("expected media_001, got %q", response.Data.Media.ID)
 	}
+	if !strings.Contains(response.Data.Media.MediaURL, "/media/playback/media_001/master.m3u8") {
+		t.Fatalf("expected signed playback mediaUrl, got %q", response.Data.Media.MediaURL)
+	}
 	if len(response.Data.Members) != 1 {
 		t.Fatalf("expected one member, got %d", len(response.Data.Members))
 	}
-	if response.Data.Members[0].Role != "host" {
-		t.Fatalf("expected host role, got %q", response.Data.Members[0].Role)
+	if response.Data.Members[0].Role != "member" {
+		t.Fatalf("expected member role, got %q", response.Data.Members[0].Role)
 	}
 }
 
@@ -230,6 +239,44 @@ func TestRoomDetailRequiresAccessToken(t *testing.T) {
 
 	if recorder.Code != http.StatusUnauthorized {
 		t.Fatalf("expected status %d, got %d", http.StatusUnauthorized, recorder.Code)
+	}
+}
+
+func TestRoomDetailRequiresActiveMembership(t *testing.T) {
+	store := &fakeRoomStore{
+		detailResult: roomapi.DetailResult{
+			Room: roomapi.Room{
+				ID:          "room_uuid",
+				RoomCode:    "A7K2M9",
+				HostUserID:  "user_a",
+				MediaItemID: "media_001",
+				Status:      "active",
+			},
+			Media: roomapi.Media{
+				ID:       "media_001",
+				Title:    "Violet Evergarden",
+				MediaURL: "https://example.com/index.m3u8",
+			},
+			Members: []roomapi.Member{
+				{
+					UserID: "user_a",
+					Role:   "host",
+				},
+			},
+		},
+	}
+	handler := NewRoomHTTPHandler(room.NewManager(), roomapi.NewService(store))
+	request := httptest.NewRequest(http.MethodGet, "/rooms/A7K2M9", nil)
+	request.Header.Set("Authorization", testAuthorizationHeader("user_b"))
+	recorder := httptest.NewRecorder()
+
+	handler.DetailByCode(recorder, request)
+
+	if recorder.Code != http.StatusForbidden {
+		t.Fatalf("expected status %d, got %d", http.StatusForbidden, recorder.Code)
+	}
+	if !strings.Contains(recorder.Body.String(), "room membership required") {
+		t.Fatalf("expected membership error, got body %s", recorder.Body.String())
 	}
 }
 
@@ -273,4 +320,13 @@ func (s *fakeRoomStore) GetRoomDetail(_ context.Context, roomCode string) (rooma
 		return roomapi.DetailResult{}, s.err
 	}
 	return s.detailResult, nil
+}
+
+func (s *fakeRoomStore) IsActiveMemberByCode(_ context.Context, roomCode string, userID string) (bool, error) {
+	for _, member := range s.detailResult.Members {
+		if member.UserID == userID && s.detailResult.Room.RoomCode == roomCode {
+			return true, nil
+		}
+	}
+	return false, s.err
 }
