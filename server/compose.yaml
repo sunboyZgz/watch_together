@@ -15,7 +15,7 @@ services:
     image: redis:7.2-alpine
     container_name: anime-watch-redis
     restart: unless-stopped
-    command: redis-server --appendonly yes --port 6380 --requirepass ${REDIS_PASSWORD:-app}
+    command: redis-server --appendonly yes --port 6380 --requirepass ${REDIS_PASSWORD:-watch_together_redis_dev}
     ports:
       - "6380:6380"
     volumes:
@@ -47,6 +47,55 @@ services:
       mc mb -p local/watch-together-media || true;
       mc anonymous set download local/watch-together-media;
       "
+
+  roomserver:
+    profiles: ["app"]
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: watch-together-roomserver:dev
+    container_name: anime-watch-roomserver
+    restart: unless-stopped
+    depends_on:
+      - postgres
+      - redis
+      - minio-init
+    environment:
+      APP_ENV: local
+      SERVER_HOST: 0.0.0.0
+      SERVER_PORT: 8080
+      LOG_LEVEL: debug
+      DEBUG_SYNC: "true"
+      AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:-watch_together_local_dev_jwt_secret_change_me}
+      DATABASE_URL: postgres://app:app@postgres:5432/anime_watch_dev?sslmode=disable
+      REDIS_ADDR: redis:6380
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-watch_together_redis_dev}
+      REDIS_DB: 0
+      REDIS_REQUIRED: "false"
+      MEDIA_DELIVERY_MODE: ${MEDIA_DELIVERY_MODE:-nginx_auth_request}
+      MEDIA_PLAYBACK_SIGNING_SECRET: ${MEDIA_PLAYBACK_SIGNING_SECRET:-watch_together_local_dev_media_playback_secret_change_me}
+      MEDIA_PUBLIC_BASE_URL: ${MEDIA_PUBLIC_BASE_URL:-http://127.0.0.1:8080/watch-together-media}
+      MEDIA_INTERNAL_BASE_URL: http://minio:9000/watch-together-media
+      MEDIA_STORAGE_ENDPOINT: http://minio:9000
+      MEDIA_STORAGE_BUCKET: watch-together-media
+      MEDIA_STORAGE_REGION: auto
+      MEDIA_STORAGE_ACCESS_KEY_ID: minioadmin
+      MEDIA_STORAGE_SECRET_ACCESS_KEY: minioadmin
+      MEDIA_STORAGE_FORCE_PATH_STYLE: "true"
+
+  nginx:
+    profiles: ["app"]
+    build:
+      context: ./deploy/nginx
+      dockerfile: Dockerfile
+    image: watch-together-nginx:dev
+    container_name: anime-watch-nginx
+    restart: unless-stopped
+    depends_on:
+      - roomserver
+      - minio
+    ports:
+      - "8080:80"
 
 volumes:
   postgres_data:

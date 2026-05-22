@@ -1,0 +1,112 @@
+name: watch-together-prod
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-watch_together}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change_me_postgres_password}
+      POSTGRES_DB: ${POSTGRES_DB:-watch_together_prod}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7.2-alpine
+    restart: unless-stopped
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-change_me_redis_password}
+    command: redis-server --appendonly yes --port 6380 --requirepass ${REDIS_PASSWORD:-change_me_redis_password}
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -p 6380 -a \"$${REDIS_PASSWORD:-change_me_redis_password}\" ping | grep PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  minio:
+    image: quay.io/minio/minio:latest
+    restart: unless-stopped
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-change_me_minio_password}
+    command: server /data --console-address ":9001"
+    volumes:
+      - minio_data:/data
+
+  minio-init:
+    image: quay.io/minio/mc:latest
+    depends_on:
+      - minio
+    restart: "no"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-change_me_minio_password}
+      MEDIA_STORAGE_BUCKET: ${MEDIA_STORAGE_BUCKET:-watch-together-media}
+    entrypoint: >
+      /bin/sh -c "
+      until mc alias set local http://minio:9000 \"$${MINIO_ROOT_USER}\" \"$${MINIO_ROOT_PASSWORD}\"; do
+        sleep 1;
+      done;
+      mc mb -p \"local/$${MEDIA_STORAGE_BUCKET}\" || true;
+      mc anonymous set download \"local/$${MEDIA_STORAGE_BUCKET}\";
+      "
+
+  roomserver:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: watch-together-roomserver:${WATCH_TOGETHER_IMAGE_TAG:-prod}
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    env_file:
+      - .env.prod
+    environment:
+      APP_ENV: prod
+      SERVER_HOST: 0.0.0.0
+      SERVER_PORT: 8080
+      LOG_LEVEL: info
+      DEBUG_SYNC: "false"
+      DATABASE_URL: postgres://${POSTGRES_USER:-watch_together}:${POSTGRES_PASSWORD:-change_me_postgres_password}@postgres:5432/${POSTGRES_DB:-watch_together_prod}?sslmode=disable
+      REDIS_ADDR: redis:6380
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-change_me_redis_password}
+      REDIS_DB: 0
+      REDIS_REQUIRED: "true"
+      MEDIA_DELIVERY_MODE: ${MEDIA_DELIVERY_MODE:-nginx_auth_request}
+      MEDIA_PUBLIC_BASE_URL: ${MEDIA_PUBLIC_BASE_URL:-http://localhost/watch-together-media}
+      MEDIA_INTERNAL_BASE_URL: http://minio:9000/${MEDIA_STORAGE_BUCKET:-watch-together-media}
+      MEDIA_STORAGE_ENDPOINT: http://minio:9000
+      MEDIA_STORAGE_BUCKET: ${MEDIA_STORAGE_BUCKET:-watch-together-media}
+      MEDIA_STORAGE_REGION: ${MEDIA_STORAGE_REGION:-auto}
+      MEDIA_STORAGE_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minioadmin}
+      MEDIA_STORAGE_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-change_me_minio_password}
+      MEDIA_STORAGE_FORCE_PATH_STYLE: "true"
+
+  nginx:
+    build:
+      context: ./deploy/nginx
+      dockerfile: Dockerfile
+    image: watch-together-nginx:${WATCH_TOGETHER_IMAGE_TAG:-prod}
+    restart: unless-stopped
+    depends_on:
+      - roomserver
+      - minio
+    ports:
+      - "${NGINX_HTTP_PORT:-80}:80"
+
+volumes:
+  postgres_data:
+  redis_data:
+  minio_data:

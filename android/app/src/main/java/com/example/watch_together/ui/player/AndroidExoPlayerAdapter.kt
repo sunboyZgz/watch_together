@@ -29,7 +29,7 @@ class AndroidExoPlayerAdapter(context: Context) : PlayerAdapter {
     private val cache = PlayerCacheProvider.get(appContext)
     private val dataSourceFactory = CacheDataSource.Factory()
         .setCache(cache)
-        .setUpstreamDataSourceFactory(DefaultHttpDataSource.Factory())
+        .setUpstreamDataSourceFactory(createHttpDataSourceFactory())
         .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
     private val hlsMediaSourceFactory = HlsMediaSource.Factory(dataSourceFactory)
     private val trackSelector = DefaultTrackSelector(context).apply {
@@ -249,6 +249,11 @@ class AndroidExoPlayerAdapter(context: Context) : PlayerAdapter {
     }
 
     private companion object {
+        fun createHttpDataSourceFactory(): DefaultHttpDataSource.Factory {
+            ensureMediaHttpCookieManagerInstalled()
+            return DefaultHttpDataSource.Factory()
+        }
+
         const val ABR_LOG_TAG = "WatchTogetherABR2"
         const val MinVideoWidth = 1_280
         const val MinVideoHeight = 720

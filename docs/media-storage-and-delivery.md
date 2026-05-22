@@ -102,8 +102,60 @@ MEDIA_INTERNAL_BASE_URL=...
 - 已实现 `MEDIA_DELIVERY_MODE` 分支配置，支持 `signed_redirect / minio_presign / nginx_auth_request`。
 - `signed_redirect` 已可直接使用。
 - `minio_presign` 已接入 S3-compatible client：playlist 文本由 Go 读取和重写，segment URL 由 MinIO presign 承担。
-- `nginx_auth_request` 已接入 Go 侧签发、播放入口跳转和 `/media/internal/auth` 校验入口；仍需要补充 Nginx 部署模板。
+- `nginx_auth_request` 已接入 Go 侧签发、播放入口跳转和 `/media/internal/auth` 校验入口；Nginx 模板位于 `server/deploy/nginx/media-auth-request.conf.example`。
 - 不再提供 `public_direct` 作为正式模式；真实 HLS URL 直出安全性过低，不进入项目推荐配置。
+- Android 播放器侧已安装 JVM/HttpURLConnection 默认 `CookieManager`，用于支持 `nginx_auth_request` 模式下 Go 播放入口返回的媒体访问 cookie。
+
+`nginx_auth_request` 的部署约束：
+
+- 推荐让 API 播放入口和 Nginx 媒体入口处于同一 host，或至少处于可共享 cookie 的同一父域名。
+- 如果 API 是 `api.example.com`，媒体是 `media.example.net` 这类无关域名，Go 下发的 cookie 不会自动发送给媒体域名。
+- 如果必须使用不同子域名，后续需要在服务端支持 cookie `Domain=.example.com` 或改为 Nginx query token / secure_link 方案。
+
+`nginx_auth_request` 参考配置：
+
+```text
+server/deploy/nginx/media-auth-request.conf.example
+```
+
+对应服务端环境变量示例：
+
+```text
+MEDIA_DELIVERY_MODE=nginx_auth_request
+MEDIA_PLAYBACK_SIGNING_SECRET=<long-random-secret>
+MEDIA_PLAYBACK_URL_TTL_SECONDS=7200
+MEDIA_PUBLIC_BASE_URL=https://watch.example.com/watch-together-media
+MEDIA_STORAGE_BUCKET=watch-together-media
+```
+
+如果使用该模式，公网边界必须由 Nginx + Go 鉴权承载，MinIO API 不应直接暴露到公网。需要注意：Nginx 反代 MinIO 对象时不会自动生成 S3 签名，所以 `server/compose.prod.yaml` 采用“MinIO 仅在 Docker 内网匿名读取 + Nginx 对外 auth_request 鉴权”的最小生产方案。直接把带匿名下载的 MinIO 端口暴露到公网是不安全的。
+
+### 媒体对象存储适配层
+
+Server 侧已经把对象存储访问从 `transport` 层抽出到 `internal/mediaobj`：
+
+```text
+internal/mediaobj/
+  store.go      # ObjectStore interface
+  s3_store.go   # MinIO / S3-compatible implementation
+```
+
+核心接口：
+
+```go
+type ObjectStore interface {
+    GetObject(ctx context.Context, key string) (io.ReadCloser, error)
+    PresignGetObject(ctx context.Context, key string, ttl time.Duration) (string, error)
+}
+```
+
+当前 `minio_presign` 只依赖 `ObjectStore`，不再直接依赖 AWS SDK。后续扩展阿里 OSS、腾讯 COS、Cloudflare R2、本地文件目录或其他流媒体资源服务器时，应新增对应 `ObjectStore` 实现，而不是把供应商 SDK 写进 `transport/media_delivery.go`。
+
+职责边界：
+
+- `mediaobj`: 负责对象读取和对象级签名。
+- `transport/media_delivery`: 负责播放入口签名、playlist 重写、Nginx auth cookie 和 HTTP 响应。
+- `store/media_postgres`: 负责读取媒体业务元数据和当前真实 HLS 地址。
 
 无 CDN 推荐演进路线：
 

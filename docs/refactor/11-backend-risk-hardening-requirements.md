@@ -380,6 +380,7 @@
 - `/media/playback/{episodeId}/master.m3u8` 会校验 HMAC 签名和过期时间，再解析数据库中的真实 HLS 地址并跳转。
 - 当前签名播放入口保护的是“播放入口 URL”，还没有完成 CDN signed cookie、Nginx secure_link 或私有对象存储 presign 对 playlist / segment 字节的完整保护。
 - 已实现媒体分发模式配置：支持 `signed_redirect / minio_presign / nginx_auth_request`；不提供 `public_direct`，避免把低安全直链作为正式模式。
+- 已新增 `internal/mediaobj.ObjectStore` 适配层，`transport/media_delivery` 不再直接依赖 AWS/S3 SDK；后续 OSS/COS/R2/本地资源服务应通过对象存储适配器接入。
 
 目标行为：
 
@@ -391,7 +392,7 @@
 实现前需确认：
 
 - `minio_presign` 后续需要补充真实 MinIO 集成测试，验证 master playlist、variant playlist 和 segment presign 在 Android Media3 中完整可播。
-- `nginx_auth_request` 后续需要补充 Nginx 配置模板，验证 Cookie / auth_request 在 HLS 多级请求中的传递效果。
+- `nginx_auth_request` 已补充 Nginx 配置模板，后续仍需在真实 MinIO/Nginx/Android 环境验证 Cookie / auth_request 在 HLS 多级请求中的传递效果。
 
 优先级：P1。
 

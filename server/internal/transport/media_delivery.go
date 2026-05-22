@@ -12,10 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/aws/aws-sdk-go-v2/aws"
-	awsconfig "github.com/aws/aws-sdk-go-v2/config"
-	"github.com/aws/aws-sdk-go-v2/credentials"
-	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"watch_together/server/internal/mediaobj"
 )
 
 const nginxMediaCookieName = "wt_media_access"
@@ -39,8 +36,7 @@ type mediaDelivery struct {
 	mode          string
 	config        MediaPlaybackConfig
 	signer        *mediaPlaybackSigner
-	s3Client      *s3.Client
-	s3Presign     *s3.PresignClient
+	objectStore   mediaobj.ObjectStore
 	presignTTL    time.Duration
 	publicBaseURL string
 	initErr       error
@@ -57,13 +53,12 @@ func newMediaDelivery(config MediaPlaybackConfig) *mediaDelivery {
 		publicBaseURL: strings.TrimRight(strings.TrimSpace(config.PublicBaseURL), "/"),
 	}
 	if delivery.mode == MediaDeliveryMinIOPresign {
-		client, err := newMediaDeliveryS3Client(context.Background(), config)
+		objectStore, err := newMediaObjectStore(context.Background(), config)
 		if err != nil {
 			delivery.initErr = err
 			return delivery
 		}
-		delivery.s3Client = client
-		delivery.s3Presign = s3.NewPresignClient(client)
+		delivery.objectStore = objectStore
 	}
 	return delivery
 }
@@ -133,7 +128,7 @@ func (d *mediaDelivery) serveMinIOPresignedPlayback(w http.ResponseWriter, r *ht
 		return nil
 	}
 
-	content, err := d.getS3ObjectText(r.Context(), objectKey)
+	content, err := d.getObjectText(r.Context(), objectKey)
 	if err != nil {
 		return err
 	}
@@ -206,16 +201,13 @@ func episodeIDFromPlaybackRequest(r *http.Request) string {
 	return episodeID
 }
 
-func (d *mediaDelivery) getS3ObjectText(ctx context.Context, objectKey string) (string, error) {
-	output, err := d.s3Client.GetObject(ctx, &s3.GetObjectInput{
-		Bucket: aws.String(strings.TrimSpace(d.config.StorageBucket)),
-		Key:    aws.String(objectKey),
-	})
+func (d *mediaDelivery) getObjectText(ctx context.Context, objectKey string) (string, error) {
+	object, err := d.objectStore.GetObject(ctx, objectKey)
 	if err != nil {
 		return "", fmt.Errorf("get hls playlist %q: %w", objectKey, err)
 	}
-	defer output.Body.Close()
-	content, err := io.ReadAll(output.Body)
+	defer object.Close()
+	content, err := io.ReadAll(object)
 	if err != nil {
 		return "", fmt.Errorf("read hls playlist %q: %w", objectKey, err)
 	}
@@ -223,16 +215,11 @@ func (d *mediaDelivery) getS3ObjectText(ctx context.Context, objectKey string) (
 }
 
 func (d *mediaDelivery) presignObjectURL(ctx context.Context, objectKey string) (string, error) {
-	output, err := d.s3Presign.PresignGetObject(ctx, &s3.GetObjectInput{
-		Bucket: aws.String(strings.TrimSpace(d.config.StorageBucket)),
-		Key:    aws.String(objectKey),
-	}, func(options *s3.PresignOptions) {
-		options.Expires = d.presignTTL
-	})
+	presignedURL, err := d.objectStore.PresignGetObject(ctx, objectKey, d.presignTTL)
 	if err != nil {
 		return "", fmt.Errorf("presign object %q: %w", objectKey, err)
 	}
-	return output.URL, nil
+	return presignedURL, nil
 }
 
 func (d *mediaDelivery) signedNginxURL(objectKey string) (string, error) {
@@ -246,41 +233,15 @@ func (d *mediaDelivery) signedNginxURL(objectKey string) (string, error) {
 	return joinURLPath(d.publicBaseURL, objectKey) + "?" + values.Encode(), nil
 }
 
-func newMediaDeliveryS3Client(ctx context.Context, config MediaPlaybackConfig) (*s3.Client, error) {
-	if strings.TrimSpace(config.StorageEndpoint) == "" {
-		return nil, errors.New("MEDIA_STORAGE_ENDPOINT is required for minio_presign delivery")
-	}
-	if strings.TrimSpace(config.StorageBucket) == "" {
-		return nil, errors.New("MEDIA_STORAGE_BUCKET is required for minio_presign delivery")
-	}
-	if strings.TrimSpace(config.StorageRegion) == "" {
-		return nil, errors.New("MEDIA_STORAGE_REGION is required for minio_presign delivery")
-	}
-	if strings.TrimSpace(config.StorageAccessKeyID) == "" {
-		return nil, errors.New("MEDIA_STORAGE_ACCESS_KEY_ID is required for minio_presign delivery")
-	}
-	if strings.TrimSpace(config.StorageSecretAccessKey) == "" {
-		return nil, errors.New("MEDIA_STORAGE_SECRET_ACCESS_KEY is required for minio_presign delivery")
-	}
-	awsCfg, err := awsconfig.LoadDefaultConfig(
-		ctx,
-		awsconfig.WithRegion(strings.TrimSpace(config.StorageRegion)),
-		awsconfig.WithCredentialsProvider(
-			credentials.NewStaticCredentialsProvider(
-				strings.TrimSpace(config.StorageAccessKeyID),
-				strings.TrimSpace(config.StorageSecretAccessKey),
-				"",
-			),
-		),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("load media delivery s3 config: %w", err)
-	}
-	client := s3.NewFromConfig(awsCfg, func(options *s3.Options) {
-		options.BaseEndpoint = aws.String(strings.TrimSpace(config.StorageEndpoint))
-		options.UsePathStyle = config.StorageForcePathStyle
+func newMediaObjectStore(ctx context.Context, config MediaPlaybackConfig) (mediaobj.ObjectStore, error) {
+	return mediaobj.NewS3Store(ctx, mediaobj.S3Config{
+		Endpoint:        config.StorageEndpoint,
+		Bucket:          config.StorageBucket,
+		Region:          config.StorageRegion,
+		AccessKeyID:     config.StorageAccessKeyID,
+		SecretAccessKey: config.StorageSecretAccessKey,
+		ForcePathStyle:  config.StorageForcePathStyle,
 	})
-	return client, nil
 }
 
 // 从媒体 URL 推导对象 key

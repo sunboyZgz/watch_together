@@ -3,6 +3,7 @@ package transport
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -312,6 +313,64 @@ func TestMinIOPresignModeFailsClosedWhenStorageIsMissing(t *testing.T) {
 	}
 }
 
+func TestMinIOPresignModeUsesObjectStoreAdapter(t *testing.T) {
+	now := time.Date(2026, 5, 21, 12, 0, 0, 0, time.UTC)
+	store := &fakeMediaStore{
+		playbackItem: media.PlaybackItem{
+			ID:       "media_1",
+			MediaURL: "https://media.example.com/watch-together-media/media/show/hls/master.m3u8",
+		},
+	}
+	handler := NewMediaHTTPHandlerWithTokenVerifier(
+		media.NewService(store),
+		nil,
+		MediaPlaybackConfig{
+			DeliveryMode:  MediaDeliveryMinIOPresign,
+			SigningSecret: "test-media-secret",
+			URLTTL:        time.Hour,
+			PublicBaseURL: "https://media.example.com/watch-together-media",
+			StorageBucket: "watch-together-media",
+			Now:           func() time.Time { return now },
+		},
+	)
+	objectStore := &fakeObjectStore{
+		objects: map[string]string{
+			"media/show/hls/master.m3u8":          "#EXTM3U\n720p-fast/index.m3u8\n",
+			"media/show/hls/720p-fast/index.m3u8": "#EXTM3U\n#EXTINF:6.000,\nsegment_00001.ts\n",
+		},
+	}
+	handler.delivery.initErr = nil
+	handler.delivery.objectStore = objectStore
+
+	signingRequest := httptest.NewRequest(http.MethodGet, "http://api.example.com/media/items", nil)
+	masterURL := handler.playbackSigner.SignedPlaybackURL(signingRequest, "media_1")
+	masterRequest := httptest.NewRequest(http.MethodGet, masterURL, nil)
+	masterRecorder := httptest.NewRecorder()
+
+	handler.Playback(masterRecorder, masterRequest)
+
+	if masterRecorder.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d body=%s", http.StatusOK, masterRecorder.Code, masterRecorder.Body.String())
+	}
+	if !strings.Contains(masterRecorder.Body.String(), "/media/playback/media_1/720p-fast/index.m3u8") {
+		t.Fatalf("expected rewritten variant playback URL, got body %s", masterRecorder.Body.String())
+	}
+
+	variantURL := handler.playbackSigner.SignedAssetPlaybackURL(signingRequest, "media_1", "720p-fast/index.m3u8")
+	variantRequest := httptest.NewRequest(http.MethodGet, variantURL, nil)
+	variantRecorder := httptest.NewRecorder()
+
+	handler.Playback(variantRecorder, variantRequest)
+
+	if variantRecorder.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d body=%s", http.StatusOK, variantRecorder.Code, variantRecorder.Body.String())
+	}
+	wantSegmentURL := "https://minio.example.com/media/show/hls/720p-fast/segment_00001.ts?presigned=1"
+	if !strings.Contains(variantRecorder.Body.String(), wantSegmentURL) {
+		t.Fatalf("expected presigned segment URL %q, got body %s", wantSegmentURL, variantRecorder.Body.String())
+	}
+}
+
 func TestMediaItemsRejectsInvalidCursor(t *testing.T) {
 	handler := NewMediaHTTPHandler(media.NewService(&fakeMediaStore{}))
 	request := httptest.NewRequest(http.MethodGet, "/media/items?cursor=nope", nil)
@@ -358,4 +417,16 @@ func (s *fakeMediaStore) FindPlaybackItem(_ context.Context, episodeID string) (
 		return s.playbackItem, nil
 	}
 	return media.PlaybackItem{}, media.ErrMediaNotFound
+}
+
+type fakeObjectStore struct {
+	objects map[string]string
+}
+
+func (s *fakeObjectStore) GetObject(_ context.Context, key string) (io.ReadCloser, error) {
+	return io.NopCloser(strings.NewReader(s.objects[key])), nil
+}
+
+func (s *fakeObjectStore) PresignGetObject(_ context.Context, key string, _ time.Duration) (string, error) {
+	return "https://minio.example.com/" + key + "?presigned=1", nil
 }
