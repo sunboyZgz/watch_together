@@ -14,6 +14,18 @@ docker compose up -d postgres redis minio minio-init
 docker compose --profile app up -d --build
 ```
 
+`app` profile 默认使用 `MEDIA_DELIVERY_MODE=nginx_auth_request`，因此必须显式配置公网可访问的媒体入口：
+
+```bash
+MEDIA_PUBLIC_BASE_URL=http://127.0.0.1:8080/watch-together-media docker compose --profile app up -d --build
+```
+
+如果是在云服务器上用手机访问，应改成服务器公网地址或域名：
+
+```bash
+MEDIA_PUBLIC_BASE_URL=http://106.12.35.52:8080/watch-together-media docker compose --profile app up -d --build
+```
+
 启用后入口是：
 
 ```text

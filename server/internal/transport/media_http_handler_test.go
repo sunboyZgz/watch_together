@@ -283,6 +283,37 @@ func TestNginxAuthRequestPlaybackSetsCookieAndRedirects(t *testing.T) {
 	}
 }
 
+func TestNginxAuthRequestPlaybackRequiresPublicBaseURL(t *testing.T) {
+	now := time.Date(2026, 5, 21, 12, 0, 0, 0, time.UTC)
+	store := &fakeMediaStore{
+		playbackItem: media.PlaybackItem{
+			ID:       "media_1",
+			MediaURL: "https://media.example.com/watch-together-media/media/show/hls/master.m3u8",
+		},
+	}
+	handler := NewMediaHTTPHandlerWithTokenVerifier(
+		media.NewService(store),
+		nil,
+		MediaPlaybackConfig{
+			DeliveryMode:  MediaDeliveryNginxAuthRequest,
+			SigningSecret: "test-media-secret",
+			URLTTL:        time.Hour,
+			StorageBucket: "watch-together-media",
+			Now:           func() time.Time { return now },
+		},
+	)
+	signingRequest := httptest.NewRequest(http.MethodGet, "http://api.example.com/media/items", nil)
+	signedURL := handler.playbackSigner.SignedPlaybackURL(signingRequest, "media_1")
+	request := httptest.NewRequest(http.MethodGet, signedURL, nil)
+	recorder := httptest.NewRecorder()
+
+	handler.Playback(recorder, request)
+
+	if recorder.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected status %d, got %d body=%s", http.StatusServiceUnavailable, recorder.Code, recorder.Body.String())
+	}
+}
+
 func TestMinIOPresignModeFailsClosedWhenStorageIsMissing(t *testing.T) {
 	now := time.Date(2026, 5, 21, 12, 0, 0, 0, time.UTC)
 	store := &fakeMediaStore{

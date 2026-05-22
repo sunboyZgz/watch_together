@@ -74,7 +74,7 @@ services:
       REDIS_REQUIRED: "false"
       MEDIA_DELIVERY_MODE: ${MEDIA_DELIVERY_MODE:-nginx_auth_request}
       MEDIA_PLAYBACK_SIGNING_SECRET: ${MEDIA_PLAYBACK_SIGNING_SECRET:-watch_together_local_dev_media_playback_secret_change_me}
-      MEDIA_PUBLIC_BASE_URL: ${MEDIA_PUBLIC_BASE_URL:-http://127.0.0.1:8080/watch-together-media}
+      MEDIA_PUBLIC_BASE_URL: ${MEDIA_PUBLIC_BASE_URL:?set MEDIA_PUBLIC_BASE_URL to the public Nginx media base URL, for example http://106.12.35.52:8080/watch-together-media}
       MEDIA_INTERNAL_BASE_URL: http://minio:9000/watch-together-media
       MEDIA_STORAGE_ENDPOINT: http://minio:9000
       MEDIA_STORAGE_BUCKET: watch-together-media
