@@ -6,6 +6,9 @@ WORKDIR /src
 
 RUN apk add --no-cache ca-certificates
 
+ENV GOPROXY=https://goproxy.cn,direct
+ENV GOSUMDB=sum.golang.google.cn
+
 COPY go.mod go.sum ./
 RUN go mod download
 
@@ -22,6 +25,6 @@ WORKDIR /app
 COPY --from=builder /out/roomserver /app/roomserver
 
 EXPOSE 8080
-USER nonroot:nonroot
+USER 65532:65532
 
 ENTRYPOINT ["/app/roomserver"]
