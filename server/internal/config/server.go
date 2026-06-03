@@ -1,21 +1,26 @@
 package config
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 )
 
+const roomRuntimeModeLocalProcess = "local_process"
+
 type ServerRuntimeConfig struct {
-	AppEnv      string
-	Host        string
-	Port        string
-	LogLevel    string
-	DatabaseURL string
-	DebugSync   bool
-	Auth        AuthConfig
-	Redis       RedisConfig
-	WebSocket   WebSocketConfig
-	Media       MediaPlaybackConfig
+	AppEnv          string
+	Host            string
+	Port            string
+	LogLevel        string
+	InstanceID      string
+	RoomRuntimeMode string
+	DatabaseURL     string
+	DebugSync       bool
+	Auth            AuthConfig
+	Redis           RedisConfig
+	WebSocket       WebSocketConfig
+	Media           MediaPlaybackConfig
 }
 
 type AuthConfig struct {
@@ -62,6 +67,8 @@ func LoadServerRuntimeConfig(configDir string) (ServerRuntimeConfig, error) {
 		"SERVER_HOST":                     "0.0.0.0",
 		"SERVER_PORT":                     "8080",
 		"LOG_LEVEL":                       "debug",
+		"SERVER_INSTANCE_ID":              "",
+		"ROOM_RUNTIME_MODE":               "local_process",
 		"DEBUG_SYNC":                      true,
 		"AUTH_ACCESS_TOKEN_TTL_HOURS":     24,
 		"REDIS_DB":                        0,
@@ -81,6 +88,8 @@ func LoadServerRuntimeConfig(configDir string) (ServerRuntimeConfig, error) {
 		"SERVER_HOST",
 		"SERVER_PORT",
 		"LOG_LEVEL",
+		"SERVER_INSTANCE_ID",
+		"ROOM_RUNTIME_MODE",
 		"DATABASE_URL",
 		"DEBUG_SYNC",
 		"AUTH_JWT_SECRET",
@@ -115,14 +124,20 @@ func LoadServerRuntimeConfig(configDir string) (ServerRuntimeConfig, error) {
 	if err != nil {
 		return ServerRuntimeConfig{}, err
 	}
+	roomRuntimeMode, err := parseRoomRuntimeMode(trimmedString(loader, "ROOM_RUNTIME_MODE"))
+	if err != nil {
+		return ServerRuntimeConfig{}, err
+	}
 
 	return ServerRuntimeConfig{
-		AppEnv:      trimmedString(loader, "APP_ENV"),
-		Host:        trimmedString(loader, "SERVER_HOST"),
-		Port:        trimmedString(loader, "SERVER_PORT"),
-		LogLevel:    trimmedString(loader, "LOG_LEVEL"),
-		DatabaseURL: trimmedString(loader, "DATABASE_URL"),
-		DebugSync:   strings.EqualFold(strings.TrimSpace(loader.GetString("DEBUG_SYNC")), "true"),
+		AppEnv:          trimmedString(loader, "APP_ENV"),
+		Host:            trimmedString(loader, "SERVER_HOST"),
+		Port:            trimmedString(loader, "SERVER_PORT"),
+		LogLevel:        trimmedString(loader, "LOG_LEVEL"),
+		InstanceID:      trimmedString(loader, "SERVER_INSTANCE_ID"),
+		RoomRuntimeMode: roomRuntimeMode,
+		DatabaseURL:     trimmedString(loader, "DATABASE_URL"),
+		DebugSync:       strings.EqualFold(strings.TrimSpace(loader.GetString("DEBUG_SYNC")), "true"),
 		Auth: AuthConfig{
 			JWTSecret:           trimmedString(loader, "AUTH_JWT_SECRET"),
 			AccessTokenTTLHours: intFromConfig(loader, "AUTH_ACCESS_TOKEN_TTL_HOURS"),
@@ -158,6 +173,17 @@ func LoadServerRuntimeConfig(configDir string) (ServerRuntimeConfig, error) {
 			StorageForcePathStyle:  boolFromConfig(loader, "MEDIA_STORAGE_FORCE_PATH_STYLE"),
 		},
 	}, nil
+}
+
+func parseRoomRuntimeMode(value string) (string, error) {
+	normalized := strings.ToLower(strings.TrimSpace(value))
+	if normalized == "" {
+		return roomRuntimeModeLocalProcess, nil
+	}
+	if normalized != roomRuntimeModeLocalProcess {
+		return "", fmt.Errorf("unsupported ROOM_RUNTIME_MODE %q; supported values: %s", value, roomRuntimeModeLocalProcess)
+	}
+	return normalized, nil
 }
 
 func boolFromConfig(loader interface{ GetString(string) string }, key string) bool {

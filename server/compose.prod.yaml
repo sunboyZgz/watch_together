@@ -78,6 +78,8 @@ services:
       SERVER_HOST: 0.0.0.0
       SERVER_PORT: 8080
       LOG_LEVEL: info
+      SERVER_INSTANCE_ID: ${SERVER_INSTANCE_ID:-roomserver-prod-1}
+      ROOM_RUNTIME_MODE: ${ROOM_RUNTIME_MODE:-local_process}
       DEBUG_SYNC: "false"
       DATABASE_URL: postgres://${POSTGRES_USER:-watch_together}:${POSTGRES_PASSWORD:-change_me_postgres_password}@postgres:5432/${POSTGRES_DB:-watch_together_prod}?sslmode=disable
       REDIS_ADDR: redis:6380

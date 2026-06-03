@@ -25,6 +25,42 @@ func TestGinRouterHealthz(t *testing.T) {
 	if strings.TrimSpace(recorder.Body.String()) != "ok" {
 		t.Fatalf("expected health body ok, got %q", recorder.Body.String())
 	}
+	if recorder.Header().Get("X-Watch-Together-Room-Runtime") != "local_process" {
+		t.Fatalf("expected room runtime health header, got %q", recorder.Header().Get("X-Watch-Together-Room-Runtime"))
+	}
+}
+
+func TestGinRouterHealthzExposesRuntimeBoundary(t *testing.T) {
+	roomManager := room.NewManager()
+	router := newGinRouter(
+		roomManager,
+		false,
+		WebSocketRuntimeConfig{},
+		nil,
+		nil,
+		transport.NewRoomHTTPHandler(roomManager, nil),
+		transport.NewAuthHTTPHandler(nil),
+		transport.NewHomeHTTPHandler(nil),
+		transport.NewMediaHTTPHandler(nil),
+		transport.NewProgressHTTPHandler(nil),
+		runtimeBoundary{
+			InstanceID:      "roomserver-a",
+			RoomRuntimeMode: "local_process",
+		},
+	)
+	recorder := httptest.NewRecorder()
+
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/healthz", nil))
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, recorder.Code)
+	}
+	if recorder.Header().Get("X-Watch-Together-Instance-ID") != "roomserver-a" {
+		t.Fatalf("expected instance health header, got %q", recorder.Header().Get("X-Watch-Together-Instance-ID"))
+	}
+	if recorder.Header().Get("X-Watch-Together-Room-Runtime") != "local_process" {
+		t.Fatalf("expected room runtime health header, got %q", recorder.Header().Get("X-Watch-Together-Room-Runtime"))
+	}
 }
 
 func TestGinRouterKeepsProgressWildcardRoute(t *testing.T) {
@@ -115,6 +151,7 @@ func newTestGinRouter() http.Handler {
 		transport.NewHomeHTTPHandler(nil),
 		transport.NewMediaHTTPHandler(nil),
 		transport.NewProgressHTTPHandler(nil),
+		runtimeBoundary{},
 	)
 }
 

@@ -1,21 +1,62 @@
 package transport
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"log"
 	"net/http"
 	"strings"
+	"time"
 
 	"watch_together/server/internal/room"
 	"watch_together/server/internal/roomapi"
 )
 
 type RoomHTTPHandler struct {
-	roomManager    *room.Manager
+	roomRuntime    roomRuntimeRegistry
 	roomService    *roomapi.Service
 	tokenVerifier  accessTokenVerifier
 	playbackSigner *mediaPlaybackSigner
 	delivery       *mediaDelivery
+}
+
+type roomRuntimeRegistry interface {
+	RegisterCreatedRoomWithMedia(
+		roomID string,
+		hostUserID string,
+		mediaID string,
+		mediaDurationMs *int64,
+	) roomStateSnapshotter
+	StoreLatestRoomState(ctx context.Context, state room.State) error
+}
+
+type roomStateSnapshotter interface {
+	StateSnapshot() room.State
+}
+
+type roomManagerRuntime struct {
+	manager         *room.Manager
+	roomStateWriter latestRoomStateWriter
+}
+
+func (r roomManagerRuntime) RegisterCreatedRoomWithMedia(
+	roomID string,
+	hostUserID string,
+	mediaID string,
+	mediaDurationMs *int64,
+) roomStateSnapshotter {
+	if r.manager == nil {
+		return nil
+	}
+	return r.manager.RegisterCreatedRoomWithMedia(roomID, hostUserID, mediaID, mediaDurationMs)
+}
+
+func (r roomManagerRuntime) StoreLatestRoomState(ctx context.Context, state room.State) error {
+	if r.roomStateWriter == nil || state.RoomID == "" {
+		return nil
+	}
+	return r.roomStateWriter.SetRoomState(ctx, state.RoomID, roomStatePayload(state))
 }
 
 type createRoomRequest struct {
@@ -88,12 +129,49 @@ func NewRoomHTTPHandlerWithTokenVerifier(
 	tokenVerifier accessTokenVerifier,
 	playbackConfigs ...MediaPlaybackConfig,
 ) *RoomHTTPHandler {
+	return NewRoomHTTPHandlerWithTokenVerifierAndRoomStateWriter(
+		roomManager,
+		roomService,
+		tokenVerifier,
+		nil,
+		playbackConfigs...,
+	)
+}
+
+func NewRoomHTTPHandlerWithTokenVerifierAndRoomStateWriter(
+	roomManager *room.Manager,
+	roomService *roomapi.Service,
+	tokenVerifier accessTokenVerifier,
+	roomStateWriter latestRoomStateWriter,
+	playbackConfigs ...MediaPlaybackConfig,
+) *RoomHTTPHandler {
+	var roomRuntime roomRuntimeRegistry
+	if roomManager != nil {
+		roomRuntime = roomManagerRuntime{
+			manager:         roomManager,
+			roomStateWriter: roomStateWriter,
+		}
+	}
+	return newRoomHTTPHandlerWithRuntime(
+		roomRuntime,
+		roomService,
+		tokenVerifier,
+		playbackConfigs...,
+	)
+}
+
+func newRoomHTTPHandlerWithRuntime(
+	roomRuntime roomRuntimeRegistry,
+	roomService *roomapi.Service,
+	tokenVerifier accessTokenVerifier,
+	playbackConfigs ...MediaPlaybackConfig,
+) *RoomHTTPHandler {
 	playbackConfig := MediaPlaybackConfig{}
 	if len(playbackConfigs) > 0 {
 		playbackConfig = playbackConfigs[0]
 	}
 	return &RoomHTTPHandler{
-		roomManager:    roomManager,
+		roomRuntime:    roomRuntime,
 		roomService:    roomService,
 		tokenVerifier:  tokenVerifier,
 		playbackSigner: newMediaPlaybackSigner(playbackConfig),
@@ -136,13 +214,18 @@ func (h *RoomHTTPHandler) CreateRoom(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	runtimeRoom := h.roomManager.RegisterCreatedRoomWithMedia(
+	runtimeRoom := h.roomRuntime.RegisterCreatedRoomWithMedia(
 		result.Room.RoomCode,
 		result.Room.HostUserID,
 		result.Room.MediaItemID,
 		result.Media.DurationMs,
 	)
+	if runtimeRoom == nil {
+		writeAPIError(w, http.StatusServiceUnavailable, "INTERNAL_ERROR", "room runtime is unavailable", nil)
+		return
+	}
 	state := runtimeRoom.StateSnapshot()
+	h.storeLatestRoomState(r.Context(), state)
 	writeAPISuccess(w, http.StatusCreated, createRoomResponse{
 		Room:      roomToResponse(result.Room),
 		Media:     h.roomMediaToResponse(r, result.Media),
@@ -179,12 +262,15 @@ func (h *RoomHTTPHandler) JoinRoomByCode(w http.ResponseWriter, r *http.Request)
 	}
 
 	// Keep the runtime room available for the following WebSocket join_room call.
-	h.roomManager.RegisterCreatedRoomWithMedia(
+	runtimeRoom := h.roomRuntime.RegisterCreatedRoomWithMedia(
 		result.Room.RoomCode,
 		result.Room.HostUserID,
 		result.Room.MediaItemID,
 		result.Media.DurationMs,
 	)
+	if runtimeRoom != nil {
+		h.storeLatestRoomState(r.Context(), runtimeRoom.StateSnapshot())
+	}
 	writeAPISuccess(w, http.StatusOK, joinRoomResponse{
 		Room:   roomToResponse(result.Room),
 		Member: memberToResponse(result.Member),
@@ -234,12 +320,15 @@ func (h *RoomHTTPHandler) DetailByCode(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusForbidden, "FORBIDDEN", "room membership required", nil)
 		return
 	}
-	h.roomManager.RegisterCreatedRoomWithMedia(
+	runtimeRoom := h.roomRuntime.RegisterCreatedRoomWithMedia(
 		result.Room.RoomCode,
 		result.Room.HostUserID,
 		result.Room.MediaItemID,
 		result.Media.DurationMs,
 	)
+	if runtimeRoom != nil {
+		h.storeLatestRoomState(r.Context(), runtimeRoom.StateSnapshot())
+	}
 	writeAPISuccess(w, http.StatusOK, roomDetailResponse{
 		Room:    roomToResponse(result.Room),
 		Media:   h.roomMediaToResponse(r, result.Media),
@@ -257,11 +346,26 @@ func roomDetailHasActiveMember(result roomapi.DetailResult, userID string) bool 
 }
 
 func (h *RoomHTTPHandler) ensureReady(w http.ResponseWriter) bool {
-	if h == nil || h.roomManager == nil || h.roomService == nil {
+	if h == nil || h.roomRuntime == nil || h.roomService == nil {
 		writeAPIError(w, http.StatusServiceUnavailable, "INTERNAL_ERROR", "room service is unavailable", nil)
 		return false
 	}
 	return true
+}
+
+func (h *RoomHTTPHandler) storeLatestRoomState(ctx context.Context, state room.State) {
+	if h == nil || h.roomRuntime == nil || state.RoomID == "" {
+		return
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	writeCtx, cancel := context.WithTimeout(ctx, 200*time.Millisecond)
+	defer cancel()
+
+	if err := h.roomRuntime.StoreLatestRoomState(writeCtx, state); err != nil {
+		log.Printf("room_state cache write failed room=%s seq=%d err=%v", state.RoomID, state.Seq, err)
+	}
 }
 
 func (h *RoomHTTPHandler) writeRoomError(w http.ResponseWriter, err error) {

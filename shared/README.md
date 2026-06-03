@@ -1,15 +1,10 @@
 # Shared
 
-`shared/` 用于放置跨端共享的定义与资料。
+`shared/` is reserved for cross-client protocol or schema artifacts. The current implementation keeps the authoritative protocol definitions in the Go server and Android client code instead of this directory.
 
-当前目录作为共享层占位，后续可以承载：
+Current source-of-truth docs:
 
-- 协议定义
-- 消息 Schema
-- 共享常量
-- 测试样例数据
-- 跨端约束说明
+- [WebSocket protocol](../docs/websocket-protocol.md)
+- [Backend API contract](../docs/backend-api-contract.md)
 
-目标是让 Android、Windows 和 Server 在关键接口与语义上保持一致。
-
-当前阶段最小 WebSocket 协议草案已记录在 [docs/websocket-event-protocol.md](../docs/websocket-event-protocol.md)。
+Add files here only when a shared artifact is consumed by more than one runtime.

@@ -92,6 +92,76 @@ func TestCreateRoomRequiresAccessToken(t *testing.T) {
 	}
 }
 
+func TestCreateRoomUsesRuntimeRegistryBoundary(t *testing.T) {
+	durationMs := int64(1_458_000)
+	runtime := &fakeRoomRuntime{
+		state: room.State{
+			RoomID:          "A7K2M9",
+			MediaID:         "media_001",
+			MediaDurationMs: &durationMs,
+			HostUserID:      "user_a",
+			Paused:          true,
+			PlaybackRate:    1.0,
+			Seq:             7,
+		},
+	}
+	handler := newRoomHTTPHandlerWithRuntime(runtime, roomapi.NewService(&fakeRoomStore{
+		createResult: roomapi.CreateRoomResult{
+			Room: roomapi.Room{
+				ID:          "room_uuid",
+				RoomCode:    "A7K2M9",
+				HostUserID:  "user_a",
+				MediaItemID: "media_001",
+				Status:      "active",
+			},
+			Media: roomapi.Media{
+				ID:         "media_001",
+				Title:      "Violet Evergarden",
+				MediaURL:   "https://example.com/index.m3u8",
+				DurationMs: &durationMs,
+			},
+		},
+	}), nil)
+	request := httptest.NewRequest(http.MethodPost, "/rooms", strings.NewReader(`{"mediaItemId":"media_001"}`))
+	request.Header.Set("Authorization", testAuthorizationHeader("user_a"))
+	request.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+
+	handler.CreateRoom(recorder, request)
+
+	if recorder.Code != http.StatusCreated {
+		t.Fatalf("expected status %d, got %d", http.StatusCreated, recorder.Code)
+	}
+	if runtime.roomID != "A7K2M9" {
+		t.Fatalf("expected runtime room A7K2M9, got %q", runtime.roomID)
+	}
+	if runtime.hostUserID != "user_a" {
+		t.Fatalf("expected runtime host user_a, got %q", runtime.hostUserID)
+	}
+	if runtime.mediaID != "media_001" {
+		t.Fatalf("expected runtime media media_001, got %q", runtime.mediaID)
+	}
+	if runtime.mediaDurationMs == nil || *runtime.mediaDurationMs != durationMs {
+		t.Fatalf("expected runtime media duration %d, got %v", durationMs, runtime.mediaDurationMs)
+	}
+
+	var response struct {
+		Data createRoomResponse `json:"data"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if response.Data.RoomState.Seq != 7 {
+		t.Fatalf("expected roomState seq from runtime boundary, got %d", response.Data.RoomState.Seq)
+	}
+	if runtime.storeCalls != 1 {
+		t.Fatalf("expected runtime snapshot store call, got %d", runtime.storeCalls)
+	}
+	if runtime.storedState.Seq != 7 {
+		t.Fatalf("expected stored runtime seq 7, got %d", runtime.storedState.Seq)
+	}
+}
+
 func TestJoinRoomByCodeFlow(t *testing.T) {
 	store := &fakeRoomStore{
 		joinResult: roomapi.JoinRoomResult{
@@ -329,4 +399,41 @@ func (s *fakeRoomStore) IsActiveMemberByCode(_ context.Context, roomCode string,
 		}
 	}
 	return false, s.err
+}
+
+type fakeRoomRuntime struct {
+	roomID          string
+	hostUserID      string
+	mediaID         string
+	mediaDurationMs *int64
+	state           room.State
+	storedState     room.State
+	storeCalls      int
+}
+
+func (r *fakeRoomRuntime) RegisterCreatedRoomWithMedia(
+	roomID string,
+	hostUserID string,
+	mediaID string,
+	mediaDurationMs *int64,
+) roomStateSnapshotter {
+	r.roomID = roomID
+	r.hostUserID = hostUserID
+	r.mediaID = mediaID
+	r.mediaDurationMs = mediaDurationMs
+	return fakeRoomSnapshot{state: r.state}
+}
+
+func (r *fakeRoomRuntime) StoreLatestRoomState(_ context.Context, state room.State) error {
+	r.storedState = state
+	r.storeCalls++
+	return nil
+}
+
+type fakeRoomSnapshot struct {
+	state room.State
+}
+
+func (s fakeRoomSnapshot) StateSnapshot() room.State {
+	return s.state
 }

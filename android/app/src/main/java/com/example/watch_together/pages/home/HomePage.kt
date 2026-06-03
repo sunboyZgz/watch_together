@@ -103,6 +103,7 @@ fun HomePage(
     accessToken: String,
     onCreateRoomClick: () -> Unit = {},
     onJoinRoomConfirm: (String) -> Unit = {},
+    onLogoutClick: () -> Unit = {},
     modifier: Modifier = Modifier,
     enableRemoteLoad: Boolean = true
 ) {
@@ -183,7 +184,8 @@ fun HomePage(
             HomeGreetingHeader(
                 profile = profile,
                 compactWidth = compactWidth,
-                onAvatarClick = { activeFeatureDialog = HomeFeatureDialogKind.Profile }
+                onAvatarClick = { activeFeatureDialog = HomeFeatureDialogKind.Profile },
+                onLogoutClick = onLogoutClick
             )
 
             if (isHomeSummaryLoading || homeSummaryError != null) {
@@ -327,7 +329,8 @@ fun HomePage(
 private fun HomeGreetingHeader(
     profile: HomeUserProfile,
     compactWidth: Boolean,
-    onAvatarClick: () -> Unit
+    onAvatarClick: () -> Unit,
+    onLogoutClick: () -> Unit
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -357,21 +360,42 @@ private fun HomeGreetingHeader(
             )
         }
 
-        Box(
-            modifier = Modifier
-                .size(if (compactWidth) 48.dp else 56.dp)
-                .clip(CircleShape)
-                .background(Color(0xFFF3CFE5))
-                .clickable(onClick = onAvatarClick),
-            contentAlignment = Alignment.Center
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Text(
-                text = profile.initials,
-                style = MaterialTheme.typography.titleMedium.copy(
-                    color = Color(0xFF6A3A67),
-                    fontWeight = FontWeight.Bold
+            Box(
+                modifier = Modifier
+                    .size(if (compactWidth) 48.dp else 56.dp)
+                    .clip(CircleShape)
+                    .background(Color(0xFFF3CFE5))
+                    .clickable(onClick = onAvatarClick),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = profile.initials,
+                    style = MaterialTheme.typography.titleMedium.copy(
+                        color = Color(0xFF6A3A67),
+                        fontWeight = FontWeight.Bold
+                    )
                 )
-            )
+            }
+
+            Surface(
+                modifier = Modifier.clickable(onClick = onLogoutClick),
+                shape = RoundedCornerShape(999.dp),
+                color = Color(0x1FFFFFFF),
+                border = BorderStroke(1.dp, HomeOutlineStroke)
+            ) {
+                Text(
+                    text = "退出",
+                    style = MaterialTheme.typography.labelMedium.copy(
+                        color = HomeTextSecondary,
+                        fontWeight = FontWeight.SemiBold
+                    ),
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                )
+            }
         }
     }
 }

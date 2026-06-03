@@ -24,16 +24,18 @@ import (
 )
 
 type Config struct {
-	AppEnv      string
-	Host        string
-	Port        string
-	LogLevel    string
-	DatabaseURL string
-	DebugSync   bool
-	Auth        auth.TokenConfig
-	Redis       cache.RedisConfig
-	WebSocket   transport.WebSocketRuntimeConfig
-	Media       transport.MediaPlaybackConfig
+	AppEnv          string
+	Host            string
+	Port            string
+	LogLevel        string
+	InstanceID      string
+	RoomRuntimeMode string
+	DatabaseURL     string
+	DebugSync       bool
+	Auth            auth.TokenConfig
+	Redis           cache.RedisConfig
+	WebSocket       transport.WebSocketRuntimeConfig
+	Media           transport.MediaPlaybackConfig
 }
 
 type RedisConfig = cache.RedisConfig
@@ -50,8 +52,16 @@ type Server struct {
 	cancel      context.CancelFunc
 }
 
+const roomRuntimeModeLocalProcess = "local_process"
+
+type runtimeBoundary struct {
+	InstanceID      string
+	RoomRuntimeMode string
+}
+
 // NewServer assembles the in-memory room manager and the HTTP routes around it.
 func NewServer(config Config) *Server {
+	config.RoomRuntimeMode = normalizeRoomRuntimeMode(config.RoomRuntimeMode)
 	serverCtx, cancel := context.WithCancel(context.Background())
 	roomManager := room.NewManager()
 	tokenManager := auth.NewTokenManager(config.Auth)
@@ -80,7 +90,13 @@ func NewServer(config Config) *Server {
 	if roomStore != nil {
 		go startPersistentRoomCleanupLoop(serverCtx, room.DefaultCleanupInterval(), roomStore, roomStateCache)
 	}
-	roomHTTPHandler := transport.NewRoomHTTPHandlerWithTokenVerifier(roomManager, roomService, tokenManager, config.Media)
+	roomHTTPHandler := transport.NewRoomHTTPHandlerWithTokenVerifierAndRoomStateWriter(
+		roomManager,
+		roomService,
+		tokenManager,
+		roomStateCache,
+		config.Media,
+	)
 	authHTTPHandler := transport.NewAuthHTTPHandler(newAuthService(db, tokenManager))
 	homeHTTPHandler := transport.NewHomeHTTPHandlerWithTokenVerifier(newHomeService(db), tokenManager)
 	mediaHTTPHandler := transport.NewMediaHTTPHandlerWithTokenVerifier(newMediaService(db), tokenManager, config.Media)
@@ -96,6 +112,7 @@ func NewServer(config Config) *Server {
 		homeHTTPHandler,
 		mediaHTTPHandler,
 		progressHTTPHandler,
+		runtimeBoundaryFromConfig(config),
 	)
 
 	httpServer := &http.Server{
@@ -110,6 +127,21 @@ func NewServer(config Config) *Server {
 		redis:       redisClient,
 		db:          db,
 		cancel:      cancel,
+	}
+}
+
+func normalizeRoomRuntimeMode(mode string) string {
+	mode = strings.ToLower(strings.TrimSpace(mode))
+	if mode == "" {
+		return roomRuntimeModeLocalProcess
+	}
+	return mode
+}
+
+func runtimeBoundaryFromConfig(config Config) runtimeBoundary {
+	return runtimeBoundary{
+		InstanceID:      strings.TrimSpace(config.InstanceID),
+		RoomRuntimeMode: normalizeRoomRuntimeMode(config.RoomRuntimeMode),
 	}
 }
 
@@ -155,12 +187,17 @@ func newGinRouter(
 	homeHTTPHandler *transport.HomeHTTPHandler,
 	mediaHTTPHandler *transport.MediaHTTPHandler,
 	progressHTTPHandler *transport.ProgressHTTPHandler,
+	runtime runtimeBoundary,
 ) *gin.Engine {
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
 	router.Use(gin.Recovery())
 
 	router.GET("/healthz", func(c *gin.Context) {
+		if runtime.InstanceID != "" {
+			c.Header("X-Watch-Together-Instance-ID", runtime.InstanceID)
+		}
+		c.Header("X-Watch-Together-Room-Runtime", normalizeRoomRuntimeMode(runtime.RoomRuntimeMode))
 		c.String(http.StatusOK, "ok")
 	})
 	router.Any("/auth/login", gin.WrapF(authHTTPHandler.Login))

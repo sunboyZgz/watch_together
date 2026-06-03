@@ -67,6 +67,8 @@ services:
       SERVER_HOST: 0.0.0.0
       SERVER_PORT: 8080
       LOG_LEVEL: debug
+      SERVER_INSTANCE_ID: ${SERVER_INSTANCE_ID:-local-roomserver-1}
+      ROOM_RUNTIME_MODE: ${ROOM_RUNTIME_MODE:-local_process}
       DEBUG_SYNC: "true"
       AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:-watch_together_local_dev_jwt_secret_change_me}
       DATABASE_URL: postgres://app:app@postgres:5432/anime_watch_dev?sslmode=disable

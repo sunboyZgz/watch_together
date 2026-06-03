@@ -69,6 +69,22 @@ fun WatchTogetherApp() {
                 shouldAutoCreateRoom = false
                 shouldAutoJoinRoom = true
                 currentScreen = AppScreen.Player
+            },
+            onLogoutClick = {
+                authSessionStore.clear()
+                sessionUserId = ""
+                sessionAccount = ""
+                sessionNickname = ""
+                sessionAccessToken = ""
+                selectedEpisodeId = AppConfig.defaultMediaIdForRoom()
+                selectedEpisodeTitle = ""
+                selectedEpisodeMediaUrl = null
+                selectedEpisodeSeasonLabel = null
+                selectedEpisodeEpisodeLabel = null
+                pendingJoinRoomCode = ""
+                shouldAutoCreateRoom = false
+                shouldAutoJoinRoom = false
+                currentScreen = AppScreen.Login
             }
         )
 

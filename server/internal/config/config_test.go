@@ -45,6 +45,12 @@ func TestLoadServerRuntimeConfigFallsBackToDefaults(t *testing.T) {
 	if cfg.Port != "8080" {
 		t.Fatalf("expected default port, got %q", cfg.Port)
 	}
+	if cfg.InstanceID != "" {
+		t.Fatalf("expected default instance id to be empty, got %q", cfg.InstanceID)
+	}
+	if cfg.RoomRuntimeMode != "local_process" {
+		t.Fatalf("expected default room runtime mode local_process, got %q", cfg.RoomRuntimeMode)
+	}
 	if !cfg.DebugSync {
 		t.Fatalf("expected default debug sync to be true")
 	}
@@ -74,6 +80,36 @@ func TestLoadServerRuntimeConfigFallsBackToDefaults(t *testing.T) {
 	}
 	if cfg.Media.DeliveryMode != "signed_redirect" {
 		t.Fatalf("expected default media delivery mode signed_redirect, got %q", cfg.Media.DeliveryMode)
+	}
+}
+
+func TestLoadServerRuntimeConfigLoadsRuntimeBoundarySettings(t *testing.T) {
+	configDir := t.TempDir()
+	mustWriteConfigFile(
+		t,
+		filepath.Join(configDir, ".env"),
+		"SERVER_INSTANCE_ID=roomserver-a\nROOM_RUNTIME_MODE=local_process\n",
+	)
+
+	cfg, err := LoadServerRuntimeConfig(configDir)
+	if err != nil {
+		t.Fatalf("load runtime config: %v", err)
+	}
+
+	if cfg.InstanceID != "roomserver-a" {
+		t.Fatalf("expected instance id roomserver-a, got %q", cfg.InstanceID)
+	}
+	if cfg.RoomRuntimeMode != "local_process" {
+		t.Fatalf("expected room runtime mode local_process, got %q", cfg.RoomRuntimeMode)
+	}
+}
+
+func TestLoadServerRuntimeConfigRejectsUnsupportedRoomRuntimeMode(t *testing.T) {
+	configDir := t.TempDir()
+	mustWriteConfigFile(t, filepath.Join(configDir, ".env"), "ROOM_RUNTIME_MODE=redis_authority\n")
+
+	if _, err := LoadServerRuntimeConfig(configDir); err == nil {
+		t.Fatalf("expected unsupported room runtime mode to fail config loading")
 	}
 }
 

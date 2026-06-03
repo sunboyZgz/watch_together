@@ -23,18 +23,22 @@ func main() {
 		os.Exit(1)
 	}
 	log.Printf(
-		"room server config app_env=%s log_level=%s debug_sync=%t",
+		"room server config app_env=%s log_level=%s debug_sync=%t instance_id=%q room_runtime_mode=%s",
 		runtimeConfig.AppEnv,
 		runtimeConfig.LogLevel,
 		runtimeConfig.DebugSync,
+		runtimeConfig.InstanceID,
+		runtimeConfig.RoomRuntimeMode,
 	)
 	server := app.NewServer(app.Config{
-		AppEnv:      runtimeConfig.AppEnv,
-		Host:        runtimeConfig.Host,
-		Port:        runtimeConfig.Port,
-		LogLevel:    runtimeConfig.LogLevel,
-		DatabaseURL: runtimeConfig.DatabaseURL,
-		DebugSync:   runtimeConfig.DebugSync,
+		AppEnv:          runtimeConfig.AppEnv,
+		Host:            runtimeConfig.Host,
+		Port:            runtimeConfig.Port,
+		LogLevel:        runtimeConfig.LogLevel,
+		InstanceID:      runtimeConfig.InstanceID,
+		RoomRuntimeMode: runtimeConfig.RoomRuntimeMode,
+		DatabaseURL:     runtimeConfig.DatabaseURL,
+		DebugSync:       runtimeConfig.DebugSync,
 		Auth: app.AuthTokenConfig{
 			JWTSecret:      runtimeConfig.Auth.JWTSecret,
 			AccessTokenTTL: time.Duration(runtimeConfig.Auth.AccessTokenTTLHours) * time.Hour,

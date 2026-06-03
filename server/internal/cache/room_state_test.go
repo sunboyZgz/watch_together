@@ -18,6 +18,18 @@ func TestRoomStateCacheDisabledWithoutRedis(t *testing.T) {
 	}
 }
 
+func TestRoomStateCacheGetDisabledWithoutRedis(t *testing.T) {
+	cache := NewRoomStateCache(nil, 0)
+
+	_, found, err := cache.GetRoomState(context.Background(), "ROOM01")
+	if !errors.Is(err, ErrRedisDisabled) {
+		t.Fatalf("expected redis disabled, got %v", err)
+	}
+	if found {
+		t.Fatalf("expected disabled cache not to report a hit")
+	}
+}
+
 func TestRoomStateKey(t *testing.T) {
 	if key := roomStateKey("ROOM01"); key != "wt:room:state:ROOM01:v1" {
 		t.Fatalf("unexpected room state key %q", key)
@@ -48,14 +60,78 @@ func TestRoomStateCacheSetUsesJSONStore(t *testing.T) {
 	}
 }
 
+func TestRoomStateCacheGetMissUsesJSONStore(t *testing.T) {
+	store := &fakeJSONStore{}
+	cache := NewRoomStateCache(store, 0)
+
+	state, found, err := cache.GetRoomState(context.Background(), "ROOM01")
+	if err != nil {
+		t.Fatalf("get room state: %v", err)
+	}
+	if found {
+		t.Fatalf("expected cache miss")
+	}
+	if state.RoomID != "" || state.Seq != 0 {
+		t.Fatalf("expected zero state on miss, got %+v", state)
+	}
+	if store.getKey != "wt:room:state:ROOM01:v1" {
+		t.Fatalf("unexpected get key %q", store.getKey)
+	}
+}
+
+func TestRoomStateCacheGetReturnsStoredPayload(t *testing.T) {
+	stored := protocolRoomStateForTest()
+	stored.MediaID = "media_001"
+	stored.HostUserID = "user_a"
+	stored.PositionMs = 12_000
+	stored.PlaybackRate = 1.25
+	stored.Seq = 9
+	store := &fakeJSONStore{
+		getFound: true,
+		getValue: stored,
+	}
+	cache := NewRoomStateCache(store, 0)
+
+	state, found, err := cache.GetRoomState(context.Background(), "ROOM01")
+	if err != nil {
+		t.Fatalf("get room state: %v", err)
+	}
+	if !found {
+		t.Fatalf("expected cache hit")
+	}
+	if store.getKey != "wt:room:state:ROOM01:v1" {
+		t.Fatalf("unexpected get key %q", store.getKey)
+	}
+	if state.RoomID != stored.RoomID ||
+		state.MediaID != stored.MediaID ||
+		state.HostUserID != stored.HostUserID ||
+		state.PositionMs != stored.PositionMs ||
+		state.PlaybackRate != stored.PlaybackRate ||
+		state.Seq != stored.Seq {
+		t.Fatalf("unexpected cached state: %+v", state)
+	}
+}
+
 type fakeJSONStore struct {
 	setKey   string
 	setValue any
 	setTTL   time.Duration
+	getKey   string
+	getFound bool
+	getValue protocol.RoomStatePayload
 }
 
 func (s *fakeJSONStore) GetJSON(ctx context.Context, key string, dest any) (bool, error) {
-	return false, nil
+	s.getKey = key
+	if !s.getFound {
+		return false, nil
+	}
+	state, ok := dest.(*protocol.RoomStatePayload)
+	if !ok {
+		return false, errors.New("unexpected room state cache destination")
+	}
+	*state = s.getValue
+	return true, nil
 }
 
 func (s *fakeJSONStore) SetJSON(ctx context.Context, key string, value any, ttl time.Duration) error {

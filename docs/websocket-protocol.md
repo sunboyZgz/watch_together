@@ -1,0 +1,239 @@
+# WebSocket Protocol
+
+The WebSocket endpoint is `GET /ws`. The opening HTTP request must include `Authorization: Bearer <accessToken>`. The token user ID becomes the connection identity; payload `userId` values must match it.
+
+## Envelope
+
+Every message is JSON:
+
+```json
+{
+  "type": "join_room",
+  "payload": {}
+}
+```
+
+Supported types are defined in `server/internal/protocol/envelope.go`.
+
+## Join Sequence
+
+Before connecting to `/ws`, the client must create or join a room through HTTP:
+
+1. Host calls `POST /rooms`.
+2. Viewer calls `POST /rooms/{roomCode}/join`.
+3. Client opens `/ws` with bearer token.
+4. Client sends `join_room`.
+5. Server verifies active room membership when the DB-backed checker is available.
+6. Server sends the authoritative `room_state` snapshot.
+
+`join_room` payload:
+
+```json
+{
+  "roomId": "ABC123",
+  "userId": "user-uuid"
+}
+```
+
+In current runtime sync, `roomId` is the 6-character room code.
+
+## Room State
+
+`room_state` is the authoritative snapshot sent after joining, on explicit state requests, after stale control events, and after some membership/lifecycle changes.
+
+```json
+{
+  "type": "room_state",
+  "payload": {
+    "roomId": "ABC123",
+    "mediaId": "episode-uuid",
+    "mediaDurationMs": 1800000,
+    "hostUserId": "host-user-uuid",
+    "paused": true,
+    "ended": false,
+    "positionMs": 0,
+    "velocity": 0,
+    "serverTimeMs": 1710000000000,
+    "reason": "init",
+    "playbackRate": 1,
+    "seq": 0
+  }
+}
+```
+
+Clients can request a fresh snapshot:
+
+```json
+{
+  "type": "room_state.request",
+  "payload": {
+    "roomId": "ABC123",
+    "userId": "user-uuid",
+    "seq": 10
+  }
+}
+```
+
+## Host Control Events
+
+Only the host can apply playback controls. The client must send the current server `seq`; if the sequence is stale, the server sends `room_state` instead of applying the event.
+
+Shared control fields:
+
+```json
+{
+  "roomId": "ABC123",
+  "userId": "host-user-uuid",
+  "requestId": "optional-idempotency-key",
+  "positionMs": 120000,
+  "velocity": 1,
+  "serverTimeMs": 1710000000000,
+  "reason": "user",
+  "seq": 4
+}
+```
+
+Supported control event types:
+
+- `play`
+- `pause`
+- `seek`
+- `ended`
+- `set_playback_rate`, which also includes `playbackRate`.
+
+Example:
+
+```json
+{
+  "type": "set_playback_rate",
+  "payload": {
+    "roomId": "ABC123",
+    "userId": "host-user-uuid",
+    "requestId": "req-1",
+    "positionMs": 120000,
+    "playbackRate": 1.5,
+    "seq": 4
+  }
+}
+```
+
+On success, the server broadcasts the same event type with server-normalized state fields and an incremented `seq`.
+
+## Control Safety Rules
+
+Implemented safeguards:
+
+- Non-host control attempts return an `error` event.
+- Stale `seq` values return the current `room_state`.
+- Duplicate non-empty `requestId` values are deduplicated for a short TTL.
+- `seek` events are rate-limited by `WS_SEEK_MIN_INTERVAL_MS`.
+- The broadcaster has bounded concurrency, per-client outbox capacity, enqueue timeouts, and room-state coalescing.
+
+## Heartbeat And Clock Sync
+
+The server sends heartbeat messages about every 5 seconds:
+
+```json
+{
+  "type": "heartbeat",
+  "payload": {
+    "serverTimeMs": 1710000000000
+  }
+}
+```
+
+The client must reply:
+
+```json
+{
+  "type": "heartbeat_ack",
+  "payload": {
+    "serverTimeMs": 1710000000000,
+    "clientTimeMs": 1710000000100
+  }
+}
+```
+
+Connections that do not ack within the timeout are closed.
+
+Clients can measure clock offset:
+
+```json
+{
+  "type": "clock_sync.ping",
+  "payload": {
+    "clientSendMonoMs": 123456
+  }
+}
+```
+
+Server response:
+
+```json
+{
+  "type": "clock_sync.pong",
+  "payload": {
+    "serverTimeMs": 1710000000000,
+    "clientSendMonoMs": 123456
+  }
+}
+```
+
+## Membership And Device Behavior
+
+`leave_room` intentionally leaves a room and persists the membership leave:
+
+```json
+{
+  "type": "leave_room",
+  "payload": {
+    "roomId": "ABC123",
+    "userId": "user-uuid"
+  }
+}
+```
+
+The server emits `room_members_changed` to other clients after joins and leaves:
+
+```json
+{
+  "type": "room_members_changed",
+  "payload": {
+    "roomId": "ABC123",
+    "reason": "join"
+  }
+}
+```
+
+Same-user active-device handling is implemented. If a user already has an active room connection, a new connection may enter a device-switch handshake using:
+
+- `room_device.switch_request`
+- `room_device.switch_reply`
+- `room_device.switch_result`
+- `room_device.waiting`
+
+Android currently handles the practical repeated-join/resync path around the room session controller.
+
+## Error Event
+
+Protocol errors are sent without immediately dropping the socket:
+
+```json
+{
+  "type": "error",
+  "payload": {
+    "roomId": "ABC123",
+    "message": "only host can control playback"
+  }
+}
+```
+
+## Room Lifecycle
+
+Transient disconnect cleanup and intentional leave are different:
+
+- If the host disconnects, remaining clients receive updated room state with no automatic host transfer.
+- The original host can reclaim host status by reconnecting within the room retention window.
+- If the last client disconnects unexpectedly, the in-memory room enters a grace period.
+- If the last member intentionally leaves, the room is destroyed immediately rather than entering the grace period.
+- Persistent cleanup also destroys expired rooms and removes their Redis `room_state` cache entry.
