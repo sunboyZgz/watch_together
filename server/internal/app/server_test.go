@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"watch_together/server/internal/cache"
+	"watch_together/server/internal/eventbus"
 	"watch_together/server/internal/room"
 	"watch_together/server/internal/transport"
 )
@@ -33,6 +34,7 @@ func TestGinRouterHealthz(t *testing.T) {
 func TestGinRouterHealthzExposesRuntimeBoundary(t *testing.T) {
 	roomManager := room.NewManager()
 	router := newGinRouter(
+		context.Background(),
 		roomManager,
 		false,
 		WebSocketRuntimeConfig{},
@@ -47,6 +49,8 @@ func TestGinRouterHealthzExposesRuntimeBoundary(t *testing.T) {
 			InstanceID:      "roomserver-a",
 			RoomRuntimeMode: "local_process",
 		},
+		"",
+		eventbus.NewDisabledRoomBroadcastBus(),
 	)
 	recorder := httptest.NewRecorder()
 
@@ -141,6 +145,7 @@ func TestRoomLifecycleHookDeletesRoomStateCacheOnDestroy(t *testing.T) {
 func newTestGinRouter() http.Handler {
 	roomManager := room.NewManager()
 	return newGinRouter(
+		context.Background(),
 		roomManager,
 		false,
 		WebSocketRuntimeConfig{},
@@ -152,6 +157,8 @@ func newTestGinRouter() http.Handler {
 		transport.NewMediaHTTPHandler(nil),
 		transport.NewProgressHTTPHandler(nil),
 		runtimeBoundary{},
+		"",
+		eventbus.NewDisabledRoomBroadcastBus(),
 	)
 }
 

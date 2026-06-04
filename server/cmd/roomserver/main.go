@@ -23,12 +23,14 @@ func main() {
 		os.Exit(1)
 	}
 	log.Printf(
-		"room server config app_env=%s log_level=%s debug_sync=%t instance_id=%q room_runtime_mode=%s",
+		"room server config app_env=%s log_level=%s debug_sync=%t instance_id=%q room_runtime_mode=%s ws_cross_instance_broadcast=%t ws_event_bus=%s",
 		runtimeConfig.AppEnv,
 		runtimeConfig.LogLevel,
 		runtimeConfig.DebugSync,
 		runtimeConfig.InstanceID,
 		runtimeConfig.RoomRuntimeMode,
+		runtimeConfig.WebSocket.CrossInstanceBroadcast,
+		runtimeConfig.WebSocket.EventBus,
 	)
 	server := app.NewServer(app.Config{
 		AppEnv:          runtimeConfig.AppEnv,
@@ -59,6 +61,13 @@ func main() {
 			MaxConnections:            runtimeConfig.WebSocket.MaxConnections,
 			MaxRoomClients:            runtimeConfig.WebSocket.MaxRoomClients,
 			SeekMinInterval:           time.Duration(runtimeConfig.WebSocket.SeekMinIntervalMs) * time.Millisecond,
+			CrossInstanceBroadcast:    runtimeConfig.WebSocket.CrossInstanceBroadcast,
+			EventBus:                  runtimeConfig.WebSocket.EventBus,
+		},
+		NATS: app.NATSConfig{
+			URL:     runtimeConfig.NATS.URL,
+			Name:    runtimeConfig.NATS.Name,
+			Subject: runtimeConfig.NATS.SubjectRoomBroadcast,
 		},
 		Media: app.MediaPlaybackConfig{
 			DeliveryMode:           runtimeConfig.Media.DeliveryMode,

@@ -7,6 +7,7 @@ import (
 )
 
 const roomRuntimeModeLocalProcess = "local_process"
+const eventBusNATSCore = "nats_core"
 
 type ServerRuntimeConfig struct {
 	AppEnv          string
@@ -20,6 +21,7 @@ type ServerRuntimeConfig struct {
 	Auth            AuthConfig
 	Redis           RedisConfig
 	WebSocket       WebSocketConfig
+	NATS            NATSConfig
 	Media           MediaPlaybackConfig
 }
 
@@ -45,6 +47,14 @@ type WebSocketConfig struct {
 	MaxConnections            int64
 	MaxRoomClients            int
 	SeekMinIntervalMs         int
+	CrossInstanceBroadcast    bool
+	EventBus                  string
+}
+
+type NATSConfig struct {
+	URL                  string
+	Name                 string
+	SubjectRoomBroadcast string
 }
 
 type MediaPlaybackConfig struct {
@@ -63,25 +73,30 @@ type MediaPlaybackConfig struct {
 
 func LoadServerRuntimeConfig(configDir string) (ServerRuntimeConfig, error) {
 	defaults := map[string]any{
-		"APP_ENV":                         "local",
-		"SERVER_HOST":                     "0.0.0.0",
-		"SERVER_PORT":                     "8080",
-		"LOG_LEVEL":                       "debug",
-		"SERVER_INSTANCE_ID":              "",
-		"ROOM_RUNTIME_MODE":               "local_process",
-		"DEBUG_SYNC":                      true,
-		"AUTH_ACCESS_TOKEN_TTL_HOURS":     24,
-		"REDIS_DB":                        0,
-		"WS_BROADCAST_CONCURRENCY_LIMIT":  64,
-		"WS_BROADCAST_TIMEOUT_MS":         5000,
-		"WS_BROADCAST_ENQUEUE_TIMEOUT_MS": 3000,
-		"WS_CLIENT_OUTBOX_CAPACITY":       64,
-		"WS_MAX_CONNECTIONS":              0,
-		"ROOM_MAX_CLIENTS":                0,
-		"WS_SEEK_MIN_INTERVAL_MS":         250,
-		"MEDIA_DELIVERY_MODE":             "signed_redirect",
-		"MEDIA_PLAYBACK_URL_TTL_SECONDS":  7200,
-		"MEDIA_STORAGE_FORCE_PATH_STYLE":  "true",
+		"APP_ENV":                             "local",
+		"SERVER_HOST":                         "0.0.0.0",
+		"SERVER_PORT":                         "8080",
+		"LOG_LEVEL":                           "debug",
+		"SERVER_INSTANCE_ID":                  "",
+		"ROOM_RUNTIME_MODE":                   "local_process",
+		"DEBUG_SYNC":                          true,
+		"AUTH_ACCESS_TOKEN_TTL_HOURS":         24,
+		"REDIS_DB":                            0,
+		"WS_BROADCAST_CONCURRENCY_LIMIT":      64,
+		"WS_BROADCAST_TIMEOUT_MS":             5000,
+		"WS_BROADCAST_ENQUEUE_TIMEOUT_MS":     3000,
+		"WS_CLIENT_OUTBOX_CAPACITY":           64,
+		"WS_MAX_CONNECTIONS":                  0,
+		"ROOM_MAX_CLIENTS":                    0,
+		"WS_SEEK_MIN_INTERVAL_MS":             250,
+		"WS_CROSS_INSTANCE_BROADCAST_ENABLED": false,
+		"WS_EVENT_BUS":                        "nats_core",
+		"NATS_URL":                            "nats://127.0.0.1:4222",
+		"NATS_NAME":                           "watch-together-roomserver",
+		"NATS_SUBJECT_ROOM_BROADCAST":         "wt.room.broadcast.v1",
+		"MEDIA_DELIVERY_MODE":                 "signed_redirect",
+		"MEDIA_PLAYBACK_URL_TTL_SECONDS":      7200,
+		"MEDIA_STORAGE_FORCE_PATH_STYLE":      "true",
 	}
 	keys := []string{
 		"APP_ENV",
@@ -107,6 +122,11 @@ func LoadServerRuntimeConfig(configDir string) (ServerRuntimeConfig, error) {
 		"WS_MAX_CONNECTIONS",
 		"ROOM_MAX_CLIENTS",
 		"WS_SEEK_MIN_INTERVAL_MS",
+		"WS_CROSS_INSTANCE_BROADCAST_ENABLED",
+		"WS_EVENT_BUS",
+		"NATS_URL",
+		"NATS_NAME",
+		"NATS_SUBJECT_ROOM_BROADCAST",
 		"MEDIA_DELIVERY_MODE",
 		"MEDIA_PLAYBACK_SIGNING_SECRET",
 		"MEDIA_PLAYBACK_URL_TTL_SECONDS",
@@ -125,6 +145,10 @@ func LoadServerRuntimeConfig(configDir string) (ServerRuntimeConfig, error) {
 		return ServerRuntimeConfig{}, err
 	}
 	roomRuntimeMode, err := parseRoomRuntimeMode(trimmedString(loader, "ROOM_RUNTIME_MODE"))
+	if err != nil {
+		return ServerRuntimeConfig{}, err
+	}
+	eventBus, err := parseEventBus(trimmedString(loader, "WS_EVENT_BUS"))
 	if err != nil {
 		return ServerRuntimeConfig{}, err
 	}
@@ -158,6 +182,13 @@ func LoadServerRuntimeConfig(configDir string) (ServerRuntimeConfig, error) {
 			MaxConnections:            int64FromConfig(loader, "WS_MAX_CONNECTIONS"),
 			MaxRoomClients:            intFromConfig(loader, "ROOM_MAX_CLIENTS"),
 			SeekMinIntervalMs:         intFromConfig(loader, "WS_SEEK_MIN_INTERVAL_MS"),
+			CrossInstanceBroadcast:    boolFromConfig(loader, "WS_CROSS_INSTANCE_BROADCAST_ENABLED"),
+			EventBus:                  eventBus,
+		},
+		NATS: NATSConfig{
+			URL:                  trimmedString(loader, "NATS_URL"),
+			Name:                 trimmedString(loader, "NATS_NAME"),
+			SubjectRoomBroadcast: trimmedString(loader, "NATS_SUBJECT_ROOM_BROADCAST"),
 		},
 		Media: MediaPlaybackConfig{
 			DeliveryMode:           trimmedString(loader, "MEDIA_DELIVERY_MODE"),
@@ -182,6 +213,17 @@ func parseRoomRuntimeMode(value string) (string, error) {
 	}
 	if normalized != roomRuntimeModeLocalProcess {
 		return "", fmt.Errorf("unsupported ROOM_RUNTIME_MODE %q; supported values: %s", value, roomRuntimeModeLocalProcess)
+	}
+	return normalized, nil
+}
+
+func parseEventBus(value string) (string, error) {
+	normalized := strings.ToLower(strings.TrimSpace(value))
+	if normalized == "" {
+		return eventBusNATSCore, nil
+	}
+	if normalized != eventBusNATSCore {
+		return "", fmt.Errorf("unsupported WS_EVENT_BUS %q; supported values: %s", value, eventBusNATSCore)
 	}
 	return normalized, nil
 }

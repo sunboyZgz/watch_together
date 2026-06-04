@@ -294,6 +294,15 @@ func (r *Room) ClientCount() int {
 	return len(r.clients)
 }
 
+// ClientsSnapshot returns the current local WebSocket clients without exposing
+// the room lock to callers.
+func (r *Room) ClientsSnapshot() []*ClientConnection {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	return r.clientsSnapshotLocked()
+}
+
 // ApplyPlay updates the room's authority state for a play action and snapshots the
 // active clients so the transport layer can broadcast without holding the room lock.
 func (r *Room) ApplyPlay(userID string, positionMs int64) (State, []*ClientConnection, error) {

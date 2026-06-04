@@ -20,6 +20,12 @@ services:
       - "6380:6380"
     volumes:
       - redis_data:/data
+  nats:
+    image: nats:2.10-alpine
+    container_name: anime-watch-nats
+    restart: unless-stopped
+    ports:
+      - "4222:4222"
   minio:
     image: quay.io/minio/minio:latest
     container_name: anime-watch-minio
@@ -59,6 +65,7 @@ services:
     depends_on:
       - postgres
       - redis
+      - nats
       - minio-init
     env_file:
       - .env
@@ -70,6 +77,11 @@ services:
       SERVER_INSTANCE_ID: ${SERVER_INSTANCE_ID:-local-roomserver-1}
       ROOM_RUNTIME_MODE: ${ROOM_RUNTIME_MODE:-local_process}
       DEBUG_SYNC: "true"
+      WS_CROSS_INSTANCE_BROADCAST_ENABLED: ${WS_CROSS_INSTANCE_BROADCAST_ENABLED:-false}
+      WS_EVENT_BUS: ${WS_EVENT_BUS:-nats_core}
+      NATS_URL: ${NATS_URL:-nats://nats:4222}
+      NATS_NAME: ${NATS_NAME:-watch-together-roomserver}
+      NATS_SUBJECT_ROOM_BROADCAST: ${NATS_SUBJECT_ROOM_BROADCAST:-wt.room.broadcast.v1}
       AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:-watch_together_local_dev_jwt_secret_change_me}
       DATABASE_URL: postgres://app:app@postgres:5432/anime_watch_dev?sslmode=disable
       REDIS_ADDR: redis:6380

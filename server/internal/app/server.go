@@ -14,6 +14,7 @@ import (
 
 	"watch_together/server/internal/auth"
 	"watch_together/server/internal/cache"
+	"watch_together/server/internal/eventbus"
 	"watch_together/server/internal/home"
 	"watch_together/server/internal/media"
 	"watch_together/server/internal/progress"
@@ -35,11 +36,13 @@ type Config struct {
 	Auth            auth.TokenConfig
 	Redis           cache.RedisConfig
 	WebSocket       transport.WebSocketRuntimeConfig
+	NATS            eventbus.NATSConfig
 	Media           transport.MediaPlaybackConfig
 }
 
 type RedisConfig = cache.RedisConfig
 type WebSocketRuntimeConfig = transport.WebSocketRuntimeConfig
+type NATSConfig = eventbus.NATSConfig
 type MediaPlaybackConfig = transport.MediaPlaybackConfig
 type AuthTokenConfig = auth.TokenConfig
 
@@ -50,6 +53,7 @@ type Server struct {
 	redis       *cache.RedisClient
 	db          *gorm.DB
 	cancel      context.CancelFunc
+	eventBus    eventbus.RoomBroadcastBus
 }
 
 const roomRuntimeModeLocalProcess = "local_process"
@@ -97,11 +101,14 @@ func NewServer(config Config) *Server {
 		roomStateCache,
 		config.Media,
 	)
+	broadcastInstanceID := roomBroadcastInstanceID(config.InstanceID)
+	roomBroadcastBus := newRoomBroadcastBus(config.WebSocket, config.NATS)
 	authHTTPHandler := transport.NewAuthHTTPHandler(newAuthService(db, tokenManager))
 	homeHTTPHandler := transport.NewHomeHTTPHandlerWithTokenVerifier(newHomeService(db), tokenManager)
 	mediaHTTPHandler := transport.NewMediaHTTPHandlerWithTokenVerifier(newMediaService(db), tokenManager, config.Media)
 	progressHTTPHandler := transport.NewProgressHTTPHandlerWithTokenVerifier(newProgressService(db), tokenManager)
 	router := newGinRouter(
+		serverCtx,
 		roomManager,
 		config.DebugSync,
 		config.WebSocket,
@@ -113,6 +120,8 @@ func NewServer(config Config) *Server {
 		mediaHTTPHandler,
 		progressHTTPHandler,
 		runtimeBoundaryFromConfig(config),
+		broadcastInstanceID,
+		roomBroadcastBus,
 	)
 
 	httpServer := &http.Server{
@@ -127,6 +136,7 @@ func NewServer(config Config) *Server {
 		redis:       redisClient,
 		db:          db,
 		cancel:      cancel,
+		eventBus:    roomBroadcastBus,
 	}
 }
 
@@ -143,6 +153,40 @@ func runtimeBoundaryFromConfig(config Config) runtimeBoundary {
 		InstanceID:      strings.TrimSpace(config.InstanceID),
 		RoomRuntimeMode: normalizeRoomRuntimeMode(config.RoomRuntimeMode),
 	}
+}
+
+func roomBroadcastInstanceID(instanceID string) string {
+	instanceID = strings.TrimSpace(instanceID)
+	if instanceID != "" {
+		return instanceID
+	}
+	return fmt.Sprintf("roomserver-%d", time.Now().UnixNano())
+}
+
+func newRoomBroadcastBus(
+	webSocketConfig transport.WebSocketRuntimeConfig,
+	natsConfig eventbus.NATSConfig,
+) eventbus.RoomBroadcastBus {
+	if !webSocketConfig.CrossInstanceBroadcast {
+		return eventbus.NewDisabledRoomBroadcastBus()
+	}
+	eventBus, err := eventbus.NormalizeEventBus(webSocketConfig.EventBus)
+	if err != nil {
+		log.Printf("unsupported websocket event bus; cross-instance broadcast disabled: %v", err)
+		return eventbus.NewDisabledRoomBroadcastBus()
+	}
+	if eventBus != eventbus.EventBusNATSCore {
+		log.Printf("unsupported websocket event bus %q; cross-instance broadcast disabled", eventBus)
+		return eventbus.NewDisabledRoomBroadcastBus()
+	}
+	bus, err := eventbus.OpenNATSRoomBroadcastBus(natsConfig)
+	if err != nil {
+		log.Printf("failed to connect NATS event bus; cross-instance broadcast disabled: %v", err)
+		return eventbus.NewDisabledRoomBroadcastBus()
+	}
+	normalized := eventbus.NormalizeNATSConfig(natsConfig)
+	log.Printf("connected NATS event bus url=%s subject=%s name=%s", normalized.URL, normalized.Subject, normalized.Name)
+	return bus
 }
 
 func newRedisClient(name string, config cache.RedisConfig) *cache.RedisClient {
@@ -177,6 +221,7 @@ func newPostgresDB(databaseURL string) *gorm.DB {
 }
 
 func newGinRouter(
+	ctx context.Context,
 	roomManager *room.Manager,
 	debugSync bool,
 	webSocketConfig transport.WebSocketRuntimeConfig,
@@ -188,6 +233,8 @@ func newGinRouter(
 	mediaHTTPHandler *transport.MediaHTTPHandler,
 	progressHTTPHandler *transport.ProgressHTTPHandler,
 	runtime runtimeBoundary,
+	broadcastInstanceID string,
+	roomBroadcastBus eventbus.RoomBroadcastBus,
 ) *gin.Engine {
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
@@ -210,14 +257,19 @@ func newGinRouter(
 	router.Any("/me/media-progress/*mediaPath", gin.WrapF(progressHTTPHandler.Update))
 	router.Any("/rooms", gin.WrapF(roomHTTPHandler.CreateRoom))
 	router.Any("/rooms/*roomPath", gin.WrapF(roomHTTPHandler.RoomRoute))
-	router.Any("/ws", gin.WrapH(transport.NewWebSocketHandlerWithConfigAndRoomStateWriterAndTokenVerifierAndRoomLeaver(
+	webSocketHandler := transport.NewWebSocketHandlerWithConfigAndRoomStateWriterAndTokenVerifierAndRoomLeaver(
 		roomManager,
 		debugSync,
 		webSocketConfig,
 		roomStateCache,
 		tokenManager,
 		roomHTTPHandler.RoomLeaver(),
-	)))
+	)
+	webSocketHandler.SetRoomBroadcastBus(broadcastInstanceID, roomBroadcastBus)
+	if err := webSocketHandler.SubscribeRoomBroadcasts(ctx); err != nil {
+		log.Printf("failed to subscribe room broadcasts; cross-instance broadcast disabled: %v", err)
+	}
+	router.Any("/ws", gin.WrapH(webSocketHandler))
 
 	return router
 }
@@ -381,6 +433,11 @@ func (s *Server) Close() error {
 	}
 	if s.redis != nil {
 		if err := s.redis.Close(); err != nil && closeErr == nil {
+			closeErr = err
+		}
+	}
+	if s.eventBus != nil {
+		if err := s.eventBus.Close(); err != nil && closeErr == nil {
 			closeErr = err
 		}
 	}

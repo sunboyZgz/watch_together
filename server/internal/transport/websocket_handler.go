@@ -10,6 +10,7 @@ import (
 	"github.com/coder/websocket"
 	"golang.org/x/sync/semaphore"
 
+	"watch_together/server/internal/eventbus"
 	"watch_together/server/internal/protocol"
 	"watch_together/server/internal/realtime"
 	"watch_together/server/internal/room"
@@ -34,6 +35,8 @@ type WebSocketHandler struct {
 	tokenVerifier       accessTokenVerifier
 	deviceSwitches      *roomDeviceSwitchRegistry
 	deviceSwitchTimeout time.Duration
+	roomBroadcastBus    eventbus.RoomBroadcastBus
+	instanceID          string
 }
 
 const (
@@ -55,6 +58,8 @@ type WebSocketRuntimeConfig struct {
 	MaxRoomClients            int
 	RoomDeviceSwitchTimeout   time.Duration
 	SeekMinInterval           time.Duration
+	CrossInstanceBroadcast    bool
+	EventBus                  string
 }
 
 type latestRoomStateWriter interface {
@@ -139,6 +144,18 @@ func NewWebSocketHandlerWithConfigAndRoomStateWriterAndTokenVerifierAndRoomLeave
 		handler.roomMemberChecker = checker
 	}
 	return handler
+}
+
+func (h *WebSocketHandler) SetRoomBroadcastBus(instanceID string, bus eventbus.RoomBroadcastBus) {
+	h.instanceID = instanceID
+	h.roomBroadcastBus = bus
+}
+
+func (h *WebSocketHandler) SubscribeRoomBroadcasts(ctx context.Context) error {
+	if h == nil || h.roomBroadcastBus == nil {
+		return nil
+	}
+	return h.roomBroadcastBus.SubscribeRoomBroadcasts(ctx, h.handleRemoteRoomBroadcast)
 }
 
 func newWebSocketHandler(
@@ -1090,6 +1107,7 @@ func (h *WebSocketHandler) handleControlEvent(
 	h.cacheRoomState(state)
 	stats, err := h.broadcaster.Broadcast(ctx, roomClientWriters(clients), envelope)
 	h.logBroadcastStats(eventType, roomID, state.Seq, &state, stats, err)
+	h.publishRoomBroadcast(ctx, roomID, state.Seq, envelope)
 	return err
 }
 
@@ -1224,6 +1242,72 @@ func (h *WebSocketHandler) broadcastEnvelope(
 	return err
 }
 
+func (h *WebSocketHandler) broadcastEnvelopeAndPublish(
+	ctx context.Context,
+	roomID string,
+	seq int64,
+	clients []*room.ClientConnection,
+	envelope protocol.Envelope,
+) error {
+	err := h.broadcastEnvelope(ctx, roomID, clients, envelope)
+	h.publishRoomBroadcast(ctx, roomID, seq, envelope)
+	return err
+}
+
+func (h *WebSocketHandler) publishRoomBroadcast(
+	ctx context.Context,
+	roomID string,
+	seq int64,
+	envelope protocol.Envelope,
+) {
+	if h.roomBroadcastBus == nil || h.instanceID == "" || roomID == "" || envelope.Type == "" {
+		return
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	publishCtx, cancel := context.WithTimeout(ctx, time.Second)
+	defer cancel()
+
+	event := eventbus.RoomBroadcastEvent{
+		InstanceID:    h.instanceID,
+		RoomID:        roomID,
+		Type:          envelope.Type,
+		Payload:       envelope.Payload,
+		Seq:           seq,
+		PublishedAtMs: h.clock.NowUnixMilli(),
+	}
+	if err := h.roomBroadcastBus.PublishRoomEnvelope(publishCtx, event); err != nil {
+		log.Printf("room broadcast publish failed room=%s type=%s seq=%d err=%v", roomID, envelope.Type, seq, err)
+	}
+}
+
+func (h *WebSocketHandler) handleRemoteRoomBroadcast(ctx context.Context, event eventbus.RoomBroadcastEvent) {
+	if h == nil || h.roomManager == nil {
+		return
+	}
+	if event.InstanceID == "" || event.InstanceID == h.instanceID || event.RoomID == "" || event.Type == "" {
+		return
+	}
+	clients := h.roomManager.Clients(event.RoomID)
+	if len(clients) == 0 {
+		return
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	broadcastCtx, cancel := context.WithTimeout(ctx, defaultBroadcastEnqueueTimeout)
+	defer cancel()
+
+	envelope := protocol.Envelope{
+		Type:    event.Type,
+		Payload: event.Payload,
+	}
+	if err := h.broadcastEnvelope(broadcastCtx, event.RoomID, clients, envelope); err != nil {
+		log.Printf("remote room broadcast delivery failed room=%s type=%s seq=%d source_instance=%s err=%v", event.RoomID, event.Type, event.Seq, event.InstanceID, err)
+	}
+}
+
 func (h *WebSocketHandler) writeRoomState(
 	ctx context.Context,
 	client *room.ClientConnection,
@@ -1242,7 +1326,7 @@ func (h *WebSocketHandler) broadcastRoomState(result room.RemoveClientResult) {
 	defer cancel()
 
 	h.cacheRoomState(result.State)
-	_ = h.broadcastEnvelope(ctx, result.State.RoomID, result.Remaining, protocol.Envelope{
+	_ = h.broadcastEnvelopeAndPublish(ctx, result.State.RoomID, result.State.Seq, result.Remaining, protocol.Envelope{
 		Type:    protocol.TypeRoomState,
 		Payload: mustJSONRaw(roomStatePayload(result.State)),
 	})
@@ -1423,7 +1507,7 @@ func (h *WebSocketHandler) broadcastRoomMembersChangedToOthers(
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
-	_ = h.broadcastEnvelope(ctx, roomID, targets, protocol.Envelope{
+	_ = h.broadcastEnvelopeAndPublish(ctx, roomID, 0, targets, protocol.Envelope{
 		Type: protocol.TypeRoomMembersChanged,
 		Payload: mustJSONRaw(protocol.RoomMembersChangedPayload{
 			RoomID: roomID,

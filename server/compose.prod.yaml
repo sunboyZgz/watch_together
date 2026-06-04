@@ -30,6 +30,10 @@ services:
       timeout: 5s
       retries: 5
 
+  nats:
+    image: nats:2.10-alpine
+    restart: unless-stopped
+
   minio:
     image: quay.io/minio/minio:latest
     restart: unless-stopped
@@ -69,6 +73,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      nats:
+        condition: service_started
       minio-init:
         condition: service_completed_successfully
     env_file:
@@ -81,6 +87,11 @@ services:
       SERVER_INSTANCE_ID: ${SERVER_INSTANCE_ID:-roomserver-prod-1}
       ROOM_RUNTIME_MODE: ${ROOM_RUNTIME_MODE:-local_process}
       DEBUG_SYNC: "false"
+      WS_CROSS_INSTANCE_BROADCAST_ENABLED: ${WS_CROSS_INSTANCE_BROADCAST_ENABLED:-false}
+      WS_EVENT_BUS: ${WS_EVENT_BUS:-nats_core}
+      NATS_URL: ${NATS_URL:-nats://nats:4222}
+      NATS_NAME: ${NATS_NAME:-watch-together-roomserver}
+      NATS_SUBJECT_ROOM_BROADCAST: ${NATS_SUBJECT_ROOM_BROADCAST:-wt.room.broadcast.v1}
       DATABASE_URL: postgres://${POSTGRES_USER:-watch_together}:${POSTGRES_PASSWORD:-change_me_postgres_password}@postgres:5432/${POSTGRES_DB:-watch_together_prod}?sslmode=disable
       REDIS_ADDR: redis:6380
       REDIS_PASSWORD: ${REDIS_PASSWORD:-change_me_redis_password}

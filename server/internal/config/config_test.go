@@ -75,6 +75,21 @@ func TestLoadServerRuntimeConfigFallsBackToDefaults(t *testing.T) {
 	if cfg.WebSocket.SeekMinIntervalMs != 250 {
 		t.Fatalf("expected default seek min interval 250ms, got %d", cfg.WebSocket.SeekMinIntervalMs)
 	}
+	if cfg.WebSocket.CrossInstanceBroadcast {
+		t.Fatalf("expected cross-instance broadcast disabled by default")
+	}
+	if cfg.WebSocket.EventBus != "nats_core" {
+		t.Fatalf("expected default websocket event bus nats_core, got %q", cfg.WebSocket.EventBus)
+	}
+	if cfg.NATS.URL != "nats://127.0.0.1:4222" {
+		t.Fatalf("expected default nats url, got %q", cfg.NATS.URL)
+	}
+	if cfg.NATS.Name != "watch-together-roomserver" {
+		t.Fatalf("expected default nats name, got %q", cfg.NATS.Name)
+	}
+	if cfg.NATS.SubjectRoomBroadcast != "wt.room.broadcast.v1" {
+		t.Fatalf("expected default room broadcast subject, got %q", cfg.NATS.SubjectRoomBroadcast)
+	}
 	if cfg.Media.URLTTLSeconds != 7200 {
 		t.Fatalf("expected default media playback url ttl 7200s, got %d", cfg.Media.URLTTLSeconds)
 	}
@@ -110,6 +125,15 @@ func TestLoadServerRuntimeConfigRejectsUnsupportedRoomRuntimeMode(t *testing.T) 
 
 	if _, err := LoadServerRuntimeConfig(configDir); err == nil {
 		t.Fatalf("expected unsupported room runtime mode to fail config loading")
+	}
+}
+
+func TestLoadServerRuntimeConfigRejectsUnsupportedEventBus(t *testing.T) {
+	configDir := t.TempDir()
+	mustWriteConfigFile(t, filepath.Join(configDir, ".env"), "WS_EVENT_BUS=kafka\n")
+
+	if _, err := LoadServerRuntimeConfig(configDir); err == nil {
+		t.Fatalf("expected unsupported websocket event bus to fail config loading")
 	}
 }
 
@@ -188,7 +212,7 @@ func TestLoadServerRuntimeConfigLoadsWebSocketRuntimeSettings(t *testing.T) {
 	mustWriteConfigFile(
 		t,
 		filepath.Join(configDir, ".env"),
-		"WS_BROADCAST_CONCURRENCY_LIMIT=128\nWS_BROADCAST_TIMEOUT_MS=7000\nWS_BROADCAST_ENQUEUE_TIMEOUT_MS=1500\nWS_CLIENT_OUTBOX_CAPACITY=32\nWS_MAX_CONNECTIONS=1000\nROOM_MAX_CLIENTS=25\nWS_SEEK_MIN_INTERVAL_MS=100\n",
+		"WS_BROADCAST_CONCURRENCY_LIMIT=128\nWS_BROADCAST_TIMEOUT_MS=7000\nWS_BROADCAST_ENQUEUE_TIMEOUT_MS=1500\nWS_CLIENT_OUTBOX_CAPACITY=32\nWS_MAX_CONNECTIONS=1000\nROOM_MAX_CLIENTS=25\nWS_SEEK_MIN_INTERVAL_MS=100\nWS_CROSS_INSTANCE_BROADCAST_ENABLED=true\nWS_EVENT_BUS=nats_core\n",
 	)
 
 	cfg, err := LoadServerRuntimeConfig(configDir)
@@ -216,6 +240,36 @@ func TestLoadServerRuntimeConfigLoadsWebSocketRuntimeSettings(t *testing.T) {
 	}
 	if cfg.WebSocket.SeekMinIntervalMs != 100 {
 		t.Fatalf("expected seek min interval 100ms, got %d", cfg.WebSocket.SeekMinIntervalMs)
+	}
+	if !cfg.WebSocket.CrossInstanceBroadcast {
+		t.Fatalf("expected cross-instance broadcast enabled")
+	}
+	if cfg.WebSocket.EventBus != "nats_core" {
+		t.Fatalf("expected event bus nats_core, got %q", cfg.WebSocket.EventBus)
+	}
+}
+
+func TestLoadServerRuntimeConfigLoadsNATSSettings(t *testing.T) {
+	configDir := t.TempDir()
+	mustWriteConfigFile(
+		t,
+		filepath.Join(configDir, ".env"),
+		"NATS_URL=nats://nats:4222\nNATS_NAME=roomserver-a\nNATS_SUBJECT_ROOM_BROADCAST=wt.room.broadcast.test\n",
+	)
+
+	cfg, err := LoadServerRuntimeConfig(configDir)
+	if err != nil {
+		t.Fatalf("load runtime config: %v", err)
+	}
+
+	if cfg.NATS.URL != "nats://nats:4222" {
+		t.Fatalf("expected nats url, got %q", cfg.NATS.URL)
+	}
+	if cfg.NATS.Name != "roomserver-a" {
+		t.Fatalf("expected nats name, got %q", cfg.NATS.Name)
+	}
+	if cfg.NATS.SubjectRoomBroadcast != "wt.room.broadcast.test" {
+		t.Fatalf("expected room broadcast subject, got %q", cfg.NATS.SubjectRoomBroadcast)
 	}
 }
 

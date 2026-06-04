@@ -383,6 +383,18 @@ func (m *Manager) ClientCount(roomID string) int {
 	return room.ClientCount()
 }
 
+// Clients returns a snapshot of local clients for an existing room without
+// creating the room or changing playback authority.
+func (m *Manager) Clients(roomID string) []*ClientConnection {
+	m.mu.RLock()
+	room, ok := m.rooms[roomID]
+	m.mu.RUnlock()
+	if !ok {
+		return nil
+	}
+	return room.ClientsSnapshot()
+}
+
 // Get returns one room by ID without creating a new one.
 func (m *Manager) Get(roomID string) (*Room, bool) {
 	m.mu.Lock()

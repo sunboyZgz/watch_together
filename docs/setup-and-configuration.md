@@ -2,11 +2,11 @@
 
 ## Local Infrastructure
 
-Start the local PostgreSQL, Redis, and MinIO services from the server directory:
+Start the local PostgreSQL, Redis, NATS, and MinIO services from the server directory:
 
 ```bash
 cd server
-docker compose up -d postgres redis minio minio-init
+docker compose up -d postgres redis nats minio minio-init
 ```
 
 Default local endpoints:
@@ -14,6 +14,7 @@ Default local endpoints:
 ```text
 PostgreSQL: 127.0.0.1:5432
 Redis:      127.0.0.1:6380
+NATS:       127.0.0.1:4222
 MinIO API:  127.0.0.1:9100
 MinIO UI:   127.0.0.1:9101
 ```
@@ -73,6 +74,11 @@ WS_CLIENT_OUTBOX_CAPACITY=64
 WS_MAX_CONNECTIONS=0
 ROOM_MAX_CLIENTS=0
 WS_SEEK_MIN_INTERVAL_MS=250
+WS_CROSS_INSTANCE_BROADCAST_ENABLED=false
+WS_EVENT_BUS=nats_core
+NATS_URL=nats://127.0.0.1:4222
+NATS_NAME=watch-together-roomserver
+NATS_SUBJECT_ROOM_BROADCAST=wt.room.broadcast.v1
 MEDIA_DELIVERY_MODE=signed_redirect
 MEDIA_PLAYBACK_SIGNING_SECRET=<secret>
 MEDIA_PLAYBACK_URL_TTL_SECONDS=7200
@@ -91,6 +97,12 @@ MEDIA_STORAGE_FORCE_PATH_STYLE=true
 `ROOM_RUNTIME_MODE` currently supports only `local_process`. It explicitly marks that active room playback authority, WebSocket connection tables, control deduplication, and seek rate limiting still live in one Go process. Unsupported values fail config loading.
 
 If `DATABASE_URL` is empty or PostgreSQL cannot be opened, database-backed HTTP endpoints return `503`. If `REDIS_ADDR` is empty, the Redis-backed room state cache is disabled.
+
+`WS_CROSS_INSTANCE_BROADCAST_ENABLED` controls Phase 3 cross-instance WebSocket fan-out. It defaults to `false`. When set to `true`, `WS_EVENT_BUS` currently accepts only `nats_core`, and `roomserver` publishes local WebSocket broadcast envelopes to `NATS_SUBJECT_ROOM_BROADCAST`.
+
+Each `roomserver` instance subscribes directly to the same NATS Core subject. Do not configure a NATS queue group for room broadcasts, because every instance needs the same broadcast message. JetStream is not enabled in this phase, so NATS is not a durable event log or playback authority. `ROOM_RUNTIME_MODE=local_process` and Redis `room_state` snapshot behavior remain unchanged.
+
+If cross-instance broadcast is enabled but NATS cannot be opened, the server logs the connection failure and continues with local-process WebSocket behavior.
 
 Start the server:
 
@@ -164,6 +176,7 @@ Production deployment uses `server/compose.prod.yaml`. Its intended boundary is:
 
 - Only Nginx exposes HTTP to the public network.
 - Go `roomserver`, PostgreSQL, Redis, and MinIO stay on the Docker network.
+- NATS stays on the Docker network and is used only for optional WebSocket fan-out.
 - Media delivery defaults to `MEDIA_DELIVERY_MODE=nginx_auth_request`.
 
 See [server/deploy/README.md](../server/deploy/README.md) for deployment-specific commands and Nginx details.
