@@ -145,7 +145,7 @@ Stores reliable delivery work for Kafka room timeline result events:
 - `published_at`
 - timestamps
 
-Rows are written by the authority `roomserver` after accepted/rejected control decisions and membership events. `cmd/outboxworker` claims pending rows with `FOR UPDATE SKIP LOCKED`, publishes to Kafka, then marks rows as `published` or schedules retry.
+Rows are written by the authority `roomserver` after accepted/rejected control decisions and membership events. `cmd/outboxworker` claims pending rows with `FOR UPDATE SKIP LOCKED`, publishes to Kafka, then marks rows as `published` or schedules retry. During Phase 5 authority recovery, same-room `pending` and `publishing` rows are merged after Kafka replay so already-decided events are not lost while asynchronous publishing catches up.
 
 ## Runtime State
 
@@ -168,7 +168,7 @@ wt:room:state:{roomCode}:v1
 
 The cached value is the WebSocket `room_state` payload: room code, media ID, optional media duration, host user ID, paused/ended flags, position, velocity, server time, reason, playback rate, and `seq`. The default TTL is currently 10 minutes.
 
-The cache is written after HTTP room runtime bootstrap and WebSocket state transitions. It is readable through the cache layer for future recovery work, but Phase 2 still treats it as a latest-snapshot cache only. It does not store WebSocket connection objects, send queues, heartbeat state, control deduplication, seek rate limits, online presence, or active-device ownership.
+The cache is written after HTTP room runtime bootstrap, WebSocket state transitions, and completed authority recovery. It can serve quick read-only snapshots, but it is not the recovery source of truth; Phase 5 rebuilds writable authority from Kafka timeline events plus unpublished PostgreSQL outbox rows. It does not store WebSocket connection objects, send queues, heartbeat state, seek rate limits, online presence, or active-device ownership.
 
 In `distributed_authority`, Redis also stores:
 
@@ -177,7 +177,7 @@ wt:room:authority:{roomId}:v1
 wt:room:active_device:{roomId}:{userId}:v1
 ```
 
-The authority value contains `instanceId` and `leaseUntilMs`. The active-device value contains `deviceId`, `instanceId`, `connectionId`, and `leaseUntilMs`.
+The authority value contains `instanceId`, `epoch`, `status`, and `leaseUntilMs`. `status=active` means the instance can apply room controls for the current epoch. `status=recovering` fences a takeover attempt while one instance replays Kafka and restores local room state. Same-instance renewals keep the epoch; successful takeover after lease expiry increments it. The active-device value contains `deviceId`, `instanceId`, `connectionId`, and `leaseUntilMs`.
 
 Kafka stores JSON v1 room result events:
 
@@ -187,7 +187,7 @@ wt.room.control_result.v1
 wt.room.membership.v1
 ```
 
-The canonical topic is the durable room timeline result log. Derived topics are produced by `cmd/derivedworker`.
+The canonical topic is the durable room timeline result log and Phase 5 authority recovery source. Recovery applies only `room.control.accepted` events to rebuild playback state. Rejected control events and membership events remain audit and retry context; they do not change recovered playback state. Derived topics are produced by `cmd/derivedworker`.
 
 ## Startup And Cleanup
 

@@ -78,6 +78,12 @@ func main() {
 			TopicRoomMembership:    runtimeConfig.Kafka.TopicRoomMembership,
 			DerivedConsumerGroupID: runtimeConfig.Kafka.DerivedConsumerGroupID,
 		},
+		AuthorityRecovery: app.AuthorityRecoveryConfig{
+			RenewInterval:        time.Duration(runtimeConfig.AuthorityRecovery.RenewIntervalMs) * time.Millisecond,
+			TakeoverScanInterval: time.Duration(runtimeConfig.AuthorityRecovery.TakeoverScanIntervalMs) * time.Millisecond,
+			RecoveryTimeout:      time.Duration(runtimeConfig.AuthorityRecovery.RecoveryTimeoutMs) * time.Millisecond,
+			KafkaReplayTimeout:   time.Duration(runtimeConfig.AuthorityRecovery.KafkaReplayTimeoutMs) * time.Millisecond,
+		},
 		Media: app.MediaPlaybackConfig{
 			DeliveryMode:           runtimeConfig.Media.DeliveryMode,
 			SigningSecret:          runtimeConfig.Media.SigningSecret,

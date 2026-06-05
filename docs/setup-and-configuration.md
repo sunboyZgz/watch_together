@@ -90,6 +90,10 @@ KAFKA_DERIVED_CONSUMER_GROUP_ID=watch-together-derived-workers
 KAFKA_DERIVED_WORKER_POLL_INTERVAL_MS=1000
 OUTBOX_WORKER_BATCH_SIZE=50
 OUTBOX_WORKER_POLL_INTERVAL_MS=1000
+AUTHORITY_RENEW_INTERVAL_MS=10000
+AUTHORITY_TAKEOVER_SCAN_INTERVAL_MS=30000
+AUTHORITY_RECOVERY_TIMEOUT_MS=5000
+KAFKA_REPLAY_TIMEOUT_MS=1000
 MEDIA_DELIVERY_MODE=signed_redirect
 MEDIA_PLAYBACK_SIGNING_SECRET=<secret>
 MEDIA_PLAYBACK_URL_TTL_SECONDS=7200
@@ -115,9 +119,18 @@ Each `roomserver` instance subscribes directly to the same NATS Core subject. Do
 
 If cross-instance broadcast is enabled but NATS cannot be opened, the server logs the connection failure and continues with local-process WebSocket behavior.
 
-In `distributed_authority`, NATS is also used for internal control request/reply through `NATS_SUBJECT_ROOM_CONTROL`. Kafka is used only for durable room timeline result logging through PostgreSQL outbox workers. Online WebSocket fan-out still uses NATS Core and local connection tables.
+In `distributed_authority`, NATS is also used for internal control request/reply through `NATS_SUBJECT_ROOM_CONTROL`. Kafka is used for durable room timeline result logging through PostgreSQL outbox workers and Phase 5 authority recovery replay. Online WebSocket fan-out still uses NATS Core and local connection tables.
 
-See [distributed-architecture.md](./distributed-architecture.md) for the Phase 4 module map and data flows.
+Authority recovery settings:
+
+- `AUTHORITY_RENEW_INTERVAL_MS` controls how often the current instance renews active authority leases for rooms it owns.
+- `AUTHORITY_TAKEOVER_SCAN_INTERVAL_MS` controls the low-frequency background scan for active or grace-period rooms whose authority lease is missing or expired.
+- `AUTHORITY_RECOVERY_TIMEOUT_MS` bounds the whole recovery attempt.
+- `KAFKA_REPLAY_TIMEOUT_MS` bounds canonical timeline replay for one room.
+
+When a Redis authority lease expires, Phase 5 recovery can claim `status=recovering` with a higher epoch, replay `wt.room.timeline.v1`, merge same-room `pending` and `publishing` outbox rows, register recovered playback state locally, then complete a new active authority lease. Kafka remains a result log, not a command ingress path; Redis `room_state` remains a latest snapshot cache.
+
+See [distributed-architecture.md](./distributed-architecture.md) for the Phase 5 module map and data flows.
 
 Worker examples:
 

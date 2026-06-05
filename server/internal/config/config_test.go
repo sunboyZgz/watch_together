@@ -107,6 +107,12 @@ func TestLoadServerRuntimeConfigFallsBackToDefaults(t *testing.T) {
 	if cfg.OutboxWorker.BatchSize != 50 || cfg.OutboxWorker.PollIntervalMs != 1000 {
 		t.Fatalf("unexpected default outbox worker config: %+v", cfg.OutboxWorker)
 	}
+	if cfg.AuthorityRecovery.RenewIntervalMs != 10000 ||
+		cfg.AuthorityRecovery.TakeoverScanIntervalMs != 30000 ||
+		cfg.AuthorityRecovery.RecoveryTimeoutMs != 5000 ||
+		cfg.AuthorityRecovery.KafkaReplayTimeoutMs != 1000 {
+		t.Fatalf("unexpected default authority recovery config: %+v", cfg.AuthorityRecovery)
+	}
 	if cfg.Media.URLTTLSeconds != 7200 {
 		t.Fatalf("expected default media playback url ttl 7200s, got %d", cfg.Media.URLTTLSeconds)
 	}
@@ -357,7 +363,7 @@ func TestLoadServerRuntimeConfigLoadsKafkaAndOutboxSettings(t *testing.T) {
 	mustWriteConfigFile(
 		t,
 		filepath.Join(configDir, ".env"),
-		"KAFKA_BROKERS=kafka:9092,kafka-2:9092\nKAFKA_CLIENT_ID=roomserver-a\nKAFKA_TOPIC_ROOM_TIMELINE=timeline.test\nKAFKA_TOPIC_ROOM_CONTROL_RESULT=control.test\nKAFKA_TOPIC_ROOM_MEMBERSHIP=membership.test\nKAFKA_DERIVED_CONSUMER_GROUP_ID=derived-test\nKAFKA_DERIVED_WORKER_POLL_INTERVAL_MS=2500\nOUTBOX_WORKER_BATCH_SIZE=25\nOUTBOX_WORKER_POLL_INTERVAL_MS=500\n",
+		"KAFKA_BROKERS=kafka:9092,kafka-2:9092\nKAFKA_CLIENT_ID=roomserver-a\nKAFKA_TOPIC_ROOM_TIMELINE=timeline.test\nKAFKA_TOPIC_ROOM_CONTROL_RESULT=control.test\nKAFKA_TOPIC_ROOM_MEMBERSHIP=membership.test\nKAFKA_DERIVED_CONSUMER_GROUP_ID=derived-test\nKAFKA_DERIVED_WORKER_POLL_INTERVAL_MS=2500\nOUTBOX_WORKER_BATCH_SIZE=25\nOUTBOX_WORKER_POLL_INTERVAL_MS=500\nAUTHORITY_RENEW_INTERVAL_MS=7000\nAUTHORITY_TAKEOVER_SCAN_INTERVAL_MS=17000\nAUTHORITY_RECOVERY_TIMEOUT_MS=4500\nKAFKA_REPLAY_TIMEOUT_MS=800\n",
 	)
 
 	cfg, err := LoadServerRuntimeConfig(configDir)
@@ -378,6 +384,12 @@ func TestLoadServerRuntimeConfigLoadsKafkaAndOutboxSettings(t *testing.T) {
 	}
 	if cfg.OutboxWorker.BatchSize != 25 || cfg.OutboxWorker.PollIntervalMs != 500 {
 		t.Fatalf("unexpected outbox worker config: %+v", cfg.OutboxWorker)
+	}
+	if cfg.AuthorityRecovery.RenewIntervalMs != 7000 ||
+		cfg.AuthorityRecovery.TakeoverScanIntervalMs != 17000 ||
+		cfg.AuthorityRecovery.RecoveryTimeoutMs != 4500 ||
+		cfg.AuthorityRecovery.KafkaReplayTimeoutMs != 800 {
+		t.Fatalf("unexpected authority recovery config: %+v", cfg.AuthorityRecovery)
 	}
 }
 

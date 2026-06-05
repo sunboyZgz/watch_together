@@ -117,6 +117,16 @@ func NewCreatedRoomWithMedia(id string, hostUserID string, mediaID string, media
 	return room
 }
 
+func NewRecoveredRoom(state State) *Room {
+	roomID := state.RoomID
+	if roomID == "" {
+		roomID = "recovered"
+	}
+	room := New(roomID)
+	room.RestoreState(state)
+	return room
+}
+
 // ID returns the stable room identifier.
 func (r *Room) ID() string {
 	return r.id
@@ -141,6 +151,32 @@ func (r *Room) BindMedia(mediaID string, mediaDurationMs *int64) State {
 	r.state.MediaID = mediaID
 	if mediaDurationMs != nil {
 		r.state.MediaDurationMs = cloneDurationMs(mediaDurationMs)
+	}
+	return r.currentStateLocked(r.now())
+}
+
+func (r *Room) RestoreState(state State) State {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if state.RoomID == "" {
+		state.RoomID = r.id
+	}
+	if state.MediaDurationMs != nil {
+		state.MediaDurationMs = cloneDurationMs(state.MediaDurationMs)
+	}
+	if state.PlaybackRate <= 0 {
+		state.PlaybackRate = 1.0
+	}
+	if state.Seq <= 0 {
+		state.Seq = 1
+	}
+	if state.ServerTimeMs <= 0 {
+		state.ServerTimeMs = r.now().UnixMilli()
+	}
+	r.state = state
+	if state.HostUserID != "" {
+		r.ownerUserID = state.HostUserID
 	}
 	return r.currentStateLocked(r.now())
 }

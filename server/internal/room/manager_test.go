@@ -448,3 +448,40 @@ func TestRegisterCreatedRoomStartsGracePeriodUntilFirstJoin(t *testing.T) {
 		)
 	}
 }
+
+func TestManagerRegisterRecoveredRoomRestoresStateAndKeepsClients(t *testing.T) {
+	manager := NewManager()
+	runtimeRoom := manager.RegisterCreatedRoom("ROOM01", "user_a", "sample_001")
+	client := NewClientConnection(nil)
+	client.SetIdentity("user_a", "ROOM01")
+	if join := runtimeRoom.Join(client); join.Err != nil {
+		t.Fatalf("join room: %v", join.Err)
+	}
+
+	recovered := State{
+		RoomID:       "ROOM01",
+		MediaID:      "sample_001",
+		HostUserID:   "user_a",
+		Paused:       false,
+		Ended:        false,
+		PositionMs:   10_000,
+		Velocity:     1,
+		ServerTimeMs: time.Now().UnixMilli(),
+		PlaybackRate: 1.25,
+		Seq:          7,
+		Reason:       "play",
+	}
+	manager.RegisterRecoveredRoom(recovered)
+
+	if manager.ClientCount("ROOM01") != 1 {
+		t.Fatalf("expected recovered room to keep existing client")
+	}
+	current, ok := manager.Get("ROOM01")
+	if !ok {
+		t.Fatalf("expected recovered room to exist")
+	}
+	state := current.StateSnapshot()
+	if state.Seq != 7 || state.PlaybackRate != 1.25 || state.PositionMs < 10_000 {
+		t.Fatalf("unexpected recovered state: %+v", state)
+	}
+}

@@ -457,3 +457,21 @@ func (s *PostgresRoomStore) CleanupExpiredRoomCodes(ctx context.Context, now tim
 	}
 	return roomCodes, nil
 }
+
+func (s *PostgresRoomStore) ListRecoverableRoomCodes(ctx context.Context, limit int) ([]string, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	const query = `
+		SELECT room_code
+		FROM rooms
+		WHERE status IN ('active', 'grace_period')
+		ORDER BY updated_at DESC
+		LIMIT ?
+	`
+	var roomCodes []string
+	if err := s.db.WithContext(ctx).Raw(query, limit).Scan(&roomCodes).Error; err != nil {
+		return nil, fmt.Errorf("list recoverable rooms: %w", err)
+	}
+	return roomCodes, nil
+}

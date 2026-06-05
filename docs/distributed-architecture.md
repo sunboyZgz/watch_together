@@ -1,6 +1,6 @@
 # Distributed Architecture
 
-Phase 4 introduces the distributed room infrastructure MVP while keeping the public HTTP API and playback control payloads small. `local_process` remains supported. `distributed_authority` adds Redis authority leases, Redis active-device ownership, NATS Core internal routing, PostgreSQL outbox, and Kafka timeline topics.
+Phase 4 introduced the distributed room infrastructure MVP while keeping the public HTTP API and playback control payloads small. `local_process` remains supported. `distributed_authority` adds Redis authority leases, Redis active-device ownership, NATS Core internal routing, PostgreSQL outbox, and Kafka timeline topics. Phase 5 adds authority recovery: expired authority leases can be fenced, recovered from Kafka canonical timeline events, completed as a new active authority epoch, and resumed without moving WebSocket connections.
 
 ## Architecture Mode
 
@@ -11,7 +11,7 @@ Android remains a session client:
 - `join_room.payload.deviceId` is required. Android generates one local device ID, stores it in `device.xml`, and excludes it from cloud backup and device transfer.
 - The client consumes server WebSocket envelopes and does not know whether the current `roomserver` is authoritative.
 
-Backend mode in Phase 4:
+Backend mode in `distributed_authority`:
 
 - `transport` owns HTTP and WebSocket protocol handling.
 - `room` owns in-process room state for the authoritative instance.
@@ -21,6 +21,7 @@ Backend mode in Phase 4:
 - `timeline` owns Kafka JSON v1 event shape, outbox dispatch, and derived-topic dispatch.
 - `cmd/outboxworker` publishes outbox rows to the canonical Kafka topic.
 - `cmd/derivedworker` derives control-result and membership topics from the canonical timeline.
+- `recovery` owns authority takeover, Kafka replay, unpublished outbox merge, and recovered `room.Manager` registration.
 
 ## Module View
 
@@ -38,6 +39,7 @@ flowchart LR
   OutboxWorker[cmd/outboxworker]
   Kafka[(Kafka)]
   Derived[cmd/derivedworker]
+  Recovery[recovery service]
 
   Android -->|HTTP bootstrap| HTTP
   Android -->|WebSocket envelopes| WS
@@ -56,21 +58,27 @@ flowchart LR
   OutboxWorker -->|canonical JSON v1| Kafka
   Derived -->|consume canonical| Kafka
   Derived -->|publish derived topics| Kafka
+  Recovery -->|begin/complete authority epoch| Redis
+  Recovery -->|room metadata| PG
+  Recovery -->|replay canonical events| Kafka
+  Recovery -->|merge pending/publishing rows| Outbox
+  Recovery -->|register recovered state| Room
 ```
 
 ## Runtime Boundaries
 
-| Boundary | Owner | Phase 4 role |
+| Boundary | Owner | Phase 5 role |
 | --- | --- | --- |
 | Local WebSocket connection | `roomserver` process | Never leaves process memory. |
 | Latest room snapshot | Redis `wt:room:state:{roomId}:v1` | Recovery-oriented cache, not authority. |
-| Room authority lease | Redis `wt:room:authority:{roomId}:v1` | Identifies the instance allowed to mutate room playback state. |
+| Room authority lease | Redis `wt:room:authority:{roomId}:v1` | Identifies the instance allowed to mutate room playback state; Phase 5 adds `epoch` and `status`. |
 | Active device lease | Redis `wt:room:active_device:{roomId}:{userId}:v1` | Guards one active client device per room user. |
 | Durable room business state | PostgreSQL | Rooms, members, media, users, progress. |
 | Reliable Kafka compensation | PostgreSQL outbox | Pending canonical timeline events. |
 | Durable timeline | Kafka `wt.room.timeline.v1` | Accepted/rejected control and membership result log. |
 | Derived topics | Kafka | `wt.room.control_result.v1`, `wt.room.membership.v1`. |
 | Realtime internal routing | NATS Core | Broadcast fan-out and non-authority control request/reply. |
+| Recovery replay | Kafka + PostgreSQL outbox | Rebuilds authority state after an expired authority lease. |
 
 ## Control Flow
 
@@ -107,6 +115,26 @@ sequenceDiagram
   N-->>B: realtime broadcast to local clients
   P->>K: outboxworker publishes canonical event
   K->>K: derivedworker publishes domain topics
+```
+
+## Recovery Flow
+
+```mermaid
+sequenceDiagram
+  participant B as roomserver B
+  participant R as Redis
+  participant P as PostgreSQL
+  participant K as Kafka
+  participant M as room.Manager
+
+  B->>R: BeginRecovery(roomId)
+  R-->>B: recovering lease epoch=N
+  B->>P: load room metadata
+  B->>K: replay wt.room.timeline.v1 for roomId
+  B->>P: read pending/publishing outbox rows
+  B->>M: RegisterRecoveredRoom(state)
+  B->>R: CompleteRecovery(epoch=N)
+  R-->>B: active lease epoch=N
 ```
 
 ## Data Flows
@@ -150,7 +178,7 @@ Non-authority control forwarding:
 
 Active-device switch:
 
-- Phase 4 externalizes active-device ownership to Redis.
+- `distributed_authority` externalizes active-device ownership to Redis.
 - Same `deviceId` may refresh ownership with a newer `connectionId`.
 - A different `deviceId` conflicts unless the existing lease expires or is released by matching `deviceId + connectionId`.
 
@@ -174,11 +202,21 @@ Realtime fan-out:
 3. Subscribers drop their own `instanceId`.
 4. Remote events are delivered only to local WebSocket clients for that room and do not mutate local authority state.
 
-## Not Phase 4 Goals
+Authority recovery:
+
+1. A join, room state request, control event, or low-frequency scanner discovers a missing or expired authority lease.
+2. One instance enters Redis `status=recovering` and increments the authority `epoch`.
+3. The instance loads room metadata from PostgreSQL.
+4. The instance replays `room.control.accepted` events from `wt.room.timeline.v1`.
+5. The instance merges same-room `pending` and `publishing` outbox events by event id.
+6. The instance registers recovered playback state in local `room.Manager`.
+7. Redis authority is completed as `status=active` for the new epoch.
+8. NATS control forwarding and broadcast messages carry `authorityEpoch`; stale epoch messages are rejected or dropped.
+
+## Not Phase 5 Goals
 
 - Kafka is not the online broadcast final hop.
 - Kafka is not the command ingress log.
 - JetStream is not enabled.
-- Automatic authority takeover after lease expiry is not implemented.
-- Distributed seek rate-limit, distributed dedup, and full presence are not complete.
+- Distributed seek rate-limit and full presence are not complete.
 - WebSocket connection objects never move between instances.

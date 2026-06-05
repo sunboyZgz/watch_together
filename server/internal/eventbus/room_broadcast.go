@@ -22,12 +22,13 @@ const (
 var ErrEventBusDisabled = errors.New("event bus is disabled")
 
 type RoomBroadcastEvent struct {
-	InstanceID    string          `json:"instanceId"`
-	RoomID        string          `json:"roomId"`
-	Type          string          `json:"type"`
-	Payload       json.RawMessage `json:"payload"`
-	Seq           int64           `json:"seq,omitempty"`
-	PublishedAtMs int64           `json:"publishedAtMs"`
+	InstanceID     string          `json:"instanceId"`
+	RoomID         string          `json:"roomId"`
+	Type           string          `json:"type"`
+	Payload        json.RawMessage `json:"payload"`
+	Seq            int64           `json:"seq,omitempty"`
+	AuthorityEpoch int64           `json:"authorityEpoch,omitempty"`
+	PublishedAtMs  int64           `json:"publishedAtMs"`
 }
 
 type RoomBroadcastHandler func(ctx context.Context, event RoomBroadcastEvent)

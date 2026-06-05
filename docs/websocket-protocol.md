@@ -131,6 +131,7 @@ Implemented safeguards:
 - The broadcaster has bounded concurrency, per-client outbox capacity, enqueue timeouts, and room-state coalescing.
 - In `distributed_authority`, controls are accepted only from the current Redis active-device lease.
 - In `distributed_authority`, non-authority instances forward controls to the Redis-declared authority instance over NATS request/reply.
+- In Phase 5 recovery, authority epochs are fenced internally. Clients do not send or receive epoch fields, but they may receive `room authority recovering` while a room is being rebuilt.
 
 ## Heartbeat And Clock Sync
 

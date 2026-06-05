@@ -42,12 +42,13 @@ func TestNormalizeNATSConfigDefaults(t *testing.T) {
 func TestRoomBroadcastEventRoundTrip(t *testing.T) {
 	payload := json.RawMessage(`{"roomId":"ROOM01","seq":4}`)
 	event := RoomBroadcastEvent{
-		InstanceID:    "roomserver-a",
-		RoomID:        "ROOM01",
-		Type:          "play",
-		Payload:       payload,
-		Seq:           4,
-		PublishedAtMs: 12345,
+		InstanceID:     "roomserver-a",
+		RoomID:         "ROOM01",
+		Type:           "play",
+		Payload:        payload,
+		Seq:            4,
+		AuthorityEpoch: 7,
+		PublishedAtMs:  12345,
 	}
 
 	data, err := EncodeRoomBroadcastEvent(event)
@@ -63,6 +64,7 @@ func TestRoomBroadcastEventRoundTrip(t *testing.T) {
 		decoded.RoomID != event.RoomID ||
 		decoded.Type != event.Type ||
 		decoded.Seq != event.Seq ||
+		decoded.AuthorityEpoch != event.AuthorityEpoch ||
 		decoded.PublishedAtMs != event.PublishedAtMs ||
 		string(decoded.Payload) != string(payload) {
 		t.Fatalf("unexpected decoded event: %+v", decoded)
@@ -115,6 +117,7 @@ func TestRoomControlRequestRoundTrip(t *testing.T) {
 		Type:             "play",
 		Payload:          payload,
 		Seq:              4,
+		AuthorityEpoch:   7,
 		RequestedAtMs:    12345,
 	}
 
@@ -134,6 +137,7 @@ func TestRoomControlRequestRoundTrip(t *testing.T) {
 		decoded.ConnectionID != request.ConnectionID ||
 		decoded.Type != request.Type ||
 		decoded.Seq != request.Seq ||
+		decoded.AuthorityEpoch != request.AuthorityEpoch ||
 		string(decoded.Payload) != string(payload) {
 		t.Fatalf("unexpected decoded request: %+v", decoded)
 	}

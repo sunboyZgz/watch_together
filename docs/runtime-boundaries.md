@@ -1,6 +1,6 @@
 # Runtime Boundaries
 
-This document records the runtime ownership boundaries for the room system. `local_process` remains the default runtime, and Phase 4 adds a `distributed_authority` MVP for multi-instance room authority.
+This document records the runtime ownership boundaries for the room system. `local_process` remains the default runtime. Phase 4 adds a `distributed_authority` MVP for multi-instance room authority, and Phase 5 adds fenced authority recovery from the Kafka canonical timeline.
 
 ## Phase 1 Boundary Markers
 
@@ -13,7 +13,7 @@ ROOM_RUNTIME_MODE=local_process
 
 - `SERVER_INSTANCE_ID` is optional metadata for logs, health checks, and load-balancer diagnostics. Set a unique value per roomserver replica in multi-instance experiments.
 - `ROOM_RUNTIME_MODE=local_process` keeps playback authority in one process.
-- `ROOM_RUNTIME_MODE=distributed_authority` enables Redis authority leases, Redis active-device ownership, NATS control forwarding, PostgreSQL outbox, and Kafka timeline logging.
+- `ROOM_RUNTIME_MODE=distributed_authority` enables Redis authority leases, Redis active-device ownership, NATS control forwarding, PostgreSQL outbox, Kafka timeline logging, and Phase 5 authority recovery.
 
 `GET /healthz` still returns `ok`, and now includes:
 
@@ -30,12 +30,13 @@ X-Watch-Together-Room-Runtime: local_process
 | HTTP auth, home, media, room, progress APIs | PostgreSQL-backed services | Mostly stateless request handling; DB-backed handlers can run on any instance. |
 | WebSocket connection objects | Local Go process memory | Must remain local; future cross-instance work should broadcast between local connection tables. |
 | Active room playback authority | `internal/room.Manager` on the authority instance | Local in `local_process`; guarded by Redis authority lease in `distributed_authority`. |
-| Latest room snapshot cache | Optional Redis `room_state` cache | Written from HTTP runtime bootstrap and WebSocket state transitions; readable for future recovery paths, but not the current write authority. |
+| Latest room snapshot cache | Optional Redis `room_state` cache | Written from HTTP runtime bootstrap, WebSocket state transitions, and completed recovery; readable for quick snapshots, but not the write authority. |
 | Cross-instance WebSocket fan-out | Optional NATS Core subject | When enabled, forwards already-built WebSocket envelopes between roomserver instances; not a state authority. |
-| Room authority routing | Redis lease + NATS request/reply | Only in `distributed_authority`; non-authority instances forward controls to the authority instance. |
+| Room authority routing | Redis lease + NATS request/reply | Only in `distributed_authority`; non-authority instances forward controls to the authority instance and include the current authority epoch. |
 | Active-device ownership | Redis lease | Only in `distributed_authority`; guards `deviceId + connectionId` ownership per room user. |
-| Durable room timeline | PostgreSQL outbox + Kafka | Only in `distributed_authority`; Kafka is a result log, not a command ingress or online fan-out path. |
-| Control deduplication | Local WebSocket handler memory | Still process-local; future phases should externalize if multiple instances can host one room. |
+| Durable room timeline | PostgreSQL outbox + Kafka | Only in `distributed_authority`; Kafka is a result log and recovery source, not a command ingress or online fan-out path. |
+| Authority recovery | Recovery service + Redis + Kafka + PostgreSQL outbox | Begins a recovering lease after expiry, replays Kafka, merges unpublished outbox rows, and completes a new active epoch. |
+| Control deduplication | Local WebSocket handler memory | Still mostly process-local; Phase 5 seeds recent recovered request IDs for minimal retry protection. |
 | Seek rate limiting | Local WebSocket handler memory | Still process-local; future phases should externalize or shard room authority. |
 | Room metadata and membership | PostgreSQL | Durable business state. |
 | Media metadata | PostgreSQL | Durable catalog state. |
@@ -63,7 +64,7 @@ NATS_SUBJECT_ROOM_BROADCAST=wt.room.broadcast.v1
 
 The default remains disabled. When enabled, each `roomserver` opens a normal NATS Core subscription to the same room broadcast subject. Do not use a NATS queue group for this subject: queue groups divide messages across subscribers, while room broadcast fan-out requires every roomserver instance to receive each message.
 
-Published events contain `instanceId`, `roomId`, envelope `type`, envelope `payload`, `seq`, and `publishedAtMs`. Clients still receive the original WebSocket envelope only; no client-visible payload fields are added. The subscriber drops messages from its own `instanceId`, looks up current local clients for the target room, and enqueues the original envelope to those connections.
+Published events contain `instanceId`, `roomId`, envelope `type`, envelope `payload`, `seq`, `publishedAtMs`, and, in `distributed_authority`, `authorityEpoch`. Clients still receive the original WebSocket envelope only; no client-visible payload fields are added. The subscriber drops messages from its own `instanceId`, drops stale authority epochs, looks up current local clients for the target room, and enqueues the original envelope to those connections.
 
 NATS Core is only real-time distribution in this phase. It is not Redis authority, Kafka authority, JetStream storage, durable replay, distributed control ordering, distributed deduplication, distributed seek rate limiting, presence, or active-device ownership. Remote broadcasts do not create rooms, do not mutate `internal/room.Manager`, and do not write Redis `room_state` snapshots.
 
@@ -91,11 +92,28 @@ wt:room:authority:{roomId}:v1
 wt:room:active_device:{roomId}:{userId}:v1
 ```
 
-The authority lease identifies the instance allowed to mutate `internal/room.Manager` for that room. Non-authority instances do not apply controls; they forward the original envelope and connection context over NATS request/reply to the authority instance. Authority absence returns an error or current snapshot; Phase 4 does not auto-takeover expired leases.
+The authority lease value contains `instanceId`, `epoch`, `status`, and `leaseUntilMs`. `status=active` identifies the instance allowed to mutate `internal/room.Manager` for that room. `status=recovering` fences concurrent takeover attempts while one instance rebuilds room state. Non-authority instances do not apply controls; they forward the original envelope and connection context over NATS request/reply to the authority instance with the expected `epoch`.
 
 The active-device lease stores `deviceId`, `instanceId`, `connectionId`, and `leaseUntilMs`. Disconnect and leave release only when both `deviceId` and `connectionId` match, preventing old sockets from clearing newer ownership.
 
 PostgreSQL `room_timeline_outbox` stores canonical timeline result events. `cmd/outboxworker` publishes them to Kafka, and `cmd/derivedworker` derives control-result and membership topics. Online WebSocket fan-out remains NATS + local connection tables.
+
+## Phase 5 Authority Recovery Boundary
+
+Phase 5 adds these recovery controls:
+
+```text
+AUTHORITY_RENEW_INTERVAL_MS=10000
+AUTHORITY_TAKEOVER_SCAN_INTERVAL_MS=30000
+AUTHORITY_RECOVERY_TIMEOUT_MS=5000
+KAFKA_REPLAY_TIMEOUT_MS=1000
+```
+
+Healthy authority instances renew active leases without changing `epoch`. After a lease is missing or expired, one instance can enter `status=recovering`, increment `epoch`, rebuild the room from the Kafka canonical timeline, merge same-room `pending` and `publishing` PostgreSQL outbox rows, register recovered state in `room.Manager`, write the latest Redis snapshot, and complete the lease as `status=active`.
+
+Recovery uses Kafka as the result log. It replays `room.control.accepted` events to rebuild playback state. Rejected control events and membership events remain audit/dedup context and do not change playback state. PostgreSQL outbox rows only close the gap for decisions that were already written but not yet published to Kafka.
+
+Old authority results are fenced by epoch. Local apply, NATS control replies, and NATS broadcasts are accepted only when the observed Redis authority lease is still active for the expected instance and epoch. A recovering room returns `room authority recovering` or a current snapshot; WebSocket connections are never moved between instances.
 
 ## Multi-Instance Readiness After Phase 1
 
@@ -108,9 +126,10 @@ Safe or mostly safe now:
 
 Still not complete:
 
-- Automatic authority takeover after the current authority disappears.
-- Distributed control deduplication and seek rate limiting beyond the authority instance.
-- Presence and full device occupancy beyond active-device lease ownership.
-- Room playback authority recovery after the instance that owns the in-memory room state restarts.
+- Automatic takeover before Redis lease expiry.
+- Distributed seek rate limiting beyond the authority instance.
+- Full presence and device occupancy beyond active-device lease ownership.
+- WebSocket connection migration between instances.
+- Kafka command-ingress logging.
 
-See [distributed-architecture.md](./distributed-architecture.md) for the Phase 4 module map and data flows.
+See [distributed-architecture.md](./distributed-architecture.md) for the Phase 5 module map and data flows.

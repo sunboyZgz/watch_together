@@ -144,6 +144,44 @@ func (s *PostgresTimelineOutboxStore) ClaimPending(
 	return rows, nil
 }
 
+func (s *PostgresTimelineOutboxStore) ReadRoomUnpublishedTimelineEvents(
+	ctx context.Context,
+	roomID string,
+) ([]timeline.Event, error) {
+	if s == nil || s.db == nil || roomID == "" {
+		return nil, nil
+	}
+	const query = `
+		SELECT payload::text
+		FROM room_timeline_outbox
+		WHERE room_id = ?
+			AND status IN ('pending', 'publishing')
+		ORDER BY created_at ASC, event_id ASC
+	`
+	rows, err := s.db.WithContext(ctx).Raw(query, roomID).Rows()
+	if err != nil {
+		return nil, fmt.Errorf("read unpublished timeline outbox: %w", err)
+	}
+	defer rows.Close()
+
+	events := make([]timeline.Event, 0)
+	for rows.Next() {
+		var payloadText string
+		if err := rows.Scan(&payloadText); err != nil {
+			return nil, fmt.Errorf("scan unpublished timeline outbox: %w", err)
+		}
+		event, err := timeline.UnmarshalEvent([]byte(payloadText))
+		if err != nil {
+			return nil, fmt.Errorf("decode unpublished timeline event: %w", err)
+		}
+		events = append(events, event)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate unpublished timeline outbox: %w", err)
+	}
+	return events, nil
+}
+
 func (s *PostgresTimelineOutboxStore) MarkPublished(ctx context.Context, id string) error {
 	if s == nil || s.db == nil || id == "" {
 		return nil

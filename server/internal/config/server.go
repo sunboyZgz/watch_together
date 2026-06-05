@@ -14,21 +14,22 @@ const (
 const eventBusNATSCore = "nats_core"
 
 type ServerRuntimeConfig struct {
-	AppEnv          string
-	Host            string
-	Port            string
-	LogLevel        string
-	InstanceID      string
-	RoomRuntimeMode string
-	DatabaseURL     string
-	DebugSync       bool
-	Auth            AuthConfig
-	Redis           RedisConfig
-	WebSocket       WebSocketConfig
-	NATS            NATSConfig
-	Kafka           KafkaConfig
-	OutboxWorker    OutboxWorkerConfig
-	Media           MediaPlaybackConfig
+	AppEnv            string
+	Host              string
+	Port              string
+	LogLevel          string
+	InstanceID        string
+	RoomRuntimeMode   string
+	DatabaseURL       string
+	DebugSync         bool
+	Auth              AuthConfig
+	Redis             RedisConfig
+	WebSocket         WebSocketConfig
+	NATS              NATSConfig
+	Kafka             KafkaConfig
+	OutboxWorker      OutboxWorkerConfig
+	AuthorityRecovery AuthorityRecoveryConfig
+	Media             MediaPlaybackConfig
 }
 
 type AuthConfig struct {
@@ -79,6 +80,13 @@ type OutboxWorkerConfig struct {
 	PollIntervalMs int
 }
 
+type AuthorityRecoveryConfig struct {
+	RenewIntervalMs        int
+	TakeoverScanIntervalMs int
+	RecoveryTimeoutMs      int
+	KafkaReplayTimeoutMs   int
+}
+
 type MediaPlaybackConfig struct {
 	DeliveryMode           string
 	SigningSecret          string
@@ -126,6 +134,10 @@ func LoadServerRuntimeConfig(configDir string) (ServerRuntimeConfig, error) {
 		"KAFKA_DERIVED_WORKER_POLL_INTERVAL_MS": 1000,
 		"OUTBOX_WORKER_BATCH_SIZE":              50,
 		"OUTBOX_WORKER_POLL_INTERVAL_MS":        1000,
+		"AUTHORITY_RENEW_INTERVAL_MS":           10000,
+		"AUTHORITY_TAKEOVER_SCAN_INTERVAL_MS":   30000,
+		"AUTHORITY_RECOVERY_TIMEOUT_MS":         5000,
+		"KAFKA_REPLAY_TIMEOUT_MS":               1000,
 		"MEDIA_DELIVERY_MODE":                   "signed_redirect",
 		"MEDIA_PLAYBACK_URL_TTL_SECONDS":        7200,
 		"MEDIA_STORAGE_FORCE_PATH_STYLE":        "true",
@@ -169,6 +181,10 @@ func LoadServerRuntimeConfig(configDir string) (ServerRuntimeConfig, error) {
 		"KAFKA_DERIVED_WORKER_POLL_INTERVAL_MS",
 		"OUTBOX_WORKER_BATCH_SIZE",
 		"OUTBOX_WORKER_POLL_INTERVAL_MS",
+		"AUTHORITY_RENEW_INTERVAL_MS",
+		"AUTHORITY_TAKEOVER_SCAN_INTERVAL_MS",
+		"AUTHORITY_RECOVERY_TIMEOUT_MS",
+		"KAFKA_REPLAY_TIMEOUT_MS",
 		"MEDIA_DELIVERY_MODE",
 		"MEDIA_PLAYBACK_SIGNING_SECRET",
 		"MEDIA_PLAYBACK_URL_TTL_SECONDS",
@@ -245,6 +261,12 @@ func LoadServerRuntimeConfig(configDir string) (ServerRuntimeConfig, error) {
 		OutboxWorker: OutboxWorkerConfig{
 			BatchSize:      intFromConfig(loader, "OUTBOX_WORKER_BATCH_SIZE"),
 			PollIntervalMs: intFromConfig(loader, "OUTBOX_WORKER_POLL_INTERVAL_MS"),
+		},
+		AuthorityRecovery: AuthorityRecoveryConfig{
+			RenewIntervalMs:        intFromConfig(loader, "AUTHORITY_RENEW_INTERVAL_MS"),
+			TakeoverScanIntervalMs: intFromConfig(loader, "AUTHORITY_TAKEOVER_SCAN_INTERVAL_MS"),
+			RecoveryTimeoutMs:      intFromConfig(loader, "AUTHORITY_RECOVERY_TIMEOUT_MS"),
+			KafkaReplayTimeoutMs:   intFromConfig(loader, "KAFKA_REPLAY_TIMEOUT_MS"),
 		},
 		Media: MediaPlaybackConfig{
 			DeliveryMode:           trimmedString(loader, "MEDIA_DELIVERY_MODE"),

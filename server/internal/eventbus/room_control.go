@@ -21,14 +21,16 @@ type RoomControlRequest struct {
 	Payload          json.RawMessage `json:"payload"`
 	RequestID        string          `json:"requestId,omitempty"`
 	Seq              int64           `json:"seq,omitempty"`
+	AuthorityEpoch   int64           `json:"authorityEpoch,omitempty"`
 	RequestedAtMs    int64           `json:"requestedAtMs"`
 }
 
 type RoomControlResponse struct {
-	Type    string          `json:"type,omitempty"`
-	Payload json.RawMessage `json:"payload,omitempty"`
-	Seq     int64           `json:"seq,omitempty"`
-	Error   string          `json:"error,omitempty"`
+	Type           string          `json:"type,omitempty"`
+	Payload        json.RawMessage `json:"payload,omitempty"`
+	Seq            int64           `json:"seq,omitempty"`
+	AuthorityEpoch int64           `json:"authorityEpoch,omitempty"`
+	Error          string          `json:"error,omitempty"`
 }
 
 type RoomControlHandler func(ctx context.Context, request RoomControlRequest) RoomControlResponse

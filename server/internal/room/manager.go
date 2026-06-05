@@ -141,6 +141,29 @@ func (m *Manager) RegisterCreatedRoomWithMedia(
 	return registeredRoom
 }
 
+func (m *Manager) RegisterRecoveredRoom(state State) *Room {
+	if state.RoomID == "" {
+		return nil
+	}
+	m.mu.Lock()
+	_, _ = m.cleanupExpiredRoomsLocked(m.now())
+
+	if existing, ok := m.rooms[state.RoomID]; ok {
+		existing.RestoreState(state)
+		delete(m.emptySince, state.RoomID)
+		m.mu.Unlock()
+		return existing
+	}
+	recoveredRoom := NewRecoveredRoom(state)
+	m.rooms[state.RoomID] = recoveredRoom
+	emptySince, destroyAfter, shouldTrigger := m.markRoomEmptyLockedIfNeeded(state.RoomID, recoveredRoom)
+	m.mu.Unlock()
+	if shouldTrigger && m.hooks.OnRoomBecameEmpty != nil {
+		m.hooks.OnRoomBecameEmpty(state.RoomID, emptySince, destroyAfter)
+	}
+	return recoveredRoom
+}
+
 // GetOrCreate returns an existing room or creates a new one on first join.
 func (m *Manager) GetOrCreate(roomID string) *Room {
 	m.mu.Lock()
@@ -370,6 +393,17 @@ func (m *Manager) RoomCount() int {
 	defer m.mu.RUnlock()
 
 	return len(m.rooms)
+}
+
+func (m *Manager) RoomIDs() []string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	roomIDs := make([]string, 0, len(m.rooms))
+	for roomID := range m.rooms {
+		roomIDs = append(roomIDs, roomID)
+	}
+	return roomIDs
 }
 
 // ClientCount returns the number of clients currently tracked in one room.

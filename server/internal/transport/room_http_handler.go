@@ -10,16 +10,18 @@ import (
 	"time"
 
 	"watch_together/server/internal/cache"
+	"watch_together/server/internal/recovery"
 	"watch_together/server/internal/room"
 	"watch_together/server/internal/roomapi"
 )
 
 type RoomHTTPHandler struct {
-	roomRuntime    roomRuntimeRegistry
-	roomService    *roomapi.Service
-	tokenVerifier  accessTokenVerifier
-	playbackSigner *mediaPlaybackSigner
-	delivery       *mediaDelivery
+	roomRuntime       roomRuntimeRegistry
+	roomService       *roomapi.Service
+	tokenVerifier     accessTokenVerifier
+	playbackSigner    *mediaPlaybackSigner
+	delivery          *mediaDelivery
+	authorityRecovery roomAuthorityRecovery
 }
 
 type roomRuntimeRegistry interface {
@@ -186,6 +188,13 @@ func (h *RoomHTTPHandler) SetRoomAuthorityClaimer(instanceID string, claimer roo
 	}
 }
 
+func (h *RoomHTTPHandler) SetRoomAuthorityRecovery(recoveryService roomAuthorityRecovery) {
+	if h == nil {
+		return
+	}
+	h.authorityRecovery = recoveryService
+}
+
 func newRoomHTTPHandlerWithRuntime(
 	roomRuntime roomRuntimeRegistry,
 	roomService *roomapi.Service,
@@ -250,6 +259,7 @@ func (h *RoomHTTPHandler) CreateRoom(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusServiceUnavailable, "INTERNAL_ERROR", "room runtime is unavailable", nil)
 		return
 	}
+	h.tryRecoverRoomAuthority(r.Context(), result.Room.RoomCode, "create_room")
 	state := runtimeRoom.StateSnapshot()
 	h.storeLatestRoomState(r.Context(), state)
 	writeAPISuccess(w, http.StatusCreated, createRoomResponse{
@@ -295,6 +305,7 @@ func (h *RoomHTTPHandler) JoinRoomByCode(w http.ResponseWriter, r *http.Request)
 		result.Media.DurationMs,
 	)
 	if runtimeRoom != nil {
+		h.tryRecoverRoomAuthority(r.Context(), result.Room.RoomCode, "join_room")
 		h.storeLatestRoomState(r.Context(), runtimeRoom.StateSnapshot())
 	}
 	writeAPISuccess(w, http.StatusOK, joinRoomResponse{
@@ -353,6 +364,7 @@ func (h *RoomHTTPHandler) DetailByCode(w http.ResponseWriter, r *http.Request) {
 		result.Media.DurationMs,
 	)
 	if runtimeRoom != nil {
+		h.tryRecoverRoomAuthority(r.Context(), result.Room.RoomCode, "room_detail")
 		h.storeLatestRoomState(r.Context(), runtimeRoom.StateSnapshot())
 	}
 	writeAPISuccess(w, http.StatusOK, roomDetailResponse{
@@ -391,6 +403,19 @@ func (h *RoomHTTPHandler) storeLatestRoomState(ctx context.Context, state room.S
 
 	if err := h.roomRuntime.StoreLatestRoomState(writeCtx, state); err != nil {
 		log.Printf("room_state cache write failed room=%s seq=%d err=%v", state.RoomID, state.Seq, err)
+	}
+}
+
+func (h *RoomHTTPHandler) tryRecoverRoomAuthority(ctx context.Context, roomID string, reason string) {
+	if h == nil || h.authorityRecovery == nil || roomID == "" {
+		return
+	}
+	recoveryCtx, cancel := context.WithTimeout(ctx, time.Second)
+	defer cancel()
+	if _, err := h.authorityRecovery.TryRecoverRoomAuthority(recoveryCtx, roomID, reason); err != nil &&
+		!errors.Is(err, recovery.ErrAuthorityActive) &&
+		!errors.Is(err, recovery.ErrAuthorityRecovering) {
+		log.Printf("room authority recovery failed room=%s reason=%s err=%v", roomID, reason, err)
 	}
 }
 

@@ -18,6 +18,7 @@ import (
 	"watch_together/server/internal/home"
 	"watch_together/server/internal/media"
 	"watch_together/server/internal/progress"
+	"watch_together/server/internal/recovery"
 	"watch_together/server/internal/room"
 	"watch_together/server/internal/roomapi"
 	"watch_together/server/internal/store"
@@ -26,20 +27,21 @@ import (
 )
 
 type Config struct {
-	AppEnv          string
-	Host            string
-	Port            string
-	LogLevel        string
-	InstanceID      string
-	RoomRuntimeMode string
-	DatabaseURL     string
-	DebugSync       bool
-	Auth            auth.TokenConfig
-	Redis           cache.RedisConfig
-	WebSocket       transport.WebSocketRuntimeConfig
-	NATS            eventbus.NATSConfig
-	Kafka           KafkaConfig
-	Media           transport.MediaPlaybackConfig
+	AppEnv            string
+	Host              string
+	Port              string
+	LogLevel          string
+	InstanceID        string
+	RoomRuntimeMode   string
+	DatabaseURL       string
+	DebugSync         bool
+	Auth              auth.TokenConfig
+	Redis             cache.RedisConfig
+	WebSocket         transport.WebSocketRuntimeConfig
+	NATS              eventbus.NATSConfig
+	Kafka             KafkaConfig
+	AuthorityRecovery AuthorityRecoveryConfig
+	Media             transport.MediaPlaybackConfig
 }
 
 type RedisConfig = cache.RedisConfig
@@ -55,6 +57,13 @@ type KafkaConfig struct {
 	TopicRoomControlResult string
 	TopicRoomMembership    string
 	DerivedConsumerGroupID string
+}
+
+type AuthorityRecoveryConfig struct {
+	RenewInterval        time.Duration
+	TakeoverScanInterval time.Duration
+	RecoveryTimeout      time.Duration
+	KafkaReplayTimeout   time.Duration
 }
 
 type Server struct {
@@ -109,8 +118,10 @@ func NewServer(config Config) *Server {
 	}
 	roomService, roomStore := newRoomService(db)
 	var timelineRecorder timeline.Recorder = timeline.NoopRecorder{}
+	var timelineOutboxStore *store.PostgresTimelineOutboxStore
 	if distributedAuthority && db != nil {
-		timelineRecorder = store.NewPostgresTimelineOutboxStore(db, config.Kafka.TopicRoomTimeline)
+		timelineOutboxStore = store.NewPostgresTimelineOutboxStore(db, config.Kafka.TopicRoomTimeline)
+		timelineRecorder = timelineOutboxStore
 	}
 	installRoomLifecycleHooks(roomManager, roomStore, roomStateCache)
 	if roomStore != nil {
@@ -141,6 +152,38 @@ func NewServer(config Config) *Server {
 	if distributedAuthority {
 		roomHTTPHandler.SetRoomAuthorityClaimer(broadcastInstanceID, authorityRegistry)
 	}
+	var authorityRecovery *recovery.Service
+	if distributedAuthority {
+		kafkaReader, err := timeline.NewKafkaRoomEventReader(
+			config.Kafka.Brokers,
+			config.Kafka.TopicRoomTimeline,
+			config.AuthorityRecovery.KafkaReplayTimeout,
+		)
+		if err != nil {
+			log.Fatalf("failed to open kafka room timeline reader: %v", err)
+		}
+		authorityRecovery = recovery.NewService(
+			recovery.Config{
+				InstanceID:      broadcastInstanceID,
+				RecoveryTimeout: config.AuthorityRecovery.RecoveryTimeout,
+			},
+			authorityRegistry,
+			roomManager,
+			roomStore,
+			kafkaReader,
+			timelineOutboxStore,
+			roomStateCache,
+		)
+		roomHTTPHandler.SetRoomAuthorityRecovery(authorityRecovery)
+		go startAuthorityRenewLoop(
+			serverCtx,
+			config.AuthorityRecovery.RenewInterval,
+			roomManager,
+			authorityRegistry,
+			broadcastInstanceID,
+		)
+		go authorityRecovery.RunScanner(serverCtx, config.AuthorityRecovery.TakeoverScanInterval)
+	}
 	roomBroadcastBus := newRoomBroadcastBus(config.WebSocket, config.NATS, distributedAuthority)
 	roomControlBus := newRoomControlBus(config.WebSocket, config.NATS, distributedAuthority)
 	authHTTPHandler := transport.NewAuthHTTPHandler(newAuthService(db, tokenManager))
@@ -166,6 +209,7 @@ func NewServer(config Config) *Server {
 		authorityRegistry,
 		activeDeviceRegistry,
 		timelineRecorder,
+		authorityRecovery,
 	)
 
 	httpServer := &http.Server{
@@ -317,6 +361,7 @@ func newGinRouter(
 	authorityRegistry *cache.RoomAuthorityRegistry,
 	activeDeviceRegistry *cache.ActiveDeviceRegistry,
 	timelineRecorder timeline.Recorder,
+	authorityRecovery *recovery.Service,
 ) *gin.Engine {
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
@@ -356,6 +401,7 @@ func newGinRouter(
 			roomControlBus,
 			timelineRecorder,
 		)
+		webSocketHandler.SetRoomAuthorityRecovery(authorityRecovery)
 	}
 	if err := webSocketHandler.SubscribeRoomBroadcasts(ctx); err != nil {
 		log.Printf("failed to subscribe room broadcasts; cross-instance broadcast disabled: %v", err)
@@ -433,6 +479,34 @@ func startPersistentRoomCleanupLoop(
 			}
 			if len(roomCodes) > 0 {
 				log.Printf("cleaned up %d expired rooms from postgres", len(roomCodes))
+			}
+		}
+	}
+}
+
+func startAuthorityRenewLoop(
+	ctx context.Context,
+	interval time.Duration,
+	roomManager *room.Manager,
+	authorityRegistry *cache.RoomAuthorityRegistry,
+	instanceID string,
+) {
+	if interval <= 0 || roomManager == nil || authorityRegistry == nil || instanceID == "" {
+		return
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			for _, roomID := range roomManager.RoomIDs() {
+				if _, renewed, err := authorityRegistry.RenewAuthority(ctx, roomID, instanceID); err != nil {
+					log.Printf("room authority renew failed room=%s instance=%s err=%v", roomID, instanceID, err)
+				} else if !renewed {
+					log.Printf("room authority renew skipped room=%s instance=%s", roomID, instanceID)
+				}
 			}
 		}
 	}
