@@ -31,6 +31,7 @@ import androidx.compose.ui.unit.dp
 import androidx.media3.common.Player
 import com.example.watch_together.config.AppConfig
 import com.example.watch_together.pages.video.MediaEpisode
+import com.example.watch_together.sync.DeviceIdStore
 import com.example.watch_together.ui.player.AndroidExoPlayerAdapter
 import com.example.watch_together.ui.player.PlayerAdapter
 import com.example.watch_together.ui.player.PlayerDebugLog
@@ -76,7 +77,13 @@ fun RoomTheaterScreen(
     val coroutineScope = rememberCoroutineScope()
     val adapter = remember(context.applicationContext) { AndroidExoPlayerAdapter(context.applicationContext) }
     val roomHttpClient = remember { RoomHttpClient() }
-    val roomSessionController = remember { RoomSessionController(roomHttpClient = roomHttpClient) }
+    val deviceIdStore = remember(context.applicationContext) { DeviceIdStore(context.applicationContext) }
+    val roomSessionController = remember {
+        RoomSessionController(
+            roomHttpClient = roomHttpClient,
+            deviceIdProvider = { deviceIdStore.getOrCreateDeviceId() }
+        )
+    }
     var playerState by remember { mutableStateOf(PlayerRuntimeState()) }
     var mediaLoadError by remember { mutableStateOf<String?>(null) }
     var isMediaLoading by remember { mutableStateOf(false) }

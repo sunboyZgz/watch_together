@@ -21,6 +21,7 @@ import (
 	"watch_together/server/internal/room"
 	"watch_together/server/internal/roomapi"
 	"watch_together/server/internal/store"
+	"watch_together/server/internal/timeline"
 	"watch_together/server/internal/transport"
 )
 
@@ -37,6 +38,7 @@ type Config struct {
 	Redis           cache.RedisConfig
 	WebSocket       transport.WebSocketRuntimeConfig
 	NATS            eventbus.NATSConfig
+	Kafka           KafkaConfig
 	Media           transport.MediaPlaybackConfig
 }
 
@@ -46,6 +48,15 @@ type NATSConfig = eventbus.NATSConfig
 type MediaPlaybackConfig = transport.MediaPlaybackConfig
 type AuthTokenConfig = auth.TokenConfig
 
+type KafkaConfig struct {
+	Brokers                []string
+	ClientID               string
+	TopicRoomTimeline      string
+	TopicRoomControlResult string
+	TopicRoomMembership    string
+	DerivedConsumerGroupID string
+}
+
 type Server struct {
 	config      Config
 	httpServer  *http.Server
@@ -54,9 +65,13 @@ type Server struct {
 	db          *gorm.DB
 	cancel      context.CancelFunc
 	eventBus    eventbus.RoomBroadcastBus
+	controlBus  eventbus.RoomControlBus
 }
 
-const roomRuntimeModeLocalProcess = "local_process"
+const (
+	roomRuntimeModeLocalProcess         = "local_process"
+	roomRuntimeModeDistributedAuthority = "distributed_authority"
+)
 
 type runtimeBoundary struct {
 	InstanceID      string
@@ -66,16 +81,37 @@ type runtimeBoundary struct {
 // NewServer assembles the in-memory room manager and the HTTP routes around it.
 func NewServer(config Config) *Server {
 	config.RoomRuntimeMode = normalizeRoomRuntimeMode(config.RoomRuntimeMode)
+	distributedAuthority := config.RoomRuntimeMode == roomRuntimeModeDistributedAuthority
+	if distributedAuthority && len(config.Kafka.Brokers) == 0 {
+		log.Fatal("distributed_authority requires kafka brokers")
+	}
 	serverCtx, cancel := context.WithCancel(context.Background())
 	roomManager := room.NewManager()
 	tokenManager := auth.NewTokenManager(config.Auth)
+	if distributedAuthority {
+		config.Redis.Required = true
+	}
 	redisClient := newRedisClient("room_state", cache.RoomStateRedisConfig(config.Redis))
+	if distributedAuthority && redisClient == nil {
+		log.Fatal("distributed_authority requires redis")
+	}
+	var authorityRegistry *cache.RoomAuthorityRegistry
+	var activeDeviceRegistry *cache.ActiveDeviceRegistry
 	var roomStateCache *cache.RoomStateCache
 	if redisClient != nil {
 		roomStateCache = cache.NewRoomStateCache(redisClient, 0)
+		authorityRegistry = cache.NewRoomAuthorityRegistry(redisClient, 0)
+		activeDeviceRegistry = cache.NewActiveDeviceRegistry(redisClient, 0)
 	}
 	db := newPostgresDB(config.DatabaseURL)
+	if distributedAuthority && db == nil {
+		log.Fatal("distributed_authority requires postgres")
+	}
 	roomService, roomStore := newRoomService(db)
+	var timelineRecorder timeline.Recorder = timeline.NoopRecorder{}
+	if distributedAuthority && db != nil {
+		timelineRecorder = store.NewPostgresTimelineOutboxStore(db, config.Kafka.TopicRoomTimeline)
+	}
 	installRoomLifecycleHooks(roomManager, roomStore, roomStateCache)
 	if roomStore != nil {
 		now := time.Now()
@@ -102,7 +138,11 @@ func NewServer(config Config) *Server {
 		config.Media,
 	)
 	broadcastInstanceID := roomBroadcastInstanceID(config.InstanceID)
-	roomBroadcastBus := newRoomBroadcastBus(config.WebSocket, config.NATS)
+	if distributedAuthority {
+		roomHTTPHandler.SetRoomAuthorityClaimer(broadcastInstanceID, authorityRegistry)
+	}
+	roomBroadcastBus := newRoomBroadcastBus(config.WebSocket, config.NATS, distributedAuthority)
+	roomControlBus := newRoomControlBus(config.WebSocket, config.NATS, distributedAuthority)
 	authHTTPHandler := transport.NewAuthHTTPHandler(newAuthService(db, tokenManager))
 	homeHTTPHandler := transport.NewHomeHTTPHandlerWithTokenVerifier(newHomeService(db), tokenManager)
 	mediaHTTPHandler := transport.NewMediaHTTPHandlerWithTokenVerifier(newMediaService(db), tokenManager, config.Media)
@@ -122,6 +162,10 @@ func NewServer(config Config) *Server {
 		runtimeBoundaryFromConfig(config),
 		broadcastInstanceID,
 		roomBroadcastBus,
+		roomControlBus,
+		authorityRegistry,
+		activeDeviceRegistry,
+		timelineRecorder,
 	)
 
 	httpServer := &http.Server{
@@ -137,6 +181,7 @@ func NewServer(config Config) *Server {
 		db:          db,
 		cancel:      cancel,
 		eventBus:    roomBroadcastBus,
+		controlBus:  roomControlBus,
 	}
 }
 
@@ -166,26 +211,59 @@ func roomBroadcastInstanceID(instanceID string) string {
 func newRoomBroadcastBus(
 	webSocketConfig transport.WebSocketRuntimeConfig,
 	natsConfig eventbus.NATSConfig,
+	required bool,
 ) eventbus.RoomBroadcastBus {
 	if !webSocketConfig.CrossInstanceBroadcast {
+		if required {
+			log.Fatal("distributed_authority requires cross-instance websocket broadcast")
+		}
 		return eventbus.NewDisabledRoomBroadcastBus()
 	}
 	eventBus, err := eventbus.NormalizeEventBus(webSocketConfig.EventBus)
 	if err != nil {
+		if required {
+			log.Fatalf("unsupported websocket event bus: %v", err)
+		}
 		log.Printf("unsupported websocket event bus; cross-instance broadcast disabled: %v", err)
 		return eventbus.NewDisabledRoomBroadcastBus()
 	}
 	if eventBus != eventbus.EventBusNATSCore {
+		if required {
+			log.Fatalf("unsupported websocket event bus %q", eventBus)
+		}
 		log.Printf("unsupported websocket event bus %q; cross-instance broadcast disabled", eventBus)
 		return eventbus.NewDisabledRoomBroadcastBus()
 	}
 	bus, err := eventbus.OpenNATSRoomBroadcastBus(natsConfig)
 	if err != nil {
+		if required {
+			log.Fatalf("failed to connect required NATS broadcast bus: %v", err)
+		}
 		log.Printf("failed to connect NATS event bus; cross-instance broadcast disabled: %v", err)
 		return eventbus.NewDisabledRoomBroadcastBus()
 	}
 	normalized := eventbus.NormalizeNATSConfig(natsConfig)
 	log.Printf("connected NATS event bus url=%s subject=%s name=%s", normalized.URL, normalized.Subject, normalized.Name)
+	return bus
+}
+
+func newRoomControlBus(
+	webSocketConfig transport.WebSocketRuntimeConfig,
+	natsConfig eventbus.NATSConfig,
+	required bool,
+) eventbus.RoomControlBus {
+	if !required {
+		return eventbus.NewDisabledRoomControlBus()
+	}
+	if !webSocketConfig.CrossInstanceBroadcast {
+		log.Fatal("distributed_authority requires cross-instance websocket broadcast")
+	}
+	bus, err := eventbus.OpenNATSRoomControlBus(natsConfig)
+	if err != nil {
+		log.Fatalf("failed to connect required NATS control bus: %v", err)
+	}
+	normalized := eventbus.NormalizeNATSConfig(natsConfig)
+	log.Printf("connected NATS control bus url=%s subject=%s name=%s", normalized.URL, normalized.ControlSubject, normalized.Name)
 	return bus
 }
 
@@ -235,6 +313,10 @@ func newGinRouter(
 	runtime runtimeBoundary,
 	broadcastInstanceID string,
 	roomBroadcastBus eventbus.RoomBroadcastBus,
+	roomControlBus eventbus.RoomControlBus,
+	authorityRegistry *cache.RoomAuthorityRegistry,
+	activeDeviceRegistry *cache.ActiveDeviceRegistry,
+	timelineRecorder timeline.Recorder,
 ) *gin.Engine {
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
@@ -266,8 +348,20 @@ func newGinRouter(
 		roomHTTPHandler.RoomLeaver(),
 	)
 	webSocketHandler.SetRoomBroadcastBus(broadcastInstanceID, roomBroadcastBus)
+	if normalizeRoomRuntimeMode(runtime.RoomRuntimeMode) == roomRuntimeModeDistributedAuthority {
+		webSocketHandler.SetDistributedAuthorityRuntime(
+			broadcastInstanceID,
+			authorityRegistry,
+			activeDeviceRegistry,
+			roomControlBus,
+			timelineRecorder,
+		)
+	}
 	if err := webSocketHandler.SubscribeRoomBroadcasts(ctx); err != nil {
 		log.Printf("failed to subscribe room broadcasts; cross-instance broadcast disabled: %v", err)
+	}
+	if err := webSocketHandler.SubscribeRoomControls(ctx); err != nil {
+		log.Printf("failed to subscribe room control requests: %v", err)
 	}
 	router.Any("/ws", gin.WrapH(webSocketHandler))
 
@@ -438,6 +532,11 @@ func (s *Server) Close() error {
 	}
 	if s.eventBus != nil {
 		if err := s.eventBus.Close(); err != nil && closeErr == nil {
+			closeErr = err
+		}
+	}
+	if s.controlBus != nil {
+		if err := s.controlBus.Close(); err != nil && closeErr == nil {
 			closeErr = err
 		}
 	}

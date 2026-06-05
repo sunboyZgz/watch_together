@@ -15,6 +15,7 @@ const (
 	EventBusNATSCore            = "nats_core"
 	DefaultNATSURL              = "nats://127.0.0.1:4222"
 	DefaultRoomBroadcastSubject = "wt.room.broadcast.v1"
+	DefaultRoomControlSubject   = "wt.room.control.v1"
 	DefaultNATSName             = "watch-together-roomserver"
 )
 
@@ -38,9 +39,10 @@ type RoomBroadcastBus interface {
 }
 
 type NATSConfig struct {
-	URL     string
-	Name    string
-	Subject string
+	URL            string
+	Name           string
+	Subject        string
+	ControlSubject string
 }
 
 func NormalizeEventBus(value string) (string, error) {
@@ -66,6 +68,10 @@ func NormalizeNATSConfig(config NATSConfig) NATSConfig {
 	config.Subject = strings.TrimSpace(config.Subject)
 	if config.Subject == "" {
 		config.Subject = DefaultRoomBroadcastSubject
+	}
+	config.ControlSubject = strings.TrimSpace(config.ControlSubject)
+	if config.ControlSubject == "" {
+		config.ControlSubject = DefaultRoomControlSubject
 	}
 	return config
 }

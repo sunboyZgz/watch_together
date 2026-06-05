@@ -26,6 +26,23 @@ services:
     restart: unless-stopped
     ports:
       - "4222:4222"
+  kafka:
+    image: bitnami/kafka:3.7
+    container_name: anime-watch-kafka
+    restart: unless-stopped
+    environment:
+      KAFKA_CFG_NODE_ID: 1
+      KAFKA_CFG_PROCESS_ROLES: broker,controller
+      KAFKA_CFG_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_CFG_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_CFG_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_CFG_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CFG_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      ALLOW_PLAINTEXT_LISTENER: "yes"
+    ports:
+      - "9092:9092"
+    volumes:
+      - kafka_data:/bitnami/kafka
   minio:
     image: quay.io/minio/minio:latest
     container_name: anime-watch-minio
@@ -66,6 +83,7 @@ services:
       - postgres
       - redis
       - nats
+      - kafka
       - minio-init
     env_file:
       - .env
@@ -82,6 +100,13 @@ services:
       NATS_URL: ${NATS_URL:-nats://nats:4222}
       NATS_NAME: ${NATS_NAME:-watch-together-roomserver}
       NATS_SUBJECT_ROOM_BROADCAST: ${NATS_SUBJECT_ROOM_BROADCAST:-wt.room.broadcast.v1}
+      NATS_SUBJECT_ROOM_CONTROL: ${NATS_SUBJECT_ROOM_CONTROL:-wt.room.control.v1}
+      KAFKA_BROKERS: ${KAFKA_BROKERS:-kafka:9092}
+      KAFKA_CLIENT_ID: ${KAFKA_CLIENT_ID:-watch-together-roomserver}
+      KAFKA_TOPIC_ROOM_TIMELINE: ${KAFKA_TOPIC_ROOM_TIMELINE:-wt.room.timeline.v1}
+      KAFKA_TOPIC_ROOM_CONTROL_RESULT: ${KAFKA_TOPIC_ROOM_CONTROL_RESULT:-wt.room.control_result.v1}
+      KAFKA_TOPIC_ROOM_MEMBERSHIP: ${KAFKA_TOPIC_ROOM_MEMBERSHIP:-wt.room.membership.v1}
+      KAFKA_DERIVED_CONSUMER_GROUP_ID: ${KAFKA_DERIVED_CONSUMER_GROUP_ID:-watch-together-derived-workers}
       AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:-watch_together_local_dev_jwt_secret_change_me}
       DATABASE_URL: postgres://app:app@postgres:5432/anime_watch_dev?sslmode=disable
       REDIS_ADDR: redis:6380
@@ -97,6 +122,49 @@ services:
       MEDIA_STORAGE_ACCESS_KEY_ID: minioadmin
       MEDIA_STORAGE_SECRET_ACCESS_KEY: minioadmin
       MEDIA_STORAGE_FORCE_PATH_STYLE: "true"
+
+  outboxworker:
+    profiles: ["app"]
+    image: watch-together-roomserver:dev
+    container_name: anime-watch-outboxworker
+    restart: unless-stopped
+    depends_on:
+      - postgres
+      - kafka
+    env_file:
+      - .env
+    environment:
+      APP_ENV: local
+      ROOM_RUNTIME_MODE: ${ROOM_RUNTIME_MODE:-local_process}
+      DATABASE_URL: postgres://app:app@postgres:5432/anime_watch_dev?sslmode=disable
+      KAFKA_BROKERS: ${KAFKA_BROKERS:-kafka:9092}
+      KAFKA_CLIENT_ID: ${KAFKA_CLIENT_ID:-watch-together-outboxworker}
+      KAFKA_TOPIC_ROOM_TIMELINE: ${KAFKA_TOPIC_ROOM_TIMELINE:-wt.room.timeline.v1}
+      KAFKA_TOPIC_ROOM_CONTROL_RESULT: ${KAFKA_TOPIC_ROOM_CONTROL_RESULT:-wt.room.control_result.v1}
+      KAFKA_TOPIC_ROOM_MEMBERSHIP: ${KAFKA_TOPIC_ROOM_MEMBERSHIP:-wt.room.membership.v1}
+      OUTBOX_WORKER_BATCH_SIZE: ${OUTBOX_WORKER_BATCH_SIZE:-50}
+      OUTBOX_WORKER_POLL_INTERVAL_MS: ${OUTBOX_WORKER_POLL_INTERVAL_MS:-1000}
+    command: ["/app/outboxworker"]
+
+  derivedworker:
+    profiles: ["app"]
+    image: watch-together-roomserver:dev
+    container_name: anime-watch-derivedworker
+    restart: unless-stopped
+    depends_on:
+      - kafka
+    env_file:
+      - .env
+    environment:
+      APP_ENV: local
+      ROOM_RUNTIME_MODE: ${ROOM_RUNTIME_MODE:-local_process}
+      KAFKA_BROKERS: ${KAFKA_BROKERS:-kafka:9092}
+      KAFKA_CLIENT_ID: ${KAFKA_CLIENT_ID:-watch-together-derivedworker}
+      KAFKA_TOPIC_ROOM_TIMELINE: ${KAFKA_TOPIC_ROOM_TIMELINE:-wt.room.timeline.v1}
+      KAFKA_TOPIC_ROOM_CONTROL_RESULT: ${KAFKA_TOPIC_ROOM_CONTROL_RESULT:-wt.room.control_result.v1}
+      KAFKA_TOPIC_ROOM_MEMBERSHIP: ${KAFKA_TOPIC_ROOM_MEMBERSHIP:-wt.room.membership.v1}
+      KAFKA_DERIVED_CONSUMER_GROUP_ID: ${KAFKA_DERIVED_CONSUMER_GROUP_ID:-watch-together-derived-workers}
+    command: ["/app/derivedworker"]
 
   nginx:
     profiles: ["app"]
@@ -115,4 +183,5 @@ services:
 volumes:
   postgres_data:
   redis_data:
+  kafka_data:
   minio_data:

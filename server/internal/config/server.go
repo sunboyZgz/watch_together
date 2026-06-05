@@ -6,7 +6,11 @@ import (
 	"strings"
 )
 
-const roomRuntimeModeLocalProcess = "local_process"
+const (
+	roomRuntimeModeLocalProcess         = "local_process"
+	roomRuntimeModeDistributedAuthority = "distributed_authority"
+)
+
 const eventBusNATSCore = "nats_core"
 
 type ServerRuntimeConfig struct {
@@ -22,6 +26,8 @@ type ServerRuntimeConfig struct {
 	Redis           RedisConfig
 	WebSocket       WebSocketConfig
 	NATS            NATSConfig
+	Kafka           KafkaConfig
+	OutboxWorker    OutboxWorkerConfig
 	Media           MediaPlaybackConfig
 }
 
@@ -55,6 +61,22 @@ type NATSConfig struct {
 	URL                  string
 	Name                 string
 	SubjectRoomBroadcast string
+	SubjectRoomControl   string
+}
+
+type KafkaConfig struct {
+	Brokers                   []string
+	ClientID                  string
+	TopicRoomTimeline         string
+	TopicRoomControlResult    string
+	TopicRoomMembership       string
+	DerivedConsumerGroupID    string
+	DerivedWorkerPollInterval int
+}
+
+type OutboxWorkerConfig struct {
+	BatchSize      int
+	PollIntervalMs int
 }
 
 type MediaPlaybackConfig struct {
@@ -73,30 +95,40 @@ type MediaPlaybackConfig struct {
 
 func LoadServerRuntimeConfig(configDir string) (ServerRuntimeConfig, error) {
 	defaults := map[string]any{
-		"APP_ENV":                             "local",
-		"SERVER_HOST":                         "0.0.0.0",
-		"SERVER_PORT":                         "8080",
-		"LOG_LEVEL":                           "debug",
-		"SERVER_INSTANCE_ID":                  "",
-		"ROOM_RUNTIME_MODE":                   "local_process",
-		"DEBUG_SYNC":                          true,
-		"AUTH_ACCESS_TOKEN_TTL_HOURS":         24,
-		"REDIS_DB":                            0,
-		"WS_BROADCAST_CONCURRENCY_LIMIT":      64,
-		"WS_BROADCAST_TIMEOUT_MS":             5000,
-		"WS_BROADCAST_ENQUEUE_TIMEOUT_MS":     3000,
-		"WS_CLIENT_OUTBOX_CAPACITY":           64,
-		"WS_MAX_CONNECTIONS":                  0,
-		"ROOM_MAX_CLIENTS":                    0,
-		"WS_SEEK_MIN_INTERVAL_MS":             250,
-		"WS_CROSS_INSTANCE_BROADCAST_ENABLED": false,
-		"WS_EVENT_BUS":                        "nats_core",
-		"NATS_URL":                            "nats://127.0.0.1:4222",
-		"NATS_NAME":                           "watch-together-roomserver",
-		"NATS_SUBJECT_ROOM_BROADCAST":         "wt.room.broadcast.v1",
-		"MEDIA_DELIVERY_MODE":                 "signed_redirect",
-		"MEDIA_PLAYBACK_URL_TTL_SECONDS":      7200,
-		"MEDIA_STORAGE_FORCE_PATH_STYLE":      "true",
+		"APP_ENV":                               "local",
+		"SERVER_HOST":                           "0.0.0.0",
+		"SERVER_PORT":                           "8080",
+		"LOG_LEVEL":                             "debug",
+		"SERVER_INSTANCE_ID":                    "",
+		"ROOM_RUNTIME_MODE":                     "local_process",
+		"DEBUG_SYNC":                            true,
+		"AUTH_ACCESS_TOKEN_TTL_HOURS":           24,
+		"REDIS_DB":                              0,
+		"WS_BROADCAST_CONCURRENCY_LIMIT":        64,
+		"WS_BROADCAST_TIMEOUT_MS":               5000,
+		"WS_BROADCAST_ENQUEUE_TIMEOUT_MS":       3000,
+		"WS_CLIENT_OUTBOX_CAPACITY":             64,
+		"WS_MAX_CONNECTIONS":                    0,
+		"ROOM_MAX_CLIENTS":                      0,
+		"WS_SEEK_MIN_INTERVAL_MS":               250,
+		"WS_CROSS_INSTANCE_BROADCAST_ENABLED":   false,
+		"WS_EVENT_BUS":                          "nats_core",
+		"NATS_URL":                              "nats://127.0.0.1:4222",
+		"NATS_NAME":                             "watch-together-roomserver",
+		"NATS_SUBJECT_ROOM_BROADCAST":           "wt.room.broadcast.v1",
+		"NATS_SUBJECT_ROOM_CONTROL":             "wt.room.control.v1",
+		"KAFKA_BROKERS":                         "",
+		"KAFKA_CLIENT_ID":                       "watch-together-roomserver",
+		"KAFKA_TOPIC_ROOM_TIMELINE":             "wt.room.timeline.v1",
+		"KAFKA_TOPIC_ROOM_CONTROL_RESULT":       "wt.room.control_result.v1",
+		"KAFKA_TOPIC_ROOM_MEMBERSHIP":           "wt.room.membership.v1",
+		"KAFKA_DERIVED_CONSUMER_GROUP_ID":       "watch-together-derived-workers",
+		"KAFKA_DERIVED_WORKER_POLL_INTERVAL_MS": 1000,
+		"OUTBOX_WORKER_BATCH_SIZE":              50,
+		"OUTBOX_WORKER_POLL_INTERVAL_MS":        1000,
+		"MEDIA_DELIVERY_MODE":                   "signed_redirect",
+		"MEDIA_PLAYBACK_URL_TTL_SECONDS":        7200,
+		"MEDIA_STORAGE_FORCE_PATH_STYLE":        "true",
 	}
 	keys := []string{
 		"APP_ENV",
@@ -127,6 +159,16 @@ func LoadServerRuntimeConfig(configDir string) (ServerRuntimeConfig, error) {
 		"NATS_URL",
 		"NATS_NAME",
 		"NATS_SUBJECT_ROOM_BROADCAST",
+		"NATS_SUBJECT_ROOM_CONTROL",
+		"KAFKA_BROKERS",
+		"KAFKA_CLIENT_ID",
+		"KAFKA_TOPIC_ROOM_TIMELINE",
+		"KAFKA_TOPIC_ROOM_CONTROL_RESULT",
+		"KAFKA_TOPIC_ROOM_MEMBERSHIP",
+		"KAFKA_DERIVED_CONSUMER_GROUP_ID",
+		"KAFKA_DERIVED_WORKER_POLL_INTERVAL_MS",
+		"OUTBOX_WORKER_BATCH_SIZE",
+		"OUTBOX_WORKER_POLL_INTERVAL_MS",
 		"MEDIA_DELIVERY_MODE",
 		"MEDIA_PLAYBACK_SIGNING_SECRET",
 		"MEDIA_PLAYBACK_URL_TTL_SECONDS",
@@ -153,7 +195,7 @@ func LoadServerRuntimeConfig(configDir string) (ServerRuntimeConfig, error) {
 		return ServerRuntimeConfig{}, err
 	}
 
-	return ServerRuntimeConfig{
+	config := ServerRuntimeConfig{
 		AppEnv:          trimmedString(loader, "APP_ENV"),
 		Host:            trimmedString(loader, "SERVER_HOST"),
 		Port:            trimmedString(loader, "SERVER_PORT"),
@@ -189,6 +231,20 @@ func LoadServerRuntimeConfig(configDir string) (ServerRuntimeConfig, error) {
 			URL:                  trimmedString(loader, "NATS_URL"),
 			Name:                 trimmedString(loader, "NATS_NAME"),
 			SubjectRoomBroadcast: trimmedString(loader, "NATS_SUBJECT_ROOM_BROADCAST"),
+			SubjectRoomControl:   trimmedString(loader, "NATS_SUBJECT_ROOM_CONTROL"),
+		},
+		Kafka: KafkaConfig{
+			Brokers:                   csvFromConfig(loader, "KAFKA_BROKERS"),
+			ClientID:                  trimmedString(loader, "KAFKA_CLIENT_ID"),
+			TopicRoomTimeline:         trimmedString(loader, "KAFKA_TOPIC_ROOM_TIMELINE"),
+			TopicRoomControlResult:    trimmedString(loader, "KAFKA_TOPIC_ROOM_CONTROL_RESULT"),
+			TopicRoomMembership:       trimmedString(loader, "KAFKA_TOPIC_ROOM_MEMBERSHIP"),
+			DerivedConsumerGroupID:    trimmedString(loader, "KAFKA_DERIVED_CONSUMER_GROUP_ID"),
+			DerivedWorkerPollInterval: intFromConfig(loader, "KAFKA_DERIVED_WORKER_POLL_INTERVAL_MS"),
+		},
+		OutboxWorker: OutboxWorkerConfig{
+			BatchSize:      intFromConfig(loader, "OUTBOX_WORKER_BATCH_SIZE"),
+			PollIntervalMs: intFromConfig(loader, "OUTBOX_WORKER_POLL_INTERVAL_MS"),
 		},
 		Media: MediaPlaybackConfig{
 			DeliveryMode:           trimmedString(loader, "MEDIA_DELIVERY_MODE"),
@@ -203,7 +259,11 @@ func LoadServerRuntimeConfig(configDir string) (ServerRuntimeConfig, error) {
 			StorageSecretAccessKey: trimmedString(loader, "MEDIA_STORAGE_SECRET_ACCESS_KEY"),
 			StorageForcePathStyle:  boolFromConfig(loader, "MEDIA_STORAGE_FORCE_PATH_STYLE"),
 		},
-	}, nil
+	}
+	if err := validateServerRuntimeConfig(config); err != nil {
+		return ServerRuntimeConfig{}, err
+	}
+	return config, nil
 }
 
 func parseRoomRuntimeMode(value string) (string, error) {
@@ -211,10 +271,45 @@ func parseRoomRuntimeMode(value string) (string, error) {
 	if normalized == "" {
 		return roomRuntimeModeLocalProcess, nil
 	}
-	if normalized != roomRuntimeModeLocalProcess {
-		return "", fmt.Errorf("unsupported ROOM_RUNTIME_MODE %q; supported values: %s", value, roomRuntimeModeLocalProcess)
+	if normalized != roomRuntimeModeLocalProcess && normalized != roomRuntimeModeDistributedAuthority {
+		return "", fmt.Errorf(
+			"unsupported ROOM_RUNTIME_MODE %q; supported values: %s, %s",
+			value,
+			roomRuntimeModeLocalProcess,
+			roomRuntimeModeDistributedAuthority,
+		)
 	}
 	return normalized, nil
+}
+
+func validateServerRuntimeConfig(config ServerRuntimeConfig) error {
+	if config.RoomRuntimeMode != roomRuntimeModeDistributedAuthority {
+		return nil
+	}
+	if strings.TrimSpace(config.InstanceID) == "" {
+		return fmt.Errorf("SERVER_INSTANCE_ID is required when ROOM_RUNTIME_MODE=%s", roomRuntimeModeDistributedAuthority)
+	}
+	if !config.WebSocket.CrossInstanceBroadcast {
+		return fmt.Errorf("WS_CROSS_INSTANCE_BROADCAST_ENABLED=true is required when ROOM_RUNTIME_MODE=%s", roomRuntimeModeDistributedAuthority)
+	}
+	if strings.TrimSpace(config.DatabaseURL) == "" {
+		return fmt.Errorf("DATABASE_URL is required when ROOM_RUNTIME_MODE=%s", roomRuntimeModeDistributedAuthority)
+	}
+	if strings.TrimSpace(config.Redis.Addr) == "" {
+		return fmt.Errorf("REDIS_ADDR is required when ROOM_RUNTIME_MODE=%s", roomRuntimeModeDistributedAuthority)
+	}
+	if strings.TrimSpace(config.NATS.URL) == "" {
+		return fmt.Errorf("NATS_URL is required when ROOM_RUNTIME_MODE=%s", roomRuntimeModeDistributedAuthority)
+	}
+	if len(config.Kafka.Brokers) == 0 {
+		return fmt.Errorf("KAFKA_BROKERS is required when ROOM_RUNTIME_MODE=%s", roomRuntimeModeDistributedAuthority)
+	}
+	if strings.TrimSpace(config.Kafka.TopicRoomTimeline) == "" ||
+		strings.TrimSpace(config.Kafka.TopicRoomControlResult) == "" ||
+		strings.TrimSpace(config.Kafka.TopicRoomMembership) == "" {
+		return fmt.Errorf("Kafka room timeline and derived topics are required when ROOM_RUNTIME_MODE=%s", roomRuntimeModeDistributedAuthority)
+	}
+	return nil
 }
 
 func parseEventBus(value string) (string, error) {
@@ -254,4 +349,21 @@ func int64FromConfig(loader interface{ GetString(string) string }, key string) i
 		return 0
 	}
 	return parsed
+}
+
+func csvFromConfig(loader interface{ GetString(string) string }, key string) []string {
+	value := strings.TrimSpace(loader.GetString(key))
+	if value == "" {
+		return nil
+	}
+	parts := strings.Split(value, ",")
+	result := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		result = append(result, part)
+	}
+	return result
 }

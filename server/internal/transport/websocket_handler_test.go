@@ -38,8 +38,9 @@ func TestWebSocketJoinRoomFlow(t *testing.T) {
 	joinData, err := json.Marshal(protocol.Envelope{
 		Type: protocol.TypeJoinRoom,
 		Payload: mustJSONRaw(protocol.JoinRoomPayload{
-			RoomID: createdRoom.ID(),
-			UserID: "user_b",
+			RoomID:   createdRoom.ID(),
+			UserID:   "user_b",
+			DeviceID: "user_b-device",
 		}),
 	})
 	if err != nil {
@@ -153,8 +154,9 @@ func TestWebSocketJoinRoomMissingRoomReturnsError(t *testing.T) {
 	joinData, err := json.Marshal(protocol.Envelope{
 		Type: protocol.TypeJoinRoom,
 		Payload: mustJSONRaw(protocol.JoinRoomPayload{
-			RoomID: "ROOM01",
-			UserID: "user_b",
+			RoomID:   "ROOM01",
+			UserID:   "user_b",
+			DeviceID: "user_b-device",
 		}),
 	})
 	if err != nil {
@@ -1597,8 +1599,9 @@ func mustJoinRoom(
 	mustSendEnvelope(t, ctx, conn, protocol.Envelope{
 		Type: protocol.TypeJoinRoom,
 		Payload: mustJSONRaw(protocol.JoinRoomPayload{
-			RoomID: roomID,
-			UserID: userID,
+			RoomID:   roomID,
+			UserID:   userID,
+			DeviceID: userID + "-device",
 		}),
 	})
 }

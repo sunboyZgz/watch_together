@@ -4,7 +4,8 @@ import com.example.watch_together.config.AppConfig
 
 class RoomSessionController(
     private val roomHttpClient: RoomHttpClient = RoomHttpClient(),
-    private val roomWebSocketClient: RoomWebSocketClient = RoomWebSocketClient()
+    private val roomWebSocketClient: RoomWebSocketClient = RoomWebSocketClient(),
+    private val deviceIdProvider: () -> String = { "android-test-device" }
 ) {
 
     fun closeSession() {
@@ -29,10 +30,12 @@ class RoomSessionController(
         accessToken: String,
         listener: RoomWebSocketListener
     ) {
+        val deviceId = deviceIdProvider()
         roomWebSocketClient.joinRoom(
             wsUrl = AppConfig.wsBaseUrl,
             roomId = roomId,
             userId = userId,
+            deviceId = deviceId,
             accessToken = accessToken,
             listener = listener
         )

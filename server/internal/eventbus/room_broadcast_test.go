@@ -34,6 +34,9 @@ func TestNormalizeNATSConfigDefaults(t *testing.T) {
 	if config.Subject != DefaultRoomBroadcastSubject {
 		t.Fatalf("expected default subject, got %q", config.Subject)
 	}
+	if config.ControlSubject != DefaultRoomControlSubject {
+		t.Fatalf("expected default control subject, got %q", config.ControlSubject)
+	}
 }
 
 func TestRoomBroadcastEventRoundTrip(t *testing.T) {
@@ -98,5 +101,85 @@ func TestMemoryRoomBroadcastBusDeliversEvents(t *testing.T) {
 
 	if got.RoomID != "ROOM01" || got.Type != "room_state" || got.Seq != 3 {
 		t.Fatalf("unexpected delivered event: %+v", got)
+	}
+}
+
+func TestRoomControlRequestRoundTrip(t *testing.T) {
+	payload := json.RawMessage(`{"roomId":"ROOM01","seq":4}`)
+	request := RoomControlRequest{
+		SourceInstanceID: "roomserver-a",
+		RoomID:           "ROOM01",
+		UserID:           "user-a",
+		DeviceID:         "device-a",
+		ConnectionID:     "conn-a",
+		Type:             "play",
+		Payload:          payload,
+		Seq:              4,
+		RequestedAtMs:    12345,
+	}
+
+	data, err := EncodeRoomControlRequest(request)
+	if err != nil {
+		t.Fatalf("encode request: %v", err)
+	}
+	decoded, err := DecodeRoomControlRequest(data)
+	if err != nil {
+		t.Fatalf("decode request: %v", err)
+	}
+
+	if decoded.SourceInstanceID != request.SourceInstanceID ||
+		decoded.RoomID != request.RoomID ||
+		decoded.UserID != request.UserID ||
+		decoded.DeviceID != request.DeviceID ||
+		decoded.ConnectionID != request.ConnectionID ||
+		decoded.Type != request.Type ||
+		decoded.Seq != request.Seq ||
+		string(decoded.Payload) != string(payload) {
+		t.Fatalf("unexpected decoded request: %+v", decoded)
+	}
+}
+
+func TestMemoryRoomControlBusRequestReply(t *testing.T) {
+	bus := NewMemoryRoomControlBus()
+	defer bus.Close()
+
+	if err := bus.SubscribeRoomControls(context.Background(), "roomserver-b", func(_ context.Context, request RoomControlRequest) RoomControlResponse {
+		if request.SourceInstanceID != "roomserver-a" || request.RoomID != "ROOM01" {
+			return RoomControlResponse{Error: "unexpected request"}
+		}
+		return RoomControlResponse{
+			Type:    request.Type,
+			Payload: request.Payload,
+			Seq:     request.Seq + 1,
+		}
+	}); err != nil {
+		t.Fatalf("subscribe controls: %v", err)
+	}
+
+	response, err := bus.RequestRoomControl(context.Background(), "roomserver-b", RoomControlRequest{
+		SourceInstanceID: "roomserver-a",
+		RoomID:           "ROOM01",
+		Type:             "play",
+		Payload:          json.RawMessage(`{"roomId":"ROOM01"}`),
+		Seq:              1,
+	})
+	if err != nil {
+		t.Fatalf("request control: %v", err)
+	}
+	if response.Type != "play" || response.Seq != 2 || response.Error != "" {
+		t.Fatalf("unexpected response: %+v", response)
+	}
+}
+
+func TestDisabledRoomControlBusRequestFails(t *testing.T) {
+	bus := NewDisabledRoomControlBus()
+
+	if _, err := bus.RequestRoomControl(context.Background(), "roomserver-b", RoomControlRequest{}); err == nil {
+		t.Fatalf("expected disabled control bus request to fail")
+	}
+	if err := bus.SubscribeRoomControls(context.Background(), "roomserver-b", func(context.Context, RoomControlRequest) RoomControlResponse {
+		return RoomControlResponse{}
+	}); err != nil {
+		t.Fatalf("expected disabled subscribe to no-op, got %v", err)
 	}
 }

@@ -62,6 +62,7 @@ class RoomWebSocketClient(
         wsUrl: String,
         roomId: String,
         userId: String,
+        deviceId: String,
         accessToken: String,
         listener: RoomWebSocketListener
     ) {
@@ -85,7 +86,8 @@ class RoomWebSocketClient(
 
                 val joinPayload = JoinRoomPayload(
                     roomId = roomId,
-                    userId = userId
+                    userId = userId,
+                    deviceId = deviceId
                 )
                 val envelope = joinPayload.toEnvelope()
                 val rawMessage = JSONObject()
@@ -95,6 +97,7 @@ class RoomWebSocketClient(
                         JSONObject()
                             .put("roomId", joinPayload.roomId)
                             .put("userId", joinPayload.userId)
+                            .put("deviceId", joinPayload.deviceId)
                     )
                     .toString()
 
@@ -265,7 +268,8 @@ class RoomWebSocketClient(
         return when (val payload = payload) {
             is JoinRoomPayload -> mapOf(
                 "roomId" to payload.roomId,
-                "userId" to payload.userId
+                "userId" to payload.userId,
+                "deviceId" to payload.deviceId
             )
 
             is LeaveRoomPayload -> mapOf(

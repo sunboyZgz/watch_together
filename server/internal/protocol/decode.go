@@ -37,6 +37,9 @@ func DecodeJoinRoom(envelope Envelope) (JoinRoomPayload, error) {
 	if payload.UserID == "" {
 		return JoinRoomPayload{}, errors.New("missing userId")
 	}
+	if payload.DeviceID == "" {
+		return JoinRoomPayload{}, errors.New("missing deviceId")
+	}
 	return payload, nil
 }
 

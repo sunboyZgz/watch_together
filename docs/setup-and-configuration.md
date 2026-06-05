@@ -2,11 +2,11 @@
 
 ## Local Infrastructure
 
-Start the local PostgreSQL, Redis, NATS, and MinIO services from the server directory:
+Start the local PostgreSQL, Redis, NATS, Kafka, and MinIO services from the server directory:
 
 ```bash
 cd server
-docker compose up -d postgres redis nats minio minio-init
+docker compose up -d postgres redis nats kafka minio minio-init
 ```
 
 Default local endpoints:
@@ -15,6 +15,7 @@ Default local endpoints:
 PostgreSQL: 127.0.0.1:5432
 Redis:      127.0.0.1:6380
 NATS:       127.0.0.1:4222
+Kafka:      127.0.0.1:9092
 MinIO API:  127.0.0.1:9100
 MinIO UI:   127.0.0.1:9101
 ```
@@ -79,6 +80,16 @@ WS_EVENT_BUS=nats_core
 NATS_URL=nats://127.0.0.1:4222
 NATS_NAME=watch-together-roomserver
 NATS_SUBJECT_ROOM_BROADCAST=wt.room.broadcast.v1
+NATS_SUBJECT_ROOM_CONTROL=wt.room.control.v1
+KAFKA_BROKERS=
+KAFKA_CLIENT_ID=watch-together-roomserver
+KAFKA_TOPIC_ROOM_TIMELINE=wt.room.timeline.v1
+KAFKA_TOPIC_ROOM_CONTROL_RESULT=wt.room.control_result.v1
+KAFKA_TOPIC_ROOM_MEMBERSHIP=wt.room.membership.v1
+KAFKA_DERIVED_CONSUMER_GROUP_ID=watch-together-derived-workers
+KAFKA_DERIVED_WORKER_POLL_INTERVAL_MS=1000
+OUTBOX_WORKER_BATCH_SIZE=50
+OUTBOX_WORKER_POLL_INTERVAL_MS=1000
 MEDIA_DELIVERY_MODE=signed_redirect
 MEDIA_PLAYBACK_SIGNING_SECRET=<secret>
 MEDIA_PLAYBACK_URL_TTL_SECONDS=7200
@@ -94,7 +105,7 @@ MEDIA_STORAGE_FORCE_PATH_STYLE=true
 
 `SERVER_INSTANCE_ID` is optional metadata surfaced in startup logs and `/healthz` headers. Set it to a unique value per roomserver replica during multi-instance experiments.
 
-`ROOM_RUNTIME_MODE` currently supports only `local_process`. It explicitly marks that active room playback authority, WebSocket connection tables, control deduplication, and seek rate limiting still live in one Go process. Unsupported values fail config loading.
+`ROOM_RUNTIME_MODE` supports `local_process` and `distributed_authority`. `local_process` keeps active room playback authority, WebSocket connection tables, control deduplication, and seek rate limiting in one Go process. `distributed_authority` requires `SERVER_INSTANCE_ID`, PostgreSQL, Redis, NATS, Kafka broker config, and `WS_CROSS_INSTANCE_BROADCAST_ENABLED=true`.
 
 If `DATABASE_URL` is empty or PostgreSQL cannot be opened, database-backed HTTP endpoints return `503`. If `REDIS_ADDR` is empty, the Redis-backed room state cache is disabled.
 
@@ -103,6 +114,18 @@ If `DATABASE_URL` is empty or PostgreSQL cannot be opened, database-backed HTTP 
 Each `roomserver` instance subscribes directly to the same NATS Core subject. Do not configure a NATS queue group for room broadcasts, because every instance needs the same broadcast message. JetStream is not enabled in this phase, so NATS is not a durable event log or playback authority. `ROOM_RUNTIME_MODE=local_process` and Redis `room_state` snapshot behavior remain unchanged.
 
 If cross-instance broadcast is enabled but NATS cannot be opened, the server logs the connection failure and continues with local-process WebSocket behavior.
+
+In `distributed_authority`, NATS is also used for internal control request/reply through `NATS_SUBJECT_ROOM_CONTROL`. Kafka is used only for durable room timeline result logging through PostgreSQL outbox workers. Online WebSocket fan-out still uses NATS Core and local connection tables.
+
+See [distributed-architecture.md](./distributed-architecture.md) for the Phase 4 module map and data flows.
+
+Worker examples:
+
+```bash
+cd server
+APP_ENV=local go run ./cmd/outboxworker
+APP_ENV=local go run ./cmd/derivedworker
+```
 
 Start the server:
 
@@ -117,7 +140,7 @@ Health check:
 GET http://127.0.0.1:8080/healthz
 ```
 
-The response body remains `ok`. Health responses include `X-Watch-Together-Room-Runtime: local_process` and include `X-Watch-Together-Instance-ID` when `SERVER_INSTANCE_ID` is configured.
+The response body remains `ok`. Health responses include `X-Watch-Together-Room-Runtime` and include `X-Watch-Together-Instance-ID` when `SERVER_INSTANCE_ID` is configured.
 
 ## Mediactl Configuration
 
@@ -175,8 +198,9 @@ cd android
 Production deployment uses `server/compose.prod.yaml`. Its intended boundary is:
 
 - Only Nginx exposes HTTP to the public network.
-- Go `roomserver`, PostgreSQL, Redis, and MinIO stay on the Docker network.
-- NATS stays on the Docker network and is used only for optional WebSocket fan-out.
+- Go `roomserver`, workers, PostgreSQL, Redis, Kafka, NATS, and MinIO stay on the Docker network.
+- NATS stays on the Docker network and is used for WebSocket fan-out and internal control forwarding.
+- Kafka stays on the Docker network and stores durable timeline result events.
 - Media delivery defaults to `MEDIA_DELIVERY_MODE=nginx_auth_request`.
 
 See [server/deploy/README.md](../server/deploy/README.md) for deployment-specific commands and Nginx details.

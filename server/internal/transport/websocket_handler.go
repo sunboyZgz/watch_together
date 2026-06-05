@@ -2,6 +2,7 @@ package transport
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log"
 	"net/http"
@@ -10,11 +11,13 @@ import (
 	"github.com/coder/websocket"
 	"golang.org/x/sync/semaphore"
 
+	"watch_together/server/internal/cache"
 	"watch_together/server/internal/eventbus"
 	"watch_together/server/internal/protocol"
 	"watch_together/server/internal/realtime"
 	"watch_together/server/internal/room"
 	"watch_together/server/internal/roomapi"
+	"watch_together/server/internal/timeline"
 )
 
 type WebSocketHandler struct {
@@ -36,7 +39,12 @@ type WebSocketHandler struct {
 	deviceSwitches      *roomDeviceSwitchRegistry
 	deviceSwitchTimeout time.Duration
 	roomBroadcastBus    eventbus.RoomBroadcastBus
+	roomControlBus      eventbus.RoomControlBus
+	roomAuthority       roomAuthorityLookup
+	activeDevices       activeDeviceRegistry
+	timelineRecorder    timeline.Recorder
 	instanceID          string
+	roomRuntimeMode     string
 }
 
 const (
@@ -47,6 +55,8 @@ const (
 	defaultBroadcastEnqueueTimeout   = 3 * time.Second
 	defaultControlRequestDedupTTL    = 2 * time.Minute
 	defaultSeekMinInterval           = 250 * time.Millisecond
+	roomRuntimeModeLocalProcess      = "local_process"
+	roomRuntimeModeDistributed       = "distributed_authority"
 )
 
 type WebSocketRuntimeConfig struct {
@@ -72,6 +82,16 @@ type roomMembershipLeaver interface {
 
 type roomMembershipChecker interface {
 	IsActiveMemberByCode(ctx context.Context, roomCode string, userID string) (bool, error)
+}
+
+type roomAuthorityLookup interface {
+	GetAuthority(ctx context.Context, roomID string) (cache.RoomAuthorityLease, bool, error)
+}
+
+type activeDeviceRegistry interface {
+	Acquire(ctx context.Context, roomID string, userID string, deviceID string, instanceID string, connectionID string) (cache.ActiveDeviceLease, bool, error)
+	Get(ctx context.Context, roomID string, userID string) (cache.ActiveDeviceLease, bool, error)
+	ReleaseIfMatch(ctx context.Context, roomID string, userID string, deviceID string, connectionID string) (bool, error)
 }
 
 type protocolMessageError struct {
@@ -151,11 +171,35 @@ func (h *WebSocketHandler) SetRoomBroadcastBus(instanceID string, bus eventbus.R
 	h.roomBroadcastBus = bus
 }
 
+func (h *WebSocketHandler) SetDistributedAuthorityRuntime(
+	instanceID string,
+	authority roomAuthorityLookup,
+	activeDevices activeDeviceRegistry,
+	controlBus eventbus.RoomControlBus,
+	recorder timeline.Recorder,
+) {
+	h.instanceID = instanceID
+	h.roomRuntimeMode = roomRuntimeModeDistributed
+	h.roomAuthority = authority
+	h.activeDevices = activeDevices
+	h.roomControlBus = controlBus
+	if recorder != nil {
+		h.timelineRecorder = recorder
+	}
+}
+
 func (h *WebSocketHandler) SubscribeRoomBroadcasts(ctx context.Context) error {
 	if h == nil || h.roomBroadcastBus == nil {
 		return nil
 	}
 	return h.roomBroadcastBus.SubscribeRoomBroadcasts(ctx, h.handleRemoteRoomBroadcast)
+}
+
+func (h *WebSocketHandler) SubscribeRoomControls(ctx context.Context) error {
+	if h == nil || h.roomControlBus == nil || h.instanceID == "" || !h.isDistributedAuthorityMode() {
+		return nil
+	}
+	return h.roomControlBus.SubscribeRoomControls(ctx, h.instanceID, h.handleAuthorityRoomControlRequest)
 }
 
 func newWebSocketHandler(
@@ -220,6 +264,8 @@ func newWebSocketHandlerWithClock(
 		tokenVerifier:       defaultAccessTokenVerifier,
 		deviceSwitches:      newRoomDeviceSwitchRegistry(),
 		deviceSwitchTimeout: config.RoomDeviceSwitchTimeout,
+		timelineRecorder:    timeline.NoopRecorder{},
+		roomRuntimeMode:     roomRuntimeModeLocalProcess,
 	}
 }
 
@@ -300,6 +346,7 @@ func (h *WebSocketHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if removeResult.HostUnavailable {
 			h.broadcastRoomState(removeResult)
 		}
+		h.releaseActiveDeviceForClient(context.Background(), client)
 		h.cancelRoomDeviceSwitchesForClient(client, "active_disconnected")
 		_ = client.Close(websocket.StatusNormalClosure, "connection closed")
 	}()
@@ -422,6 +469,8 @@ func (h *WebSocketHandler) handleLeaveRoom(
 
 	h.persistRoomLeave(payload.RoomID, payload.UserID)
 	leaveResult := h.roomManager.LeaveClient(client)
+	h.releaseActiveDeviceForClient(ctx, client)
+	h.recordMembershipTimeline(ctx, timeline.EventTypeMemberLeft, payload.RoomID, payload.UserID, client.DeviceID(), nil)
 	client.SetIdentity("", "")
 	if leaveResult.HostUnavailable {
 		h.broadcastRoomState(leaveResult)
@@ -556,39 +605,47 @@ func (h *WebSocketHandler) handleJoinRoom(
 
 	// We persist identity on the connection first so disconnect cleanup can find the room later.
 	client.SetIdentity(authUserID, payload.RoomID)
-	if activeLookup, ok := h.roomManager.ActiveClientForUser(authUserID); ok && activeLookup.Client != nil && activeLookup.Client != client {
-		switchRequest, created := h.deviceSwitches.create(
-			authUserID,
-			payload.RoomID,
-			activeLookup.RoomID,
-			activeLookup.Client,
-			client,
-			h.clock.Now().Add(h.deviceSwitchTimeout),
-		)
-		if !created {
-			client.SetIdentity("", "")
-			return protocolMessageError{
-				roomID:  payload.RoomID,
-				message: "device switch already pending",
+	client.SetDeviceID(payload.DeviceID)
+	if err := h.acquireActiveDevice(ctx, payload.RoomID, authUserID, payload.DeviceID, client); err != nil {
+		client.SetIdentity("", "")
+		return err
+	}
+	if !h.isDistributedAuthorityMode() {
+		if activeLookup, ok := h.roomManager.ActiveClientForUser(authUserID); ok && activeLookup.Client != nil && activeLookup.Client != client {
+			switchRequest, created := h.deviceSwitches.create(
+				authUserID,
+				payload.RoomID,
+				activeLookup.RoomID,
+				activeLookup.Client,
+				client,
+				h.clock.Now().Add(h.deviceSwitchTimeout),
+			)
+			if !created {
+				client.SetIdentity("", "")
+				return protocolMessageError{
+					roomID:  payload.RoomID,
+					message: "device switch already pending",
+				}
 			}
+			if err := h.writeRoomDeviceWaiting(ctx, client, switchRequest); err != nil {
+				h.deviceSwitches.take(switchRequest.RequestID)
+				client.SetIdentity("", "")
+				return err
+			}
+			if err := h.notifyRoomDeviceSwitchRequest(ctx, activeLookup.Client, switchRequest); err != nil {
+				h.deviceSwitches.take(switchRequest.RequestID)
+				_ = h.writeRoomDeviceSwitchResult(context.Background(), client, switchRequest, false, "switch request delivery failed")
+				client.SetIdentity("", "")
+				_ = client.Close(websocket.StatusPolicyViolation, "device switch request delivery failed")
+				return err
+			}
+			h.scheduleRoomDeviceSwitchTimeout(switchRequest)
+			return nil
 		}
-		if err := h.writeRoomDeviceWaiting(ctx, client, switchRequest); err != nil {
-			h.deviceSwitches.take(switchRequest.RequestID)
-			client.SetIdentity("", "")
-			return err
-		}
-		if err := h.notifyRoomDeviceSwitchRequest(ctx, activeLookup.Client, switchRequest); err != nil {
-			h.deviceSwitches.take(switchRequest.RequestID)
-			_ = h.writeRoomDeviceSwitchResult(context.Background(), client, switchRequest, false, "switch request delivery failed")
-			client.SetIdentity("", "")
-			_ = client.Close(websocket.StatusPolicyViolation, "device switch request delivery failed")
-			return err
-		}
-		h.scheduleRoomDeviceSwitchTimeout(switchRequest)
-		return nil
 	}
 	joinResult := existingRoom.JoinWithLimit(client, h.maxRoomClients)
 	if joinResult.Err != nil {
+		h.releaseActiveDeviceForClient(ctx, client)
 		client.SetIdentity("", "")
 		if errors.Is(joinResult.Err, room.ErrRoomFull) {
 			return protocolMessageError{
@@ -616,6 +673,10 @@ func (h *WebSocketHandler) handleJoinRoom(
 	}
 	if joinResult.MembershipChanged {
 		h.broadcastRoomMembersChangedToOthers(payload.RoomID, joinResult.Clients, client, "join")
+		h.recordMembershipTimeline(ctx, timeline.EventTypeMemberJoined, payload.RoomID, authUserID, payload.DeviceID, protocol.RoomMembersChangedPayload{
+			RoomID: payload.RoomID,
+			Reason: "join",
+		})
 	}
 	return nil
 }
@@ -641,6 +702,188 @@ func (h *WebSocketHandler) ensureActiveRoomMember(ctx context.Context, roomID st
 		}
 	}
 	return nil
+}
+
+func (h *WebSocketHandler) isDistributedAuthorityMode() bool {
+	return h != nil && h.roomRuntimeMode == roomRuntimeModeDistributed
+}
+
+func (h *WebSocketHandler) acquireActiveDevice(
+	ctx context.Context,
+	roomID string,
+	userID string,
+	deviceID string,
+	client *room.ClientConnection,
+) error {
+	if !h.isDistributedAuthorityMode() || h.activeDevices == nil {
+		return nil
+	}
+	lease, acquired, err := h.activeDevices.Acquire(ctx, roomID, userID, deviceID, h.instanceID, client.ConnectionID())
+	if err != nil {
+		return err
+	}
+	if !acquired {
+		return protocolMessageError{
+			roomID:  roomID,
+			message: "active room device already exists",
+		}
+	}
+	if h.debugSync {
+		log.Printf(
+			"active_device acquired room=%s user=%s device=%s connection=%s owner_instance=%s lease_until_ms=%d",
+			roomID,
+			userID,
+			deviceID,
+			client.ConnectionID(),
+			lease.InstanceID,
+			lease.LeaseUntilMs,
+		)
+	}
+	return nil
+}
+
+func (h *WebSocketHandler) releaseActiveDeviceForClient(ctx context.Context, client *room.ClientConnection) {
+	if !h.isDistributedAuthorityMode() || h.activeDevices == nil || client == nil {
+		return
+	}
+	roomID := client.RoomID()
+	userID := client.UserID()
+	deviceID := client.DeviceID()
+	connectionID := client.ConnectionID()
+	if roomID == "" || userID == "" || deviceID == "" || connectionID == "" {
+		return
+	}
+	released, err := h.activeDevices.ReleaseIfMatch(ctx, roomID, userID, deviceID, connectionID)
+	if err != nil && h.debugSync {
+		log.Printf("active_device release failed room=%s user=%s device=%s connection=%s err=%v", roomID, userID, deviceID, connectionID, err)
+	}
+	if released && h.debugSync {
+		log.Printf("active_device released room=%s user=%s device=%s connection=%s", roomID, userID, deviceID, connectionID)
+	}
+}
+
+func (h *WebSocketHandler) ensureActiveDeviceControl(
+	ctx context.Context,
+	roomID string,
+	client *room.ClientConnection,
+) error {
+	if !h.isDistributedAuthorityMode() || h.activeDevices == nil {
+		return nil
+	}
+	lease, found, err := h.activeDevices.Get(ctx, roomID, client.UserID())
+	if err != nil {
+		return err
+	}
+	if !found ||
+		lease.DeviceID != client.DeviceID() ||
+		lease.ConnectionID != client.ConnectionID() ||
+		lease.InstanceID != h.instanceID {
+		return protocolMessageError{
+			roomID:  roomID,
+			message: "active room device required",
+		}
+	}
+	return h.refreshActiveDeviceLeaseForClient(ctx, client)
+}
+
+func (h *WebSocketHandler) refreshActiveDeviceLeaseForClient(
+	ctx context.Context,
+	client *room.ClientConnection,
+) error {
+	if !h.isDistributedAuthorityMode() || h.activeDevices == nil || client == nil {
+		return nil
+	}
+	roomID := client.RoomID()
+	userID := client.UserID()
+	deviceID := client.DeviceID()
+	connectionID := client.ConnectionID()
+	if roomID == "" || userID == "" || deviceID == "" || connectionID == "" {
+		return nil
+	}
+	_, acquired, err := h.activeDevices.Acquire(ctx, roomID, userID, deviceID, h.instanceID, connectionID)
+	if err != nil {
+		return err
+	}
+	if !acquired {
+		return protocolMessageError{
+			roomID:  roomID,
+			message: "active room device required",
+		}
+	}
+	return nil
+}
+
+func (h *WebSocketHandler) recordMembershipTimeline(
+	ctx context.Context,
+	eventType string,
+	roomID string,
+	userID string,
+	deviceID string,
+	payload any,
+) {
+	h.recordTimelineEvent(ctx, eventType, roomID, userID, deviceID, "", 0, payload)
+}
+
+func (h *WebSocketHandler) recordControlAccepted(
+	ctx context.Context,
+	eventType string,
+	roomID string,
+	meta controlEventMeta,
+	seq int64,
+	envelope protocol.Envelope,
+) {
+	h.recordTimelineEvent(ctx, timeline.EventTypeControlAccepted, roomID, meta.UserID, meta.DeviceID, eventType, seq, envelope)
+}
+
+func (h *WebSocketHandler) recordControlRejected(
+	ctx context.Context,
+	eventType string,
+	roomID string,
+	meta controlEventMeta,
+	reason string,
+) {
+	h.recordTimelineEvent(ctx, timeline.EventTypeControlRejected, roomID, meta.UserID, meta.DeviceID, eventType, meta.ClientSeq, map[string]any{
+		"type":      eventType,
+		"requestId": meta.RequestID,
+		"reason":    reason,
+	})
+}
+
+func (h *WebSocketHandler) recordTimelineEvent(
+	ctx context.Context,
+	eventType string,
+	roomID string,
+	userID string,
+	deviceID string,
+	controlType string,
+	seq int64,
+	payload any,
+) {
+	if h == nil || h.timelineRecorder == nil || roomID == "" {
+		return
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	data, err := json.Marshal(payload)
+	if err != nil {
+		if h.debugSync {
+			log.Printf("timeline event payload marshal failed room=%s type=%s err=%v", roomID, eventType, err)
+		}
+		return
+	}
+	event := timeline.NewEvent(eventType, roomID, h.clock.Now())
+	event.UserID = userID
+	event.DeviceID = deviceID
+	event.InstanceID = h.instanceID
+	event.ControlType = controlType
+	event.Seq = seq
+	event.Payload = data
+	recordCtx, cancel := context.WithTimeout(ctx, 300*time.Millisecond)
+	defer cancel()
+	if err := h.timelineRecorder.RecordTimelineEvent(recordCtx, event); err != nil && h.debugSync {
+		log.Printf("timeline outbox write failed room=%s type=%s err=%v", roomID, eventType, err)
+	}
 }
 
 func (h *WebSocketHandler) handleRoomDeviceSwitchReply(
@@ -828,10 +1071,12 @@ func (h *WebSocketHandler) handlePlay(
 	}
 	client.MarkHeartbeatAck(h.clock.Now())
 	meta := controlEventMeta{
-		UserID:     client.UserID(),
-		RequestID:  payload.RequestID,
-		PositionMs: payload.PositionMs,
-		ClientSeq:  payload.Seq,
+		UserID:       client.UserID(),
+		DeviceID:     client.DeviceID(),
+		ConnectionID: client.ConnectionID(),
+		RequestID:    payload.RequestID,
+		PositionMs:   payload.PositionMs,
+		ClientSeq:    payload.Seq,
 	}
 	h.logControlReceived(protocol.TypePlay, payload.RoomID, meta, 0)
 	return h.handleControlEvent(
@@ -840,6 +1085,7 @@ func (h *WebSocketHandler) handlePlay(
 		protocol.TypePlay,
 		payload.RoomID,
 		meta,
+		envelope,
 		func(existingRoom *room.Room) (room.State, []*room.ClientConnection, error) {
 			return existingRoom.ApplyPlayIfSeq(meta.UserID, payload.PositionMs, meta.ClientSeq)
 		},
@@ -861,10 +1107,12 @@ func (h *WebSocketHandler) handlePause(
 	}
 	client.MarkHeartbeatAck(h.clock.Now())
 	meta := controlEventMeta{
-		UserID:     client.UserID(),
-		RequestID:  payload.RequestID,
-		PositionMs: payload.PositionMs,
-		ClientSeq:  payload.Seq,
+		UserID:       client.UserID(),
+		DeviceID:     client.DeviceID(),
+		ConnectionID: client.ConnectionID(),
+		RequestID:    payload.RequestID,
+		PositionMs:   payload.PositionMs,
+		ClientSeq:    payload.Seq,
 	}
 	h.logControlReceived(protocol.TypePause, payload.RoomID, meta, 0)
 	return h.handleControlEvent(
@@ -873,6 +1121,7 @@ func (h *WebSocketHandler) handlePause(
 		protocol.TypePause,
 		payload.RoomID,
 		meta,
+		envelope,
 		func(existingRoom *room.Room) (room.State, []*room.ClientConnection, error) {
 			return existingRoom.ApplyPauseIfSeq(meta.UserID, payload.PositionMs, meta.ClientSeq)
 		},
@@ -894,10 +1143,12 @@ func (h *WebSocketHandler) handleSeek(
 	}
 	client.MarkHeartbeatAck(h.clock.Now())
 	meta := controlEventMeta{
-		UserID:     client.UserID(),
-		RequestID:  payload.RequestID,
-		PositionMs: payload.PositionMs,
-		ClientSeq:  payload.Seq,
+		UserID:       client.UserID(),
+		DeviceID:     client.DeviceID(),
+		ConnectionID: client.ConnectionID(),
+		RequestID:    payload.RequestID,
+		PositionMs:   payload.PositionMs,
+		ClientSeq:    payload.Seq,
 	}
 	h.logControlReceived(protocol.TypeSeek, payload.RoomID, meta, 0)
 	return h.handleControlEvent(
@@ -906,6 +1157,7 @@ func (h *WebSocketHandler) handleSeek(
 		protocol.TypeSeek,
 		payload.RoomID,
 		meta,
+		envelope,
 		func(existingRoom *room.Room) (room.State, []*room.ClientConnection, error) {
 			return existingRoom.ApplySeekIfSeq(meta.UserID, payload.PositionMs, meta.ClientSeq)
 		},
@@ -927,10 +1179,12 @@ func (h *WebSocketHandler) handleSetPlaybackRate(
 	}
 	client.MarkHeartbeatAck(h.clock.Now())
 	meta := controlEventMeta{
-		UserID:     client.UserID(),
-		RequestID:  payload.RequestID,
-		PositionMs: payload.PositionMs,
-		ClientSeq:  payload.Seq,
+		UserID:       client.UserID(),
+		DeviceID:     client.DeviceID(),
+		ConnectionID: client.ConnectionID(),
+		RequestID:    payload.RequestID,
+		PositionMs:   payload.PositionMs,
+		ClientSeq:    payload.Seq,
 	}
 	h.logControlReceived(protocol.TypeSetPlaybackRate, payload.RoomID, meta, payload.PlaybackRate)
 	return h.handleControlEvent(
@@ -939,6 +1193,7 @@ func (h *WebSocketHandler) handleSetPlaybackRate(
 		protocol.TypeSetPlaybackRate,
 		payload.RoomID,
 		meta,
+		envelope,
 		func(existingRoom *room.Room) (room.State, []*room.ClientConnection, error) {
 			return existingRoom.ApplyPlaybackRateIfSeq(meta.UserID, payload.PlaybackRate, meta.ClientSeq)
 		},
@@ -960,10 +1215,12 @@ func (h *WebSocketHandler) handleEnded(
 	}
 	client.MarkHeartbeatAck(h.clock.Now())
 	meta := controlEventMeta{
-		UserID:     client.UserID(),
-		RequestID:  payload.RequestID,
-		PositionMs: payload.PositionMs,
-		ClientSeq:  payload.Seq,
+		UserID:       client.UserID(),
+		DeviceID:     client.DeviceID(),
+		ConnectionID: client.ConnectionID(),
+		RequestID:    payload.RequestID,
+		PositionMs:   payload.PositionMs,
+		ClientSeq:    payload.Seq,
 	}
 	h.logControlReceived(protocol.TypeEnded, payload.RoomID, meta, 0)
 	return h.handleControlEvent(
@@ -972,6 +1229,7 @@ func (h *WebSocketHandler) handleEnded(
 		protocol.TypeEnded,
 		payload.RoomID,
 		meta,
+		envelope,
 		func(existingRoom *room.Room) (room.State, []*room.ClientConnection, error) {
 			return existingRoom.ApplyEndedIfSeq(meta.UserID, payload.PositionMs, meta.ClientSeq)
 		},
@@ -982,10 +1240,12 @@ func (h *WebSocketHandler) handleEnded(
 }
 
 type controlEventMeta struct {
-	UserID     string
-	RequestID  string
-	PositionMs int64
-	ClientSeq  int64
+	UserID       string
+	DeviceID     string
+	ConnectionID string
+	RequestID    string
+	PositionMs   int64
+	ClientSeq    int64
 }
 
 func (h *WebSocketHandler) handleControlEvent(
@@ -994,29 +1254,77 @@ func (h *WebSocketHandler) handleControlEvent(
 	eventType string,
 	roomID string,
 	meta controlEventMeta,
+	sourceEnvelope protocol.Envelope,
 	apply func(existingRoom *room.Room) (room.State, []*room.ClientConnection, error),
 	buildEnvelope func(state room.State) protocol.Envelope,
 ) error {
 	if client.UserID() == "" || client.UserID() != meta.UserID || client.RoomID() != roomID {
-		return protocolMessageError{
+		err := protocolMessageError{
 			roomID:  roomID,
 			message: "room identity mismatch",
+		}
+		h.recordControlRejected(ctx, eventType, roomID, meta, err.message)
+		return err
+	}
+	if h.isDistributedAuthorityMode() {
+		if err := h.ensureActiveDeviceControl(ctx, roomID, client); err != nil {
+			h.recordControlRejected(ctx, eventType, roomID, meta, err.Error())
+			return err
+		}
+		authority, found, err := h.currentRoomAuthority(ctx, roomID)
+		if err != nil {
+			h.recordControlRejected(ctx, eventType, roomID, meta, err.Error())
+			return err
+		}
+		if !found {
+			protocolErr := protocolMessageError{
+				roomID:  roomID,
+				message: "room authority unavailable",
+			}
+			h.recordControlRejected(ctx, eventType, roomID, meta, protocolErr.message)
+			return protocolErr
+		}
+		if authority.InstanceID != h.instanceID {
+			return h.forwardControlEvent(ctx, client, eventType, roomID, meta, sourceEnvelope, authority.InstanceID)
 		}
 	}
 	existingRoom, ok := h.roomManager.Get(roomID)
 	if !ok {
-		return protocolMessageError{
+		err := protocolMessageError{
 			roomID:  roomID,
 			message: "room not found",
 		}
+		h.recordControlRejected(ctx, eventType, roomID, meta, err.message)
+		return err
 	}
 	if !existingRoom.IsActiveClient(client) {
-		return protocolMessageError{
+		err := protocolMessageError{
 			roomID:  roomID,
 			message: "active room device required",
 		}
+		h.recordControlRejected(ctx, eventType, roomID, meta, err.message)
+		return err
 	}
 
+	response, accepted, err := h.applyLocalControlEvent(ctx, existingRoom, eventType, roomID, meta, apply, buildEnvelope)
+	if err != nil {
+		return err
+	}
+	if !accepted {
+		return client.WriteJSON(ctx, response)
+	}
+	return nil
+}
+
+func (h *WebSocketHandler) applyLocalControlEvent(
+	ctx context.Context,
+	existingRoom *room.Room,
+	eventType string,
+	roomID string,
+	meta controlEventMeta,
+	apply func(existingRoom *room.Room) (room.State, []*room.ClientConnection, error),
+	buildEnvelope func(state room.State) protocol.Envelope,
+) (protocol.Envelope, bool, error) {
 	previous := existingRoom.StateSnapshot()
 	if meta.ClientSeq != previous.Seq {
 		if h.debugSync {
@@ -1031,7 +1339,11 @@ func (h *WebSocketHandler) handleControlEvent(
 			)
 		}
 		h.cacheRoomState(previous)
-		return h.writeRoomState(ctx, client, previous)
+		h.recordControlRejected(ctx, eventType, roomID, meta, "control seq does not match current room state")
+		return protocol.Envelope{
+			Type:    protocol.TypeRoomState,
+			Payload: mustJSONRaw(roomStatePayload(previous)),
+		}, false, nil
 	}
 
 	if meta.RequestID != "" && !h.reserveControlRequest(roomID, meta.RequestID, h.clock.Now()) {
@@ -1046,7 +1358,10 @@ func (h *WebSocketHandler) handleControlEvent(
 				previous.Seq,
 			)
 		}
-		return h.writeRoomState(ctx, client, previous)
+		return protocol.Envelope{
+			Type:    protocol.TypeRoomState,
+			Payload: mustJSONRaw(roomStatePayload(previous)),
+		}, false, nil
 	}
 
 	var seekRateReservation time.Time
@@ -1068,7 +1383,11 @@ func (h *WebSocketHandler) handleControlEvent(
 				)
 			}
 			h.cacheRoomState(previous)
-			return h.writeRoomState(ctx, client, previous)
+			h.recordControlRejected(ctx, eventType, roomID, meta, "control rate limited")
+			return protocol.Envelope{
+				Type:    protocol.TypeRoomState,
+				Payload: mustJSONRaw(roomStatePayload(previous)),
+			}, false, nil
 		}
 	}
 
@@ -1091,15 +1410,22 @@ func (h *WebSocketHandler) handleControlEvent(
 				)
 			}
 			h.cacheRoomState(state)
-			return h.writeRoomState(ctx, client, state)
+			h.recordControlRejected(ctx, eventType, roomID, meta, room.ErrSeqMismatch.Error())
+			return protocol.Envelope{
+				Type:    protocol.TypeRoomState,
+				Payload: mustJSONRaw(roomStatePayload(state)),
+			}, false, nil
 		}
 		if errors.Is(err, room.ErrNotHost) {
-			return protocolMessageError{
+			protocolErr := protocolMessageError{
 				roomID:  roomID,
 				message: "only host can control playback",
 			}
+			h.recordControlRejected(ctx, eventType, roomID, meta, protocolErr.message)
+			return protocol.Envelope{}, false, protocolErr
 		}
-		return err
+		h.recordControlRejected(ctx, eventType, roomID, meta, err.Error())
+		return protocol.Envelope{}, false, err
 	}
 
 	h.logTimelineTransition(eventType, roomID, meta, previous, state)
@@ -1108,7 +1434,296 @@ func (h *WebSocketHandler) handleControlEvent(
 	stats, err := h.broadcaster.Broadcast(ctx, roomClientWriters(clients), envelope)
 	h.logBroadcastStats(eventType, roomID, state.Seq, &state, stats, err)
 	h.publishRoomBroadcast(ctx, roomID, state.Seq, envelope)
-	return err
+	h.recordControlAccepted(ctx, eventType, roomID, meta, state.Seq, envelope)
+	return envelope, true, err
+}
+
+func (h *WebSocketHandler) currentRoomAuthority(
+	ctx context.Context,
+	roomID string,
+) (cache.RoomAuthorityLease, bool, error) {
+	if h.roomAuthority == nil {
+		return cache.RoomAuthorityLease{}, false, nil
+	}
+	return h.roomAuthority.GetAuthority(ctx, roomID)
+}
+
+func (h *WebSocketHandler) forwardControlEvent(
+	ctx context.Context,
+	client *room.ClientConnection,
+	eventType string,
+	roomID string,
+	meta controlEventMeta,
+	envelope protocol.Envelope,
+	authorityInstanceID string,
+) error {
+	if h.roomControlBus == nil {
+		err := protocolMessageError{
+			roomID:  roomID,
+			message: "room authority unavailable",
+		}
+		h.recordControlRejected(ctx, eventType, roomID, meta, err.message)
+		return err
+	}
+	requestCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	response, err := h.roomControlBus.RequestRoomControl(requestCtx, authorityInstanceID, eventbus.RoomControlRequest{
+		SourceInstanceID: h.instanceID,
+		RoomID:           roomID,
+		UserID:           meta.UserID,
+		DeviceID:         client.DeviceID(),
+		ConnectionID:     client.ConnectionID(),
+		Type:             eventType,
+		Payload:          envelope.Payload,
+		RequestID:        meta.RequestID,
+		Seq:              meta.ClientSeq,
+		RequestedAtMs:    h.clock.NowUnixMilli(),
+	})
+	if err != nil {
+		protocolErr := protocolMessageError{
+			roomID:  roomID,
+			message: "room authority unavailable",
+		}
+		h.recordControlRejected(ctx, eventType, roomID, meta, err.Error())
+		return protocolErr
+	}
+	if response.Error != "" {
+		h.recordControlRejected(ctx, eventType, roomID, meta, response.Error)
+		return protocolMessageError{
+			roomID:  roomID,
+			message: response.Error,
+		}
+	}
+	if response.Type == "" {
+		return nil
+	}
+	return client.WriteJSON(ctx, protocol.Envelope{
+		Type:    response.Type,
+		Payload: response.Payload,
+	})
+}
+
+func (h *WebSocketHandler) handleAuthorityRoomControlRequest(
+	ctx context.Context,
+	request eventbus.RoomControlRequest,
+) eventbus.RoomControlResponse {
+	if !h.isDistributedAuthorityMode() {
+		return eventbus.RoomControlResponse{Error: "room authority unavailable"}
+	}
+	if request.SourceInstanceID == h.instanceID {
+		return eventbus.RoomControlResponse{Error: "self control forwarding is not allowed"}
+	}
+	authority, found, err := h.currentRoomAuthority(ctx, request.RoomID)
+	if err != nil {
+		return eventbus.RoomControlResponse{Error: err.Error()}
+	}
+	if !found || authority.InstanceID != h.instanceID {
+		return eventbus.RoomControlResponse{Error: "room authority unavailable"}
+	}
+	if err := h.ensureActiveDeviceControlRequest(ctx, request); err != nil {
+		return eventbus.RoomControlResponse{Error: err.Error()}
+	}
+	existingRoom, ok := h.roomManager.Get(request.RoomID)
+	if !ok {
+		return eventbus.RoomControlResponse{Error: "room not found"}
+	}
+	response, accepted, err := h.applyForwardedControlRequest(ctx, existingRoom, request)
+	if err != nil {
+		return eventbus.RoomControlResponse{Error: controlErrorMessage(err)}
+	}
+	_ = accepted
+	return eventbus.RoomControlResponse{
+		Type:    response.Type,
+		Payload: response.Payload,
+		Seq:     responseSeq(response),
+	}
+}
+
+func (h *WebSocketHandler) ensureActiveDeviceControlRequest(
+	ctx context.Context,
+	request eventbus.RoomControlRequest,
+) error {
+	if h.activeDevices == nil {
+		return nil
+	}
+	lease, found, err := h.activeDevices.Get(ctx, request.RoomID, request.UserID)
+	if err != nil {
+		return err
+	}
+	if !found ||
+		lease.DeviceID != request.DeviceID ||
+		lease.ConnectionID != request.ConnectionID ||
+		lease.InstanceID != request.SourceInstanceID {
+		return errors.New("active room device required")
+	}
+	return nil
+}
+
+func (h *WebSocketHandler) applyForwardedControlRequest(
+	ctx context.Context,
+	existingRoom *room.Room,
+	request eventbus.RoomControlRequest,
+) (protocol.Envelope, bool, error) {
+	envelope := protocol.Envelope{Type: request.Type, Payload: request.Payload}
+	switch request.Type {
+	case protocol.TypePlay:
+		payload, err := protocol.DecodePlay(envelope)
+		if err != nil {
+			return protocol.Envelope{}, false, err
+		}
+		meta := forwardedControlMeta(request, payload.RequestID, payload.PositionMs, payload.Seq)
+		return h.applyLocalControlEvent(
+			ctx,
+			existingRoom,
+			protocol.TypePlay,
+			payload.RoomID,
+			meta,
+			func(existingRoom *room.Room) (room.State, []*room.ClientConnection, error) {
+				return existingRoom.ApplyPlayIfSeq(meta.UserID, payload.PositionMs, meta.ClientSeq)
+			},
+			func(state room.State) protocol.Envelope {
+				return controlEnvelopeFromState(protocol.TypePlay, state, payload.RequestID)
+			},
+		)
+	case protocol.TypePause:
+		payload, err := protocol.DecodePause(envelope)
+		if err != nil {
+			return protocol.Envelope{}, false, err
+		}
+		meta := forwardedControlMeta(request, payload.RequestID, payload.PositionMs, payload.Seq)
+		return h.applyLocalControlEvent(
+			ctx,
+			existingRoom,
+			protocol.TypePause,
+			payload.RoomID,
+			meta,
+			func(existingRoom *room.Room) (room.State, []*room.ClientConnection, error) {
+				return existingRoom.ApplyPauseIfSeq(meta.UserID, payload.PositionMs, meta.ClientSeq)
+			},
+			func(state room.State) protocol.Envelope {
+				return controlEnvelopeFromState(protocol.TypePause, state, payload.RequestID)
+			},
+		)
+	case protocol.TypeSeek:
+		payload, err := protocol.DecodeSeek(envelope)
+		if err != nil {
+			return protocol.Envelope{}, false, err
+		}
+		meta := forwardedControlMeta(request, payload.RequestID, payload.PositionMs, payload.Seq)
+		return h.applyLocalControlEvent(
+			ctx,
+			existingRoom,
+			protocol.TypeSeek,
+			payload.RoomID,
+			meta,
+			func(existingRoom *room.Room) (room.State, []*room.ClientConnection, error) {
+				return existingRoom.ApplySeekIfSeq(meta.UserID, payload.PositionMs, meta.ClientSeq)
+			},
+			func(state room.State) protocol.Envelope {
+				return controlEnvelopeFromState(protocol.TypeSeek, state, payload.RequestID)
+			},
+		)
+	case protocol.TypeSetPlaybackRate:
+		payload, err := protocol.DecodeSetPlaybackRate(envelope)
+		if err != nil {
+			return protocol.Envelope{}, false, err
+		}
+		meta := forwardedControlMeta(request, payload.RequestID, payload.PositionMs, payload.Seq)
+		return h.applyLocalControlEvent(
+			ctx,
+			existingRoom,
+			protocol.TypeSetPlaybackRate,
+			payload.RoomID,
+			meta,
+			func(existingRoom *room.Room) (room.State, []*room.ClientConnection, error) {
+				return existingRoom.ApplyPlaybackRateIfSeq(meta.UserID, payload.PlaybackRate, meta.ClientSeq)
+			},
+			func(state room.State) protocol.Envelope {
+				return controlEnvelopeFromState(protocol.TypeSetPlaybackRate, state, payload.RequestID)
+			},
+		)
+	case protocol.TypeEnded:
+		payload, err := protocol.DecodeEnded(envelope)
+		if err != nil {
+			return protocol.Envelope{}, false, err
+		}
+		meta := forwardedControlMeta(request, payload.RequestID, payload.PositionMs, payload.Seq)
+		return h.applyLocalControlEvent(
+			ctx,
+			existingRoom,
+			protocol.TypeEnded,
+			payload.RoomID,
+			meta,
+			func(existingRoom *room.Room) (room.State, []*room.ClientConnection, error) {
+				return existingRoom.ApplyEndedIfSeq(meta.UserID, payload.PositionMs, meta.ClientSeq)
+			},
+			func(state room.State) protocol.Envelope {
+				return controlEnvelopeFromState(protocol.TypeEnded, state, payload.RequestID)
+			},
+		)
+	default:
+		return protocol.Envelope{}, false, protocol.ErrUnsupportedMessageType
+	}
+}
+
+func forwardedControlMeta(
+	request eventbus.RoomControlRequest,
+	requestID string,
+	positionMs int64,
+	seq int64,
+) controlEventMeta {
+	return controlEventMeta{
+		UserID:       request.UserID,
+		DeviceID:     request.DeviceID,
+		ConnectionID: request.ConnectionID,
+		RequestID:    requestID,
+		PositionMs:   positionMs,
+		ClientSeq:    seq,
+	}
+}
+
+func controlErrorMessage(err error) string {
+	var protocolErr protocolMessageError
+	if errors.As(err, &protocolErr) {
+		return protocolErr.message
+	}
+	return err.Error()
+}
+
+func responseSeq(envelope protocol.Envelope) int64 {
+	switch envelope.Type {
+	case protocol.TypeRoomState:
+		var payload protocol.RoomStatePayload
+		if err := json.Unmarshal(envelope.Payload, &payload); err == nil {
+			return payload.Seq
+		}
+	case protocol.TypePlay:
+		var payload protocol.PlayPayload
+		if err := json.Unmarshal(envelope.Payload, &payload); err == nil {
+			return payload.Seq
+		}
+	case protocol.TypePause:
+		var payload protocol.PausePayload
+		if err := json.Unmarshal(envelope.Payload, &payload); err == nil {
+			return payload.Seq
+		}
+	case protocol.TypeSeek:
+		var payload protocol.SeekPayload
+		if err := json.Unmarshal(envelope.Payload, &payload); err == nil {
+			return payload.Seq
+		}
+	case protocol.TypeSetPlaybackRate:
+		var payload protocol.SetPlaybackRatePayload
+		if err := json.Unmarshal(envelope.Payload, &payload); err == nil {
+			return payload.Seq
+		}
+	case protocol.TypeEnded:
+		var payload protocol.EndedPayload
+		if err := json.Unmarshal(envelope.Payload, &payload); err == nil {
+			return payload.Seq
+		}
+	}
+	return 0
 }
 
 func (h *WebSocketHandler) logControlReceived(
@@ -1530,6 +2145,13 @@ func (h *WebSocketHandler) runHeartbeatLoop(ctx context.Context, client *room.Cl
 			now := h.clock.Now()
 			if client.HeartbeatTimedOut(now, h.heartbeatTimeout) {
 				_ = client.Close(websocket.StatusPolicyViolation, "heartbeat timeout")
+				return
+			}
+			if err := h.refreshActiveDeviceLeaseForClient(ctx, client); err != nil {
+				if h.debugSync && !errors.Is(err, context.Canceled) {
+					log.Printf("active_device heartbeat refresh failed: %v", err)
+				}
+				_ = client.Close(websocket.StatusPolicyViolation, "active device lease lost")
 				return
 			}
 

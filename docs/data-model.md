@@ -129,6 +129,24 @@ Stores low-frequency progress:
 
 This table supports the Android home page's last-watched and continue-watching data. It does not drive real-time room sync.
 
+### `room_timeline_outbox`
+
+Stores reliable delivery work for Kafka room timeline result events:
+
+- `topic`
+- `event_id`
+- `event_type`
+- `room_id`
+- `payload`
+- `status`
+- `attempts`
+- `last_error`
+- `next_attempt_at`
+- `published_at`
+- timestamps
+
+Rows are written by the authority `roomserver` after accepted/rejected control decisions and membership events. `cmd/outboxworker` claims pending rows with `FOR UPDATE SKIP LOCKED`, publishes to Kafka, then marks rows as `published` or schedules retry.
+
 ## Runtime State
 
 The in-process `room.Manager` owns active WebSocket room state:
@@ -140,7 +158,7 @@ The in-process `room.Manager` owns active WebSocket room state:
 - `seq`
 - grace-period cleanup
 
-When configured, Redis stores latest room snapshots in a `room_state` cache. Redis is not the source of truth for playback authority; the in-process room manager is.
+When configured, Redis stores latest room snapshots in a `room_state` cache. In `local_process`, Redis is not the source of truth for playback authority; the in-process room manager is.
 
 The room snapshot cache uses keys shaped as:
 
@@ -151,6 +169,25 @@ wt:room:state:{roomCode}:v1
 The cached value is the WebSocket `room_state` payload: room code, media ID, optional media duration, host user ID, paused/ended flags, position, velocity, server time, reason, playback rate, and `seq`. The default TTL is currently 10 minutes.
 
 The cache is written after HTTP room runtime bootstrap and WebSocket state transitions. It is readable through the cache layer for future recovery work, but Phase 2 still treats it as a latest-snapshot cache only. It does not store WebSocket connection objects, send queues, heartbeat state, control deduplication, seek rate limits, online presence, or active-device ownership.
+
+In `distributed_authority`, Redis also stores:
+
+```text
+wt:room:authority:{roomId}:v1
+wt:room:active_device:{roomId}:{userId}:v1
+```
+
+The authority value contains `instanceId` and `leaseUntilMs`. The active-device value contains `deviceId`, `instanceId`, `connectionId`, and `leaseUntilMs`.
+
+Kafka stores JSON v1 room result events:
+
+```text
+wt.room.timeline.v1
+wt.room.control_result.v1
+wt.room.membership.v1
+```
+
+The canonical topic is the durable room timeline result log. Derived topics are produced by `cmd/derivedworker`.
 
 ## Startup And Cleanup
 

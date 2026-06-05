@@ -2,7 +2,10 @@ package room
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"sync"
 	"time"
 
@@ -15,8 +18,10 @@ type ClientConnection struct {
 	writeMu             *semaphore.Weighted
 	outbox              *clientOutbox
 	stateMu             sync.RWMutex
+	connectionID        string
 	userID              string
 	roomID              string
+	deviceID            string
 	lastHeartbeatSentAt time.Time
 	lastHeartbeatAckAt  time.Time
 }
@@ -179,9 +184,18 @@ func NewClientConnectionWithOptions(conn *websocket.Conn, options ClientConnecti
 		conn:                conn,
 		writeMu:             semaphore.NewWeighted(1),
 		outbox:              newClientOutbox(outboxCapacity),
+		connectionID:        newConnectionID(),
 		lastHeartbeatSentAt: now,
 		lastHeartbeatAckAt:  now,
 	}
+}
+
+func newConnectionID() string {
+	bytes := make([]byte, 16)
+	if _, err := rand.Read(bytes); err != nil {
+		return fmt.Sprintf("conn-%d", time.Now().UnixNano())
+	}
+	return hex.EncodeToString(bytes)
 }
 
 // SetIdentity stores the logical user and room binding after a successful join_room.
@@ -191,6 +205,17 @@ func (c *ClientConnection) SetIdentity(userID string, roomID string) {
 
 	c.userID = userID
 	c.roomID = roomID
+	if userID == "" || roomID == "" {
+		c.deviceID = ""
+	}
+}
+
+// SetDeviceID stores the client-persistent device identifier after join_room validation.
+func (c *ClientConnection) SetDeviceID(deviceID string) {
+	c.stateMu.Lock()
+	defer c.stateMu.Unlock()
+
+	c.deviceID = deviceID
 }
 
 // UserID returns the logical user bound to this connection.
@@ -207,6 +232,23 @@ func (c *ClientConnection) RoomID() string {
 	defer c.stateMu.RUnlock()
 
 	return c.roomID
+}
+
+// DeviceID returns the client-persistent device identifier bound to this connection.
+func (c *ClientConnection) DeviceID() string {
+	c.stateMu.RLock()
+	defer c.stateMu.RUnlock()
+
+	return c.deviceID
+}
+
+// ConnectionID is the process-local session identifier used for distributed
+// active-device ownership checks and release safety.
+func (c *ClientConnection) ConnectionID() string {
+	c.stateMu.RLock()
+	defer c.stateMu.RUnlock()
+
+	return c.connectionID
 }
 
 // WriteJSON serializes one protocol message and writes it as a text WebSocket frame.

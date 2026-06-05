@@ -2,7 +2,8 @@ package com.example.watch_together.sync.protocol
 
 data class JoinRoomPayload(
     val roomId: String,
-    val userId: String
+    val userId: String,
+    val deviceId: String
 ) : ProtocolPayload
 
 data class LeaveRoomPayload(

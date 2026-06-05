@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"watch_together/server/internal/cache"
 	"watch_together/server/internal/room"
 	"watch_together/server/internal/roomapi"
 )
@@ -31,13 +32,19 @@ type roomRuntimeRegistry interface {
 	StoreLatestRoomState(ctx context.Context, state room.State) error
 }
 
+type roomAuthorityClaimer interface {
+	ClaimAuthority(ctx context.Context, roomID string, instanceID string) (cache.RoomAuthorityLease, bool, error)
+}
+
 type roomStateSnapshotter interface {
 	StateSnapshot() room.State
 }
 
 type roomManagerRuntime struct {
-	manager         *room.Manager
-	roomStateWriter latestRoomStateWriter
+	manager           *room.Manager
+	roomStateWriter   latestRoomStateWriter
+	authorityClaimer  roomAuthorityClaimer
+	authorityInstance string
 }
 
 func (r roomManagerRuntime) RegisterCreatedRoomWithMedia(
@@ -49,7 +56,15 @@ func (r roomManagerRuntime) RegisterCreatedRoomWithMedia(
 	if r.manager == nil {
 		return nil
 	}
-	return r.manager.RegisterCreatedRoomWithMedia(roomID, hostUserID, mediaID, mediaDurationMs)
+	runtimeRoom := r.manager.RegisterCreatedRoomWithMedia(roomID, hostUserID, mediaID, mediaDurationMs)
+	if r.authorityClaimer != nil && r.authorityInstance != "" && roomID != "" {
+		if _, claimed, err := r.authorityClaimer.ClaimAuthority(context.Background(), roomID, r.authorityInstance); err != nil {
+			log.Printf("room authority claim failed room=%s instance=%s err=%v", roomID, r.authorityInstance, err)
+		} else if !claimed {
+			log.Printf("room authority claim skipped room=%s instance=%s reason=another_authority", roomID, r.authorityInstance)
+		}
+	}
+	return runtimeRoom
 }
 
 func (r roomManagerRuntime) StoreLatestRoomState(ctx context.Context, state room.State) error {
@@ -158,6 +173,17 @@ func NewRoomHTTPHandlerWithTokenVerifierAndRoomStateWriter(
 		tokenVerifier,
 		playbackConfigs...,
 	)
+}
+
+func (h *RoomHTTPHandler) SetRoomAuthorityClaimer(instanceID string, claimer roomAuthorityClaimer) {
+	if h == nil {
+		return
+	}
+	if runtime, ok := h.roomRuntime.(roomManagerRuntime); ok {
+		runtime.authorityClaimer = claimer
+		runtime.authorityInstance = strings.TrimSpace(instanceID)
+		h.roomRuntime = runtime
+	}
 }
 
 func newRoomHTTPHandlerWithRuntime(

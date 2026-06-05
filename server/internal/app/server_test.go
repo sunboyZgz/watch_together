@@ -51,6 +51,10 @@ func TestGinRouterHealthzExposesRuntimeBoundary(t *testing.T) {
 		},
 		"",
 		eventbus.NewDisabledRoomBroadcastBus(),
+		eventbus.NewDisabledRoomControlBus(),
+		nil,
+		nil,
+		nil,
 	)
 	recorder := httptest.NewRecorder()
 
@@ -159,6 +163,10 @@ func newTestGinRouter() http.Handler {
 		runtimeBoundary{},
 		"",
 		eventbus.NewDisabledRoomBroadcastBus(),
+		eventbus.NewDisabledRoomControlBus(),
+		nil,
+		nil,
+		nil,
 	)
 }
 

@@ -90,6 +90,23 @@ func TestLoadServerRuntimeConfigFallsBackToDefaults(t *testing.T) {
 	if cfg.NATS.SubjectRoomBroadcast != "wt.room.broadcast.v1" {
 		t.Fatalf("expected default room broadcast subject, got %q", cfg.NATS.SubjectRoomBroadcast)
 	}
+	if cfg.NATS.SubjectRoomControl != "wt.room.control.v1" {
+		t.Fatalf("expected default room control subject, got %q", cfg.NATS.SubjectRoomControl)
+	}
+	if len(cfg.Kafka.Brokers) != 0 {
+		t.Fatalf("expected default kafka brokers to be empty, got %+v", cfg.Kafka.Brokers)
+	}
+	if cfg.Kafka.ClientID != "watch-together-roomserver" {
+		t.Fatalf("expected default kafka client id, got %q", cfg.Kafka.ClientID)
+	}
+	if cfg.Kafka.TopicRoomTimeline != "wt.room.timeline.v1" ||
+		cfg.Kafka.TopicRoomControlResult != "wt.room.control_result.v1" ||
+		cfg.Kafka.TopicRoomMembership != "wt.room.membership.v1" {
+		t.Fatalf("unexpected default kafka topics: %+v", cfg.Kafka)
+	}
+	if cfg.OutboxWorker.BatchSize != 50 || cfg.OutboxWorker.PollIntervalMs != 1000 {
+		t.Fatalf("unexpected default outbox worker config: %+v", cfg.OutboxWorker)
+	}
 	if cfg.Media.URLTTLSeconds != 7200 {
 		t.Fatalf("expected default media playback url ttl 7200s, got %d", cfg.Media.URLTTLSeconds)
 	}
@@ -116,6 +133,65 @@ func TestLoadServerRuntimeConfigLoadsRuntimeBoundarySettings(t *testing.T) {
 	}
 	if cfg.RoomRuntimeMode != "local_process" {
 		t.Fatalf("expected room runtime mode local_process, got %q", cfg.RoomRuntimeMode)
+	}
+}
+
+func TestLoadServerRuntimeConfigAcceptsDistributedAuthorityWithDependencies(t *testing.T) {
+	configDir := t.TempDir()
+	mustWriteConfigFile(
+		t,
+		filepath.Join(configDir, ".env"),
+		"ROOM_RUNTIME_MODE=distributed_authority\nSERVER_INSTANCE_ID=roomserver-a\nWS_CROSS_INSTANCE_BROADCAST_ENABLED=true\nDATABASE_URL=postgres://app:app@postgres:5432/app\nREDIS_ADDR=redis:6380\nNATS_URL=nats://nats:4222\nKAFKA_BROKERS=kafka:9092, kafka-2:9092\n",
+	)
+
+	cfg, err := LoadServerRuntimeConfig(configDir)
+	if err != nil {
+		t.Fatalf("load runtime config: %v", err)
+	}
+
+	if cfg.RoomRuntimeMode != "distributed_authority" {
+		t.Fatalf("expected distributed_authority, got %q", cfg.RoomRuntimeMode)
+	}
+	if len(cfg.Kafka.Brokers) != 2 || cfg.Kafka.Brokers[0] != "kafka:9092" || cfg.Kafka.Brokers[1] != "kafka-2:9092" {
+		t.Fatalf("unexpected kafka brokers: %+v", cfg.Kafka.Brokers)
+	}
+}
+
+func TestLoadServerRuntimeConfigDistributedAuthorityRequiresDependencies(t *testing.T) {
+	cases := []struct {
+		name    string
+		content string
+	}{
+		{
+			name:    "missing instance id",
+			content: "ROOM_RUNTIME_MODE=distributed_authority\nWS_CROSS_INSTANCE_BROADCAST_ENABLED=true\nDATABASE_URL=postgres://db\nREDIS_ADDR=redis:6380\nNATS_URL=nats://nats:4222\nKAFKA_BROKERS=kafka:9092\n",
+		},
+		{
+			name:    "cross instance broadcast disabled",
+			content: "ROOM_RUNTIME_MODE=distributed_authority\nSERVER_INSTANCE_ID=roomserver-a\nDATABASE_URL=postgres://db\nREDIS_ADDR=redis:6380\nNATS_URL=nats://nats:4222\nKAFKA_BROKERS=kafka:9092\n",
+		},
+		{
+			name:    "missing database",
+			content: "ROOM_RUNTIME_MODE=distributed_authority\nSERVER_INSTANCE_ID=roomserver-a\nWS_CROSS_INSTANCE_BROADCAST_ENABLED=true\nREDIS_ADDR=redis:6380\nNATS_URL=nats://nats:4222\nKAFKA_BROKERS=kafka:9092\n",
+		},
+		{
+			name:    "missing redis",
+			content: "ROOM_RUNTIME_MODE=distributed_authority\nSERVER_INSTANCE_ID=roomserver-a\nWS_CROSS_INSTANCE_BROADCAST_ENABLED=true\nDATABASE_URL=postgres://db\nNATS_URL=nats://nats:4222\nKAFKA_BROKERS=kafka:9092\n",
+		},
+		{
+			name:    "missing kafka",
+			content: "ROOM_RUNTIME_MODE=distributed_authority\nSERVER_INSTANCE_ID=roomserver-a\nWS_CROSS_INSTANCE_BROADCAST_ENABLED=true\nDATABASE_URL=postgres://db\nREDIS_ADDR=redis:6380\nNATS_URL=nats://nats:4222\n",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			configDir := t.TempDir()
+			mustWriteConfigFile(t, filepath.Join(configDir, ".env"), tc.content)
+			if _, err := LoadServerRuntimeConfig(configDir); err == nil {
+				t.Fatalf("expected distributed_authority dependency validation to fail")
+			}
+		})
 	}
 }
 
@@ -254,7 +330,7 @@ func TestLoadServerRuntimeConfigLoadsNATSSettings(t *testing.T) {
 	mustWriteConfigFile(
 		t,
 		filepath.Join(configDir, ".env"),
-		"NATS_URL=nats://nats:4222\nNATS_NAME=roomserver-a\nNATS_SUBJECT_ROOM_BROADCAST=wt.room.broadcast.test\n",
+		"NATS_URL=nats://nats:4222\nNATS_NAME=roomserver-a\nNATS_SUBJECT_ROOM_BROADCAST=wt.room.broadcast.test\nNATS_SUBJECT_ROOM_CONTROL=wt.room.control.test\n",
 	)
 
 	cfg, err := LoadServerRuntimeConfig(configDir)
@@ -270,6 +346,38 @@ func TestLoadServerRuntimeConfigLoadsNATSSettings(t *testing.T) {
 	}
 	if cfg.NATS.SubjectRoomBroadcast != "wt.room.broadcast.test" {
 		t.Fatalf("expected room broadcast subject, got %q", cfg.NATS.SubjectRoomBroadcast)
+	}
+	if cfg.NATS.SubjectRoomControl != "wt.room.control.test" {
+		t.Fatalf("expected room control subject, got %q", cfg.NATS.SubjectRoomControl)
+	}
+}
+
+func TestLoadServerRuntimeConfigLoadsKafkaAndOutboxSettings(t *testing.T) {
+	configDir := t.TempDir()
+	mustWriteConfigFile(
+		t,
+		filepath.Join(configDir, ".env"),
+		"KAFKA_BROKERS=kafka:9092,kafka-2:9092\nKAFKA_CLIENT_ID=roomserver-a\nKAFKA_TOPIC_ROOM_TIMELINE=timeline.test\nKAFKA_TOPIC_ROOM_CONTROL_RESULT=control.test\nKAFKA_TOPIC_ROOM_MEMBERSHIP=membership.test\nKAFKA_DERIVED_CONSUMER_GROUP_ID=derived-test\nKAFKA_DERIVED_WORKER_POLL_INTERVAL_MS=2500\nOUTBOX_WORKER_BATCH_SIZE=25\nOUTBOX_WORKER_POLL_INTERVAL_MS=500\n",
+	)
+
+	cfg, err := LoadServerRuntimeConfig(configDir)
+	if err != nil {
+		t.Fatalf("load runtime config: %v", err)
+	}
+
+	if len(cfg.Kafka.Brokers) != 2 || cfg.Kafka.Brokers[0] != "kafka:9092" || cfg.Kafka.Brokers[1] != "kafka-2:9092" {
+		t.Fatalf("unexpected kafka brokers: %+v", cfg.Kafka.Brokers)
+	}
+	if cfg.Kafka.ClientID != "roomserver-a" ||
+		cfg.Kafka.TopicRoomTimeline != "timeline.test" ||
+		cfg.Kafka.TopicRoomControlResult != "control.test" ||
+		cfg.Kafka.TopicRoomMembership != "membership.test" ||
+		cfg.Kafka.DerivedConsumerGroupID != "derived-test" ||
+		cfg.Kafka.DerivedWorkerPollInterval != 2500 {
+		t.Fatalf("unexpected kafka config: %+v", cfg.Kafka)
+	}
+	if cfg.OutboxWorker.BatchSize != 25 || cfg.OutboxWorker.PollIntervalMs != 500 {
+		t.Fatalf("unexpected outbox worker config: %+v", cfg.OutboxWorker)
 	}
 }
 

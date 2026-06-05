@@ -29,7 +29,7 @@ func TestWebSocketCrossInstanceBroadcastDeliversRemoteControlEnvelope(t *testing
 	}
 	roomManagerB.RegisterCreatedRoom(roomA.ID(), "user_a", "sample_001")
 
-	serverA, handlerA := newCrossInstanceWebSocketServer(t, roomManagerA, "instance-a", bus)
+	serverA, _ := newCrossInstanceWebSocketServer(t, roomManagerA, "instance-a", bus)
 	defer serverA.Close()
 	serverB, _ := newCrossInstanceWebSocketServer(t, roomManagerB, "instance-b", bus)
 	defer serverB.Close()
@@ -66,15 +66,15 @@ func TestWebSocketCrossInstanceBroadcastDeliversRemoteControlEnvelope(t *testing
 
 	assertControlBroadcast(t, ctx, hostA, protocol.TypePlay, -1, 2)
 	assertControlBroadcast(t, ctx, viewerB, protocol.TypePlay, -1, 2)
-	assertNoEnvelopeWithin(t, hostA, 100*time.Millisecond)
-
+	stateA := roomA.StateSnapshot()
+	if stateA.Seq != 2 || stateA.Paused {
+		t.Fatalf("expected source authority state to keep accepted play, got seq=%d paused=%t", stateA.Seq, stateA.Paused)
+	}
 	stateB := roomManagerB.GetOrCreate(roomA.ID()).StateSnapshot()
 	if stateB.Seq != 1 || !stateB.Paused {
 		t.Fatalf("expected remote broadcast not to mutate local authority, got seq=%d paused=%t", stateB.Seq, stateB.Paused)
 	}
-	if len(handlerA.roomManager.Clients(roomA.ID())) == 0 {
-		t.Fatalf("expected source handler to keep local clients")
-	}
+	assertNoEnvelopeWithin(t, hostA, 100*time.Millisecond)
 }
 
 func TestWebSocketCrossInstanceBroadcastDropsOwnInstanceEvent(t *testing.T) {

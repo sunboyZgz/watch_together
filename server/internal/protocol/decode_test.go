@@ -68,6 +68,40 @@ func TestDecodeRoomStateRequest(t *testing.T) {
 	}
 }
 
+func TestDecodeJoinRoomRequiresDeviceID(t *testing.T) {
+	envelope := Envelope{
+		Type: TypeJoinRoom,
+		Payload: mustRawMessage(t, JoinRoomPayload{
+			RoomID:   "room_001",
+			UserID:   "user_a",
+			DeviceID: "device_a",
+		}),
+	}
+
+	payload, err := DecodeJoinRoom(envelope)
+	if err != nil {
+		t.Fatalf("decode join_room: %v", err)
+	}
+	if payload.RoomID != "room_001" || payload.UserID != "user_a" || payload.DeviceID != "device_a" {
+		t.Fatalf("unexpected join_room payload: %+v", payload)
+	}
+}
+
+func TestDecodeJoinRoomRejectsMissingDeviceID(t *testing.T) {
+	envelope := Envelope{
+		Type: TypeJoinRoom,
+		Payload: mustRawMessage(t, JoinRoomPayload{
+			RoomID: "room_001",
+			UserID: "user_a",
+		}),
+	}
+
+	_, err := DecodeJoinRoom(envelope)
+	if err == nil || !strings.Contains(err.Error(), "missing deviceId") {
+		t.Fatalf("expected missing deviceId error, got %v", err)
+	}
+}
+
 func TestDecodeLeaveRoom(t *testing.T) {
 	envelope := Envelope{
 		Type: TypeLeaveRoom,

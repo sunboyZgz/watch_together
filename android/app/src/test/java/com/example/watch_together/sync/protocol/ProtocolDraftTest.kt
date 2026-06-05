@@ -46,7 +46,7 @@ class ProtocolDraftTest {
 
     @Test
     fun `envelope factories keep event to wire-name mapping stable`() {
-        assertEquals("join_room", JoinRoomPayload("room_001", "user_a").toEnvelope().type)
+        assertEquals("join_room", JoinRoomPayload("room_001", "user_a", "device_a").toEnvelope().type)
         assertEquals(
             "room_state",
             RoomStatePayload("room_001", "sample_001", "user_a", false, false, 125_000L, 1.0, 3L)

@@ -65,9 +65,18 @@ func main() {
 			EventBus:                  runtimeConfig.WebSocket.EventBus,
 		},
 		NATS: app.NATSConfig{
-			URL:     runtimeConfig.NATS.URL,
-			Name:    runtimeConfig.NATS.Name,
-			Subject: runtimeConfig.NATS.SubjectRoomBroadcast,
+			URL:            runtimeConfig.NATS.URL,
+			Name:           runtimeConfig.NATS.Name,
+			Subject:        runtimeConfig.NATS.SubjectRoomBroadcast,
+			ControlSubject: runtimeConfig.NATS.SubjectRoomControl,
+		},
+		Kafka: app.KafkaConfig{
+			Brokers:                runtimeConfig.Kafka.Brokers,
+			ClientID:               runtimeConfig.Kafka.ClientID,
+			TopicRoomTimeline:      runtimeConfig.Kafka.TopicRoomTimeline,
+			TopicRoomControlResult: runtimeConfig.Kafka.TopicRoomControlResult,
+			TopicRoomMembership:    runtimeConfig.Kafka.TopicRoomMembership,
+			DerivedConsumerGroupID: runtimeConfig.Kafka.DerivedConsumerGroupID,
 		},
 		Media: app.MediaPlaybackConfig{
 			DeliveryMode:           runtimeConfig.Media.DeliveryMode,

@@ -11,8 +11,9 @@ type CreateRoomResponse struct {
 }
 
 type JoinRoomPayload struct {
-	RoomID string `json:"roomId"`
-	UserID string `json:"userId"`
+	RoomID   string `json:"roomId"`
+	UserID   string `json:"userId"`
+	DeviceID string `json:"deviceId"`
 }
 
 type LeaveRoomPayload struct {

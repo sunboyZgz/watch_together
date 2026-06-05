@@ -33,6 +33,7 @@ android/app/src/main/java/com/example/watch_together/
 - `VideoSelectionPage` calls `GET /media/tags` and `GET /media/items`.
 - Creating a room passes the selected episode ID as `mediaItemId` to `POST /rooms`.
 - Joining a room first calls `POST /rooms/{roomCode}/join`, then connects to `/ws` and sends `join_room`.
+- `join_room` includes a locally persisted `deviceId`. The app stores it in `device.xml` through `DeviceIdStore` and excludes that file from Android backup and device transfer.
 - `PlayerScreen` assembles the room session controller, sync coordinator, player adapter, and room theater UI.
 - `RoomTheaterPage` owns the business page shell.
 - `PlayerCoreShell` owns the player viewport and controls.
@@ -70,6 +71,7 @@ Android follows the backend room authority state:
 - Heartbeat messages are acknowledged with `heartbeat_ack`.
 - Room detail HTTP data supplies user-facing room and media metadata.
 - WebSocket messages supply live position, pause state, playback rate, ended state, and sequence.
+- `deviceId` is stable for the local installation and is used by the backend for active-device ownership. It is not account data and should not be synced across devices.
 
 ## Tests
 

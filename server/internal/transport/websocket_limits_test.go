@@ -92,8 +92,9 @@ func writeJoinRoom(t *testing.T, ctx context.Context, conn *websocket.Conn, room
 	data, err := json.Marshal(protocol.Envelope{
 		Type: protocol.TypeJoinRoom,
 		Payload: mustJSONRaw(protocol.JoinRoomPayload{
-			RoomID: roomID,
-			UserID: userID,
+			RoomID:   roomID,
+			UserID:   userID,
+			DeviceID: userID + "-device",
 		}),
 	})
 	if err != nil {

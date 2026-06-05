@@ -17,12 +17,24 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
     -trimpath \
     -ldflags="-s -w" \
     -o /out/roomserver \
-    ./cmd/roomserver
+    ./cmd/roomserver && \
+    CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
+    -trimpath \
+    -ldflags="-s -w" \
+    -o /out/outboxworker \
+    ./cmd/outboxworker && \
+    CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
+    -trimpath \
+    -ldflags="-s -w" \
+    -o /out/derivedworker \
+    ./cmd/derivedworker
 
 FROM scratch
 
 WORKDIR /app
 COPY --from=builder /out/roomserver /app/roomserver
+COPY --from=builder /out/outboxworker /app/outboxworker
+COPY --from=builder /out/derivedworker /app/derivedworker
 
 EXPOSE 8080
 USER 65532:65532

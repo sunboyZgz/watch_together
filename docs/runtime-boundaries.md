@@ -1,6 +1,6 @@
 # Runtime Boundaries
 
-This document records the architecture boundary cleanup for the current `local_process` room runtime. It does not claim the backend is distributed yet; it makes runtime ownership explicit so later phases can externalize room state and cross-instance broadcasting without changing API contracts first.
+This document records the runtime ownership boundaries for the room system. `local_process` remains the default runtime, and Phase 4 adds a `distributed_authority` MVP for multi-instance room authority.
 
 ## Phase 1 Boundary Markers
 
@@ -12,7 +12,8 @@ ROOM_RUNTIME_MODE=local_process
 ```
 
 - `SERVER_INSTANCE_ID` is optional metadata for logs, health checks, and load-balancer diagnostics. Set a unique value per roomserver replica in multi-instance experiments.
-- `ROOM_RUNTIME_MODE=local_process` is the only implemented mode. Unsupported values fail config loading so deployments cannot accidentally advertise a distributed room runtime that does not exist yet.
+- `ROOM_RUNTIME_MODE=local_process` keeps playback authority in one process.
+- `ROOM_RUNTIME_MODE=distributed_authority` enables Redis authority leases, Redis active-device ownership, NATS control forwarding, PostgreSQL outbox, and Kafka timeline logging.
 
 `GET /healthz` still returns `ok`, and now includes:
 
@@ -28,9 +29,12 @@ X-Watch-Together-Room-Runtime: local_process
 | JWT validation | Stateless server config | Multi-instance safe when `AUTH_JWT_SECRET` and TTL config are shared. |
 | HTTP auth, home, media, room, progress APIs | PostgreSQL-backed services | Mostly stateless request handling; DB-backed handlers can run on any instance. |
 | WebSocket connection objects | Local Go process memory | Must remain local; future cross-instance work should broadcast between local connection tables. |
-| Active room playback authority | `internal/room.Manager` in one process | Still single-process; visible as `ROOM_RUNTIME_MODE=local_process`. |
+| Active room playback authority | `internal/room.Manager` on the authority instance | Local in `local_process`; guarded by Redis authority lease in `distributed_authority`. |
 | Latest room snapshot cache | Optional Redis `room_state` cache | Written from HTTP runtime bootstrap and WebSocket state transitions; readable for future recovery paths, but not the current write authority. |
 | Cross-instance WebSocket fan-out | Optional NATS Core subject | When enabled, forwards already-built WebSocket envelopes between roomserver instances; not a state authority. |
+| Room authority routing | Redis lease + NATS request/reply | Only in `distributed_authority`; non-authority instances forward controls to the authority instance. |
+| Active-device ownership | Redis lease | Only in `distributed_authority`; guards `deviceId + connectionId` ownership per room user. |
+| Durable room timeline | PostgreSQL outbox + Kafka | Only in `distributed_authority`; Kafka is a result log, not a command ingress or online fan-out path. |
 | Control deduplication | Local WebSocket handler memory | Still process-local; future phases should externalize if multiple instances can host one room. |
 | Seek rate limiting | Local WebSocket handler memory | Still process-local; future phases should externalize or shard room authority. |
 | Room metadata and membership | PostgreSQL | Durable business state. |
@@ -65,6 +69,34 @@ NATS Core is only real-time distribution in this phase. It is not Redis authorit
 
 If NATS is unavailable while cross-instance broadcast is disabled, startup is unchanged. If the feature is enabled but NATS cannot be opened, `roomserver` logs the failure and continues in local-process mode with cross-instance fan-out disabled.
 
+## Phase 4 Distributed Authority Boundary
+
+Phase 4 adds:
+
+```text
+ROOM_RUNTIME_MODE=distributed_authority
+NATS_SUBJECT_ROOM_CONTROL=wt.room.control.v1
+KAFKA_BROKERS=kafka:9092
+KAFKA_TOPIC_ROOM_TIMELINE=wt.room.timeline.v1
+KAFKA_TOPIC_ROOM_CONTROL_RESULT=wt.room.control_result.v1
+KAFKA_TOPIC_ROOM_MEMBERSHIP=wt.room.membership.v1
+```
+
+`distributed_authority` requires `SERVER_INSTANCE_ID`, PostgreSQL, Redis, NATS, Kafka broker config, and `WS_CROSS_INSTANCE_BROADCAST_ENABLED=true`. Missing required config fails config loading; missing required runtime dependencies fail startup.
+
+Redis keys:
+
+```text
+wt:room:authority:{roomId}:v1
+wt:room:active_device:{roomId}:{userId}:v1
+```
+
+The authority lease identifies the instance allowed to mutate `internal/room.Manager` for that room. Non-authority instances do not apply controls; they forward the original envelope and connection context over NATS request/reply to the authority instance. Authority absence returns an error or current snapshot; Phase 4 does not auto-takeover expired leases.
+
+The active-device lease stores `deviceId`, `instanceId`, `connectionId`, and `leaseUntilMs`. Disconnect and leave release only when both `deviceId` and `connectionId` match, preventing old sockets from clearing newer ownership.
+
+PostgreSQL `room_timeline_outbox` stores canonical timeline result events. `cmd/outboxworker` publishes them to Kafka, and `cmd/derivedworker` derives control-result and membership topics. Online WebSocket fan-out remains NATS + local connection tables.
+
 ## Multi-Instance Readiness After Phase 1
 
 Safe or mostly safe now:
@@ -74,15 +106,11 @@ Safe or mostly safe now:
 - Health diagnostics can identify which instance handled a request.
 - Cross-instance WebSocket broadcast fan-out for already-authoritative local events, when NATS Core is enabled.
 
-Still not multi-instance safe:
+Still not complete:
 
-- A single room with clients connected to different instances that expect distributed control authority.
-- Cross-instance host/device occupancy checks.
-- Cross-instance control event ordering, deduplication, and rate limiting.
+- Automatic authority takeover after the current authority disappears.
+- Distributed control deduplication and seek rate limiting beyond the authority instance.
+- Presence and full device occupancy beyond active-device lease ownership.
 - Room playback authority recovery after the instance that owns the in-memory room state restarts.
 
-## Next Phase Boundary
-
-The next small step should externalize cross-instance event distribution while keeping local WebSocket connection tables process-local. That work should keep WebSocket payloads and HTTP API shapes unchanged.
-
-The HTTP room entrypoint already depends on a narrow room runtime registry boundary for room-state registration and snapshot bootstrap. The current adapter still wraps `internal/room.Manager` and writes optional Redis snapshots, so runtime behavior remains `local_process`; later phases can replace that adapter without changing the public HTTP handler constructors, API responses, or WebSocket payloads.
+See [distributed-architecture.md](./distributed-architecture.md) for the Phase 4 module map and data flows.
