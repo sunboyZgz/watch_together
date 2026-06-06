@@ -75,6 +75,9 @@ WS_CLIENT_OUTBOX_CAPACITY=64
 WS_MAX_CONNECTIONS=0
 ROOM_MAX_CLIENTS=0
 WS_SEEK_MIN_INTERVAL_MS=250
+CONTROL_IDEMPOTENCY_TTL_MS=600000
+PRESENCE_LEASE_TTL_MS=45000
+PRESENCE_REFRESH_INTERVAL_MS=15000
 WS_CROSS_INSTANCE_BROADCAST_ENABLED=false
 WS_EVENT_BUS=nats_core
 NATS_URL=nats://127.0.0.1:4222
@@ -129,6 +132,14 @@ Authority recovery settings:
 - `KAFKA_REPLAY_TIMEOUT_MS` bounds canonical timeline replay for one room.
 
 When a Redis authority lease expires, Phase 5 recovery can claim `status=recovering` with a higher epoch, replay `wt.room.timeline.v1`, merge same-room `pending` and `publishing` outbox rows, register recovered playback state locally, then complete a new active authority lease. Kafka remains a result log, not a command ingress path; Redis `room_state` remains a latest snapshot cache.
+
+Distributed control hardening settings:
+
+- `CONTROL_IDEMPOTENCY_TTL_MS` controls how long Redis keeps recent control `requestId` outcomes. Duplicate accepted requests return the same accepted envelope; duplicate pending requests return `room authority processing`.
+- `PRESENCE_LEASE_TTL_MS` controls how long a Redis user-level presence entry remains valid without refresh.
+- `PRESENCE_REFRESH_INTERVAL_MS` controls how often heartbeat acks refresh presence while the WebSocket is healthy.
+
+Presence is runtime state only. It is stored in Redis, broadcast as user-level `room_presence` snapshots, and is not PostgreSQL membership or a Kafka timeline event.
 
 See [distributed-architecture.md](./distributed-architecture.md) for the Phase 5 module map and data flows.
 

@@ -14,16 +14,17 @@ import (
 )
 
 type ClientConnection struct {
-	conn                *websocket.Conn
-	writeMu             *semaphore.Weighted
-	outbox              *clientOutbox
-	stateMu             sync.RWMutex
-	connectionID        string
-	userID              string
-	roomID              string
-	deviceID            string
-	lastHeartbeatSentAt time.Time
-	lastHeartbeatAckAt  time.Time
+	conn                  *websocket.Conn
+	writeMu               *semaphore.Weighted
+	outbox                *clientOutbox
+	stateMu               sync.RWMutex
+	connectionID          string
+	userID                string
+	roomID                string
+	deviceID              string
+	lastHeartbeatSentAt   time.Time
+	lastHeartbeatAckAt    time.Time
+	lastPresenceRefreshAt time.Time
 }
 
 type outboundMessage struct {
@@ -181,12 +182,13 @@ func NewClientConnectionWithOptions(conn *websocket.Conn, options ClientConnecti
 		outboxCapacity = defaultClientOutboxCapacity
 	}
 	return &ClientConnection{
-		conn:                conn,
-		writeMu:             semaphore.NewWeighted(1),
-		outbox:              newClientOutbox(outboxCapacity),
-		connectionID:        newConnectionID(),
-		lastHeartbeatSentAt: now,
-		lastHeartbeatAckAt:  now,
+		conn:                  conn,
+		writeMu:               semaphore.NewWeighted(1),
+		outbox:                newClientOutbox(outboxCapacity),
+		connectionID:          newConnectionID(),
+		lastHeartbeatSentAt:   now,
+		lastHeartbeatAckAt:    now,
+		lastPresenceRefreshAt: now,
 	}
 }
 
@@ -326,6 +328,23 @@ func (c *ClientConnection) HeartbeatTimedOut(now time.Time, timeout time.Duratio
 	defer c.stateMu.RUnlock()
 
 	return now.Sub(c.lastHeartbeatAckAt) > timeout
+}
+
+func (c *ClientConnection) PresenceRefreshDue(now time.Time, interval time.Duration) bool {
+	c.stateMu.RLock()
+	defer c.stateMu.RUnlock()
+
+	if interval <= 0 {
+		return true
+	}
+	return now.Sub(c.lastPresenceRefreshAt) >= interval
+}
+
+func (c *ClientConnection) MarkPresenceRefreshed(refreshedAt time.Time) {
+	c.stateMu.Lock()
+	defer c.stateMu.Unlock()
+
+	c.lastPresenceRefreshAt = refreshedAt
 }
 
 // Close terminates the underlying WebSocket connection.

@@ -121,6 +121,21 @@ type RoomMembersChangedPayload struct {
 	Reason string `json:"reason"`
 }
 
+type RoomPresenceMemberPayload struct {
+	UserID string `json:"userId"`
+	Role   string `json:"role,omitempty"`
+	IsHost bool   `json:"isHost"`
+	IsSelf bool   `json:"isSelf"`
+}
+
+type RoomPresencePayload struct {
+	RoomID       string                      `json:"roomId"`
+	OnlineCount  int                         `json:"onlineCount"`
+	Members      []RoomPresenceMemberPayload `json:"members"`
+	Reason       string                      `json:"reason"`
+	ServerTimeMs int64                       `json:"serverTimeMs"`
+}
+
 type RoomDeviceSwitchRequestPayload struct {
 	RoomID       string `json:"roomId"`
 	TargetRoomID string `json:"targetRoomId,omitempty"`

@@ -10,6 +10,8 @@ class ProtocolDraftTest {
         val expected = mapOf(
             ProtocolEventType.JoinRoom to ("join_room" to ProtocolDirection.ClientToServer),
             ProtocolEventType.RoomState to ("room_state" to ProtocolDirection.ServerToClient),
+            ProtocolEventType.RoomMembersChanged to ("room_members_changed" to ProtocolDirection.ServerToClient),
+            ProtocolEventType.RoomPresence to ("room_presence" to ProtocolDirection.ServerToClient),
             ProtocolEventType.Play to (
                 "play" to ProtocolDirection.ClientToServerAndServerToClients
             ),

@@ -65,6 +65,13 @@ type Result struct {
 	Recovered  bool
 	State      room.State
 	RequestIDs []string
+	Requests   []RecoveredRequest
+}
+
+type RecoveredRequest struct {
+	RequestID string
+	Seq       int64
+	Envelope  json.RawMessage
 }
 
 func NewService(
@@ -144,7 +151,7 @@ func (s *Service) TryRecoverRoomAuthority(ctx context.Context, roomID string, re
 		events = append(events, pending...)
 	}
 
-	state, requestIDs, err := RecoverStateFromEvents(state, events)
+	state, requests, err := RecoverStateFromEvents(state, events)
 	if err != nil {
 		return Result{Lease: lease}, err
 	}
@@ -164,7 +171,8 @@ func (s *Service) TryRecoverRoomAuthority(ctx context.Context, roomID string, re
 		Lease:      activeLease,
 		Recovered:  true,
 		State:      state,
-		RequestIDs: requestIDs,
+		RequestIDs: recoveredRequestIDs(requests),
+		Requests:   requests,
 	}, nil
 }
 
@@ -206,7 +214,7 @@ func (s *Service) ScanOnce(ctx context.Context) (int, error) {
 	return recovered, nil
 }
 
-func RecoverStateFromEvents(base room.State, events []timeline.Event) (room.State, []string, error) {
+func RecoverStateFromEvents(base room.State, events []timeline.Event) (room.State, []RecoveredRequest, error) {
 	sort.SliceStable(events, func(i, j int) bool {
 		if events[i].OccurredAtMs != events[j].OccurredAtMs {
 			return events[i].OccurredAtMs < events[j].OccurredAtMs
@@ -219,7 +227,7 @@ func RecoverStateFromEvents(base room.State, events []timeline.Event) (room.Stat
 
 	seenEvents := make(map[string]struct{}, len(events))
 	seenRequests := make(map[string]struct{})
-	requestIDs := make([]string, 0)
+	requests := make([]RecoveredRequest, 0)
 	state := base
 	for _, event := range events {
 		if event.EventID != "" {
@@ -231,25 +239,25 @@ func RecoverStateFromEvents(base room.State, events []timeline.Event) (room.Stat
 		if event.EventType != timeline.EventTypeControlAccepted {
 			continue
 		}
-		next, requestID, err := applyAcceptedControlEvent(state, event)
+		next, request, err := applyAcceptedControlEvent(state, event)
 		if err != nil {
 			return room.State{}, nil, err
 		}
 		state = next
-		if requestID != "" {
-			if _, ok := seenRequests[requestID]; !ok {
-				seenRequests[requestID] = struct{}{}
-				requestIDs = append(requestIDs, requestID)
+		if request.RequestID != "" {
+			if _, ok := seenRequests[request.RequestID]; !ok {
+				seenRequests[request.RequestID] = struct{}{}
+				requests = append(requests, request)
 			}
 		}
 	}
-	return state, requestIDs, nil
+	return state, requests, nil
 }
 
-func applyAcceptedControlEvent(state room.State, event timeline.Event) (room.State, string, error) {
+func applyAcceptedControlEvent(state room.State, event timeline.Event) (room.State, RecoveredRequest, error) {
 	var envelope protocol.Envelope
 	if err := json.Unmarshal(event.Payload, &envelope); err != nil {
-		return room.State{}, "", fmt.Errorf("decode accepted control envelope: %w", err)
+		return room.State{}, RecoveredRequest{}, fmt.Errorf("decode accepted control envelope: %w", err)
 	}
 	if envelope.Type == "" {
 		envelope.Type = event.ControlType
@@ -259,52 +267,52 @@ func applyAcceptedControlEvent(state room.State, event timeline.Event) (room.Sta
 	case protocol.TypePlay:
 		var payload protocol.PlayPayload
 		if err := json.Unmarshal(envelope.Payload, &payload); err != nil {
-			return room.State{}, "", err
+			return room.State{}, RecoveredRequest{}, err
 		}
 		state = applyPlaybackPayload(state, payload.RoomID, payload.UserID, payload.PositionMs, payload.Velocity, payload.ServerTimeMs, payload.Reason, payload.Seq)
 		state.Paused = payload.Velocity == 0
 		state.Ended = atMediaEnd(state)
-		return state, payload.RequestID, nil
+		return state, recoveredRequest(payload.RequestID, payload.Seq, event.Payload), nil
 	case protocol.TypePause:
 		var payload protocol.PausePayload
 		if err := json.Unmarshal(envelope.Payload, &payload); err != nil {
-			return room.State{}, "", err
+			return room.State{}, RecoveredRequest{}, err
 		}
 		state = applyPlaybackPayload(state, payload.RoomID, payload.UserID, payload.PositionMs, payload.Velocity, payload.ServerTimeMs, payload.Reason, payload.Seq)
 		state.Paused = true
 		state.Ended = state.Ended || atMediaEnd(state)
-		return state, payload.RequestID, nil
+		return state, recoveredRequest(payload.RequestID, payload.Seq, event.Payload), nil
 	case protocol.TypeSeek:
 		var payload protocol.SeekPayload
 		if err := json.Unmarshal(envelope.Payload, &payload); err != nil {
-			return room.State{}, "", err
+			return room.State{}, RecoveredRequest{}, err
 		}
 		state = applyPlaybackPayload(state, payload.RoomID, payload.UserID, payload.PositionMs, payload.Velocity, payload.ServerTimeMs, payload.Reason, payload.Seq)
 		state.Paused = payload.Velocity == 0
 		state.Ended = atMediaEnd(state)
-		return state, payload.RequestID, nil
+		return state, recoveredRequest(payload.RequestID, payload.Seq, event.Payload), nil
 	case protocol.TypeSetPlaybackRate:
 		var payload protocol.SetPlaybackRatePayload
 		if err := json.Unmarshal(envelope.Payload, &payload); err != nil {
-			return room.State{}, "", err
+			return room.State{}, RecoveredRequest{}, err
 		}
 		state = applyPlaybackPayload(state, payload.RoomID, payload.UserID, payload.PositionMs, payload.Velocity, payload.ServerTimeMs, payload.Reason, payload.Seq)
 		state.PlaybackRate = payload.PlaybackRate
 		state.Paused = payload.Velocity == 0
 		state.Ended = state.Ended || atMediaEnd(state)
-		return state, payload.RequestID, nil
+		return state, recoveredRequest(payload.RequestID, payload.Seq, event.Payload), nil
 	case protocol.TypeEnded:
 		var payload protocol.EndedPayload
 		if err := json.Unmarshal(envelope.Payload, &payload); err != nil {
-			return room.State{}, "", err
+			return room.State{}, RecoveredRequest{}, err
 		}
 		state = applyPlaybackPayload(state, payload.RoomID, payload.UserID, payload.PositionMs, payload.Velocity, payload.ServerTimeMs, payload.Reason, payload.Seq)
 		state.Paused = true
 		state.Ended = true
 		state.Velocity = 0
-		return state, payload.RequestID, nil
+		return state, recoveredRequest(payload.RequestID, payload.Seq, event.Payload), nil
 	default:
-		return room.State{}, "", fmt.Errorf("unsupported accepted control type %q", envelope.Type)
+		return room.State{}, RecoveredRequest{}, fmt.Errorf("unsupported accepted control type %q", envelope.Type)
 	}
 }
 
@@ -372,6 +380,33 @@ func roomStatePayload(state room.State) protocol.RoomStatePayload {
 		PlaybackRate:    state.PlaybackRate,
 		Seq:             state.Seq,
 	}
+}
+
+func recoveredRequest(requestID string, seq int64, envelope []byte) RecoveredRequest {
+	return RecoveredRequest{
+		RequestID: requestID,
+		Seq:       seq,
+		Envelope:  cloneRawMessage(envelope),
+	}
+}
+
+func recoveredRequestIDs(requests []RecoveredRequest) []string {
+	ids := make([]string, 0, len(requests))
+	for _, request := range requests {
+		if request.RequestID != "" {
+			ids = append(ids, request.RequestID)
+		}
+	}
+	return ids
+}
+
+func cloneRawMessage(value []byte) json.RawMessage {
+	if len(value) == 0 {
+		return nil
+	}
+	cloned := make([]byte, len(value))
+	copy(cloned, value)
+	return cloned
 }
 
 func atMediaEnd(state room.State) bool {

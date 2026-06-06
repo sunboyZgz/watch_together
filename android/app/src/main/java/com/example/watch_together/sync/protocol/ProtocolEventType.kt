@@ -20,6 +20,10 @@ enum class ProtocolEventType(
         wireName = "room_members_changed",
         direction = ProtocolDirection.ServerToClient
     ),
+    RoomPresence(
+        wireName = "room_presence",
+        direction = ProtocolDirection.ServerToClient
+    ),
     RoomDeviceWaiting(
         wireName = "room_device.waiting",
         direction = ProtocolDirection.ServerToClient

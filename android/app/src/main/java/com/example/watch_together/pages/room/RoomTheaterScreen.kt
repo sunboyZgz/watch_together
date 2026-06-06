@@ -52,6 +52,7 @@ import com.example.watch_together.sync.protocol.PlayPayload
 import com.example.watch_together.sync.protocol.RoomDeviceSwitchRequestPayload
 import com.example.watch_together.sync.protocol.RoomDeviceSwitchResultPayload
 import com.example.watch_together.sync.protocol.RoomMembersChangedPayload
+import com.example.watch_together.sync.protocol.RoomPresencePayload
 import com.example.watch_together.sync.protocol.SeekPayload
 import com.example.watch_together.sync.protocol.SetPlaybackRatePayload
 import com.example.watch_together.ui.theme.Watch_togetherTheme
@@ -92,6 +93,7 @@ fun RoomTheaterScreen(
     var activeRoomRole by remember { mutableStateOf<String?>(null) }
     var activeRoomUserId by remember { mutableStateOf<String?>(null) }
     var latestRoomState by remember { mutableStateOf<RoomSyncState?>(null) }
+    var latestPresenceOnlineCount by remember { mutableStateOf<Int?>(null) }
     var isApplyingRemoteEvent by remember { mutableStateOf(false) }
     var roomBootstrapStatus by remember { mutableStateOf(roomBootstrapInitialStatus(autoCreateAsHost, autoJoinAsViewer, initialRoomCode)) }
     var pendingPostSeekCalibrationJob by remember { mutableStateOf<Job?>(null) }
@@ -197,6 +199,13 @@ fun RoomTheaterScreen(
             override fun onRoomMembersChanged(payload: RoomMembersChangedPayload) {
                 coroutineScope.launch {
                     appendPlayerLog(playerLogs, "members changed reason=${payload.reason}", maxSize = 10)
+                }
+            }
+
+            override fun onRoomPresence(payload: RoomPresencePayload) {
+                coroutineScope.launch {
+                    latestPresenceOnlineCount = payload.onlineCount
+                    appendPlayerLog(playerLogs, "presence online=${payload.onlineCount} reason=${payload.reason}", maxSize = 10)
                 }
             }
 
@@ -484,6 +493,7 @@ fun RoomTheaterScreen(
             currentUserNickname = currentUserNickname,
             latestRoomState = latestRoomState
         ),
+        presenceOnlineCount = latestPresenceOnlineCount,
         mediaTitle = activeEpisode.title.ifBlank { "等待媒体选择" },
         mediaSeasonLabel = activeEpisode.seasonLabel,
         mediaEpisodeLabel = activeEpisode.episodeLabel,

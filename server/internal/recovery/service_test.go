@@ -90,6 +90,17 @@ func TestServiceRecoversStateFromKafkaAndPendingOutbox(t *testing.T) {
 	if len(result.RequestIDs) != 3 {
 		t.Fatalf("expected three accepted request IDs, got %+v", result.RequestIDs)
 	}
+	requestsByID := make(map[string]RecoveredRequest, len(result.Requests))
+	for _, request := range result.Requests {
+		requestsByID[request.RequestID] = request
+	}
+	endedRequest, ok := requestsByID["req-ended"]
+	if !ok {
+		t.Fatalf("expected recovered accepted request req-ended, got %+v", result.Requests)
+	}
+	if endedRequest.Seq != 4 || len(endedRequest.Envelope) == 0 {
+		t.Fatalf("expected recovered request to include seq and envelope, got %+v", endedRequest)
+	}
 	recoveredRoom, ok := roomManager.Get("ROOM01")
 	if !ok {
 		t.Fatalf("expected recovered room to be registered")

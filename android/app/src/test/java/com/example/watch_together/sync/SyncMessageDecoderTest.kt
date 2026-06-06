@@ -56,6 +56,43 @@ class SyncMessageDecoderTest {
     }
 
     @Test
+    fun `room_presence message decodes user level online snapshot`() {
+        val rawMessage = """
+            {
+              "type": "room_presence",
+              "payload": {
+                "roomId": "ROOM42",
+                "onlineCount": 2,
+                "reason": "join",
+                "serverTimeMs": 1710000000000,
+                "members": [
+                  {
+                    "userId": "host_a",
+                    "role": "host",
+                    "isHost": true,
+                    "isSelf": false
+                  },
+                  {
+                    "userId": "viewer_b",
+                    "role": "member",
+                    "isHost": false,
+                    "isSelf": true
+                  }
+                ]
+              }
+            }
+        """.trimIndent()
+
+        val decoded = decoder.decode(rawMessage) as SyncMessage.RoomPresence
+
+        assertEquals("ROOM42", decoded.payload.roomId)
+        assertEquals(2, decoded.payload.onlineCount)
+        assertEquals("join", decoded.payload.reason)
+        assertEquals("viewer_b", decoded.payload.members[1].userId)
+        assertTrue(decoded.payload.members[1].isSelf)
+    }
+
+    @Test
     fun `room_state payload converts to room sync state`() {
         val syncState = decoder.decode(
             """

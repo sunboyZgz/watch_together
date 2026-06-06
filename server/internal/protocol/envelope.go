@@ -8,6 +8,7 @@ const (
 	TypeRoomState               = "room_state"
 	TypeRoomStateRequest        = "room_state.request"
 	TypeRoomMembersChanged      = "room_members_changed"
+	TypeRoomPresence            = "room_presence"
 	TypeRoomDeviceSwitchRequest = "room_device.switch_request"
 	TypeRoomDeviceSwitchReply   = "room_device.switch_reply"
 	TypeRoomDeviceSwitchResult  = "room_device.switch_result"

@@ -126,11 +126,12 @@ Implemented safeguards:
 
 - Non-host control attempts return an `error` event.
 - Stale `seq` values return the current `room_state`.
-- Duplicate non-empty `requestId` values are deduplicated for a short TTL.
+- Duplicate non-empty `requestId` values are deduplicated for a short TTL. In `distributed_authority`, Redis stores `pending`, `accepted`, and `rejected` outcomes so duplicates can return the original accepted envelope or the same rejection semantics across instances.
 - `seek` events are rate-limited by `WS_SEEK_MIN_INTERVAL_MS`.
 - The broadcaster has bounded concurrency, per-client outbox capacity, enqueue timeouts, and room-state coalescing.
 - In `distributed_authority`, controls are accepted only from the current Redis active-device lease.
 - In `distributed_authority`, non-authority instances forward controls to the Redis-declared authority instance over NATS request/reply.
+- In `distributed_authority`, an accepted control writes `room_timeline_outbox` before Redis snapshot writes and WebSocket/NATS broadcast. If that write fails, the accepted envelope is not broadcast.
 - In Phase 5 recovery, authority epochs are fenced internally. Clients do not send or receive epoch fields, but they may receive `room authority recovering` while a room is being rebuilt.
 
 ## Heartbeat And Clock Sync
@@ -208,6 +209,36 @@ The server emits `room_members_changed` to other clients after joins and leaves:
   }
 }
 ```
+
+In `distributed_authority`, the server also emits user-level `room_presence` snapshots. Android should prefer `onlineCount` from this event when present and fall back to existing membership estimates when it is absent.
+
+```json
+{
+  "type": "room_presence",
+  "payload": {
+    "roomId": "ABC123",
+    "onlineCount": 2,
+    "members": [
+      {
+        "userId": "host-user-uuid",
+        "role": "host",
+        "isHost": true,
+        "isSelf": false
+      },
+      {
+        "userId": "viewer-user-uuid",
+        "role": "member",
+        "isHost": false,
+        "isSelf": true
+      }
+    ],
+    "reason": "join",
+    "serverTimeMs": 1710000000000
+  }
+}
+```
+
+`room_presence` intentionally does not expose `deviceId`, `connectionId`, or `instanceId`. Those values remain server-side Redis runtime details.
 
 Same-user active-device handling is implemented. In `local_process`, if a user already has an active room connection, a new connection may enter a process-local device-switch handshake using:
 

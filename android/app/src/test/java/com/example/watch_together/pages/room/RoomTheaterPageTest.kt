@@ -36,4 +36,36 @@ class RoomTheaterPageTest {
 
         assertEquals("小明", viewerSlotDisplayName(viewerMember = viewer, activeUserId = "host_user"))
     }
+
+    @Test
+    fun `online count prefers presence snapshot when available`() {
+        val members = listOf(
+            RoomMember("host_user", "host", "host", null, "host")
+        )
+
+        assertEquals(
+            3,
+            resolveRoomOnlineCount(
+                roomMembers = members,
+                hasActiveRoom = true,
+                presenceOnlineCount = 3
+            )
+        )
+    }
+
+    @Test
+    fun `online count falls back to member estimate without presence`() {
+        val members = listOf(
+            RoomMember("host_user", "host", "host", null, "host")
+        )
+
+        assertEquals(
+            1,
+            resolveRoomOnlineCount(
+                roomMembers = members,
+                hasActiveRoom = true,
+                presenceOnlineCount = null
+            )
+        )
+    }
 }

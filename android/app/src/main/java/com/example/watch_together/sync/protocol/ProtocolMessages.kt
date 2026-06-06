@@ -27,6 +27,21 @@ data class RoomMembersChangedPayload(
     val reason: String
 ) : ProtocolPayload
 
+data class RoomPresenceMemberPayload(
+    val userId: String,
+    val role: String,
+    val isHost: Boolean,
+    val isSelf: Boolean
+) : ProtocolPayload
+
+data class RoomPresencePayload(
+    val roomId: String,
+    val onlineCount: Int,
+    val members: List<RoomPresenceMemberPayload>,
+    val reason: String,
+    val serverTimeMs: Long
+) : ProtocolPayload
+
 data class RoomDeviceSwitchRequestPayload(
     val roomId: String,
     val targetRoomId: String,

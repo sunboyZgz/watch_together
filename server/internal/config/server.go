@@ -54,6 +54,9 @@ type WebSocketConfig struct {
 	MaxConnections            int64
 	MaxRoomClients            int
 	SeekMinIntervalMs         int
+	ControlIdempotencyTTLms   int
+	PresenceLeaseTTLms        int
+	PresenceRefreshIntervalMs int
 	CrossInstanceBroadcast    bool
 	EventBus                  string
 }
@@ -119,6 +122,9 @@ func LoadServerRuntimeConfig(configDir string) (ServerRuntimeConfig, error) {
 		"WS_MAX_CONNECTIONS":                    0,
 		"ROOM_MAX_CLIENTS":                      0,
 		"WS_SEEK_MIN_INTERVAL_MS":               250,
+		"CONTROL_IDEMPOTENCY_TTL_MS":            600000,
+		"PRESENCE_LEASE_TTL_MS":                 45000,
+		"PRESENCE_REFRESH_INTERVAL_MS":          15000,
 		"WS_CROSS_INSTANCE_BROADCAST_ENABLED":   false,
 		"WS_EVENT_BUS":                          "nats_core",
 		"NATS_URL":                              "nats://127.0.0.1:4222",
@@ -166,6 +172,9 @@ func LoadServerRuntimeConfig(configDir string) (ServerRuntimeConfig, error) {
 		"WS_MAX_CONNECTIONS",
 		"ROOM_MAX_CLIENTS",
 		"WS_SEEK_MIN_INTERVAL_MS",
+		"CONTROL_IDEMPOTENCY_TTL_MS",
+		"PRESENCE_LEASE_TTL_MS",
+		"PRESENCE_REFRESH_INTERVAL_MS",
 		"WS_CROSS_INSTANCE_BROADCAST_ENABLED",
 		"WS_EVENT_BUS",
 		"NATS_URL",
@@ -240,6 +249,9 @@ func LoadServerRuntimeConfig(configDir string) (ServerRuntimeConfig, error) {
 			MaxConnections:            int64FromConfig(loader, "WS_MAX_CONNECTIONS"),
 			MaxRoomClients:            intFromConfig(loader, "ROOM_MAX_CLIENTS"),
 			SeekMinIntervalMs:         intFromConfig(loader, "WS_SEEK_MIN_INTERVAL_MS"),
+			ControlIdempotencyTTLms:   intFromConfig(loader, "CONTROL_IDEMPOTENCY_TTL_MS"),
+			PresenceLeaseTTLms:        intFromConfig(loader, "PRESENCE_LEASE_TTL_MS"),
+			PresenceRefreshIntervalMs: intFromConfig(loader, "PRESENCE_REFRESH_INTERVAL_MS"),
 			CrossInstanceBroadcast:    boolFromConfig(loader, "WS_CROSS_INSTANCE_BROADCAST_ENABLED"),
 			EventBus:                  eventBus,
 		},

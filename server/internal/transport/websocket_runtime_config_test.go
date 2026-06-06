@@ -31,6 +31,15 @@ func TestNormalizeWebSocketRuntimeConfigAppliesDefaults(t *testing.T) {
 	if config.SeekMinInterval != defaultSeekMinInterval {
 		t.Fatalf("expected default seek min interval, got %s", config.SeekMinInterval)
 	}
+	if config.ControlIdempotencyTTL != defaultControlIdempotencyTTL {
+		t.Fatalf("expected default control idempotency ttl, got %s", config.ControlIdempotencyTTL)
+	}
+	if config.PresenceLeaseTTL != defaultPresenceLeaseTTL {
+		t.Fatalf("expected default presence lease ttl, got %s", config.PresenceLeaseTTL)
+	}
+	if config.PresenceRefreshInterval != defaultPresenceRefreshInterval {
+		t.Fatalf("expected default presence refresh interval, got %s", config.PresenceRefreshInterval)
+	}
 }
 
 func TestNormalizeWebSocketRuntimeConfigKeepsExplicitLimits(t *testing.T) {
@@ -42,6 +51,9 @@ func TestNormalizeWebSocketRuntimeConfigKeepsExplicitLimits(t *testing.T) {
 		MaxConnections:            20,
 		MaxRoomClients:            3,
 		SeekMinInterval:           100 * time.Millisecond,
+		ControlIdempotencyTTL:     3 * time.Minute,
+		PresenceLeaseTTL:          40 * time.Second,
+		PresenceRefreshInterval:   10 * time.Second,
 	})
 
 	if config.BroadcastConcurrencyLimit != 12 {
@@ -64,6 +76,15 @@ func TestNormalizeWebSocketRuntimeConfigKeepsExplicitLimits(t *testing.T) {
 	}
 	if config.SeekMinInterval != 100*time.Millisecond {
 		t.Fatalf("expected explicit seek min interval, got %s", config.SeekMinInterval)
+	}
+	if config.ControlIdempotencyTTL != 3*time.Minute {
+		t.Fatalf("expected explicit control idempotency ttl, got %s", config.ControlIdempotencyTTL)
+	}
+	if config.PresenceLeaseTTL != 40*time.Second {
+		t.Fatalf("expected explicit presence lease ttl, got %s", config.PresenceLeaseTTL)
+	}
+	if config.PresenceRefreshInterval != 10*time.Second {
+		t.Fatalf("expected explicit presence refresh interval, got %s", config.PresenceRefreshInterval)
 	}
 }
 

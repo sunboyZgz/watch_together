@@ -77,6 +77,7 @@ internal fun RoomTheaterPage(
     roomRole: String?,
     roomStatusLabel: String,
     roomMembers: List<RoomMember>,
+    presenceOnlineCount: Int? = null,
     mediaTitle: String,
     mediaSeasonLabel: String?,
     mediaEpisodeLabel: String?,
@@ -104,7 +105,11 @@ internal fun RoomTheaterPage(
         val sectionGap = if (compactHeight) 14.dp else 16.dp
         val displayRoomCode = roomCode.take(6).uppercase().ifBlank { "A7K2M9" }
         val hasActiveRoom = roomCode.isNotBlank()
-        val onlineCount = roomMembers.size.coerceAtLeast(if (hasActiveRoom) 1 else 2)
+        val onlineCount = resolveRoomOnlineCount(
+            roomMembers = roomMembers,
+            hasActiveRoom = hasActiveRoom,
+            presenceOnlineCount = presenceOnlineCount
+        )
         val displayTitle = mediaTitle.takeUnless { it.isBlank() || it == "等待选择影片" } ?: "CLANNAD After Story"
         val currentEpisodeNumber = episodeNumberFromLabel(mediaEpisodeLabel) ?: 14
         val currentEpisodeLabel = "EP %02d".format(currentEpisodeNumber)
@@ -917,6 +922,14 @@ internal fun viewerSlotDisplayName(
             fallbackUserId = it.userId
         )
     } ?: "待加入"
+}
+
+internal fun resolveRoomOnlineCount(
+    roomMembers: List<RoomMember>,
+    hasActiveRoom: Boolean,
+    presenceOnlineCount: Int?
+): Int {
+    return presenceOnlineCount ?: roomMembers.size.coerceAtLeast(if (hasActiveRoom) 1 else 2)
 }
 
 @Preview(showBackground = true, widthDp = 390, heightDp = 844)

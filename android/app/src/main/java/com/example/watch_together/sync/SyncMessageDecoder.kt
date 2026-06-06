@@ -7,6 +7,8 @@ import com.example.watch_together.sync.protocol.PausePayload
 import com.example.watch_together.sync.protocol.PlayPayload
 import com.example.watch_together.sync.protocol.ProtocolEventType
 import com.example.watch_together.sync.protocol.RoomMembersChangedPayload
+import com.example.watch_together.sync.protocol.RoomPresenceMemberPayload
+import com.example.watch_together.sync.protocol.RoomPresencePayload
 import com.example.watch_together.sync.protocol.RoomDeviceSwitchRequestPayload
 import com.example.watch_together.sync.protocol.RoomDeviceSwitchResultPayload
 import com.example.watch_together.sync.protocol.RoomStatePayload
@@ -17,6 +19,7 @@ import org.json.JSONObject
 sealed interface SyncMessage {
     data class RoomState(val payload: RoomStatePayload) : SyncMessage
     data class RoomMembersChanged(val payload: RoomMembersChangedPayload) : SyncMessage
+    data class RoomPresence(val payload: RoomPresencePayload) : SyncMessage
     data class RoomDeviceWaiting(val payload: RoomDeviceSwitchRequestPayload) : SyncMessage
     data class RoomDeviceSwitchRequest(val payload: RoomDeviceSwitchRequestPayload) : SyncMessage
     data class RoomDeviceSwitchResult(val payload: RoomDeviceSwitchResultPayload) : SyncMessage
@@ -61,6 +64,10 @@ class SyncMessageDecoder {
                         reason = payload.optString("reason")
                     )
                 )
+            }
+
+            ProtocolEventType.RoomPresence.wireName -> {
+                SyncMessage.RoomPresence(payload.toRoomPresencePayload())
             }
 
             ProtocolEventType.RoomDeviceWaiting.wireName -> {
@@ -169,5 +176,26 @@ private fun JSONObject.toRoomDeviceSwitchRequestPayload(): RoomDeviceSwitchReque
         userId = getString("userId"),
         requestId = getString("requestId"),
         expiresAtMs = getLong("expiresAtMs")
+    )
+}
+
+private fun JSONObject.toRoomPresencePayload(): RoomPresencePayload {
+    val membersArray = getJSONArray("members")
+    val members = mutableListOf<RoomPresenceMemberPayload>()
+    for (index in 0 until membersArray.length()) {
+        val member = membersArray.getJSONObject(index)
+        members += RoomPresenceMemberPayload(
+            userId = member.getString("userId"),
+            role = member.optString("role"),
+            isHost = member.optBoolean("isHost"),
+            isSelf = member.optBoolean("isSelf")
+        )
+    }
+    return RoomPresencePayload(
+        roomId = getString("roomId"),
+        onlineCount = getInt("onlineCount"),
+        members = members,
+        reason = optString("reason"),
+        serverTimeMs = optLong("serverTimeMs")
     )
 }

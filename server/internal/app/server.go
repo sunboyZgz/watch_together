@@ -106,11 +106,15 @@ func NewServer(config Config) *Server {
 	}
 	var authorityRegistry *cache.RoomAuthorityRegistry
 	var activeDeviceRegistry *cache.ActiveDeviceRegistry
+	var controlRequestRegistry *cache.ControlRequestRegistry
+	var presenceRegistry *cache.PresenceRegistry
 	var roomStateCache *cache.RoomStateCache
 	if redisClient != nil {
 		roomStateCache = cache.NewRoomStateCache(redisClient, 0)
 		authorityRegistry = cache.NewRoomAuthorityRegistry(redisClient, 0)
 		activeDeviceRegistry = cache.NewActiveDeviceRegistry(redisClient, 0)
+		controlRequestRegistry = cache.NewControlRequestRegistry(redisClient, config.WebSocket.ControlIdempotencyTTL)
+		presenceRegistry = cache.NewPresenceRegistry(redisClient, config.WebSocket.PresenceLeaseTTL)
 	}
 	db := newPostgresDB(config.DatabaseURL)
 	if distributedAuthority && db == nil {
@@ -208,6 +212,8 @@ func NewServer(config Config) *Server {
 		roomControlBus,
 		authorityRegistry,
 		activeDeviceRegistry,
+		controlRequestRegistry,
+		presenceRegistry,
 		timelineRecorder,
 		authorityRecovery,
 	)
@@ -360,6 +366,8 @@ func newGinRouter(
 	roomControlBus eventbus.RoomControlBus,
 	authorityRegistry *cache.RoomAuthorityRegistry,
 	activeDeviceRegistry *cache.ActiveDeviceRegistry,
+	controlRequestRegistry *cache.ControlRequestRegistry,
+	presenceRegistry *cache.PresenceRegistry,
 	timelineRecorder timeline.Recorder,
 	authorityRecovery *recovery.Service,
 ) *gin.Engine {
@@ -400,6 +408,11 @@ func newGinRouter(
 			activeDeviceRegistry,
 			roomControlBus,
 			timelineRecorder,
+		)
+		webSocketHandler.SetDistributedControlHardening(
+			controlRequestRegistry,
+			presenceRegistry,
+			webSocketConfig.PresenceRefreshInterval,
 		)
 		webSocketHandler.SetRoomAuthorityRecovery(authorityRecovery)
 	}

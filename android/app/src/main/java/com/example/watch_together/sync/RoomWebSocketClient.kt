@@ -7,6 +7,7 @@ import com.example.watch_together.sync.protocol.EndedPayload
 import com.example.watch_together.sync.protocol.PausePayload
 import com.example.watch_together.sync.protocol.PlayPayload
 import com.example.watch_together.sync.protocol.RoomMembersChangedPayload
+import com.example.watch_together.sync.protocol.RoomPresencePayload
 import com.example.watch_together.sync.protocol.RoomDeviceSwitchReplyPayload
 import com.example.watch_together.sync.protocol.RoomDeviceSwitchRequestPayload
 import com.example.watch_together.sync.protocol.RoomDeviceSwitchResultPayload
@@ -24,6 +25,7 @@ interface RoomWebSocketListener {
     fun onLog(message: String)
     fun onRoomState(payload: RoomSyncState)
     fun onRoomMembersChanged(payload: RoomMembersChangedPayload)
+    fun onRoomPresence(payload: RoomPresencePayload)
     fun onRoomDeviceWaiting(payload: RoomDeviceSwitchRequestPayload)
     fun onRoomDeviceSwitchRequest(payload: RoomDeviceSwitchRequestPayload)
     fun onRoomDeviceSwitchResult(payload: RoomDeviceSwitchResultPayload)
@@ -111,6 +113,7 @@ class RoomWebSocketClient(
                     when (val message = decoder.decode(text)) {
                         is SyncMessage.RoomState -> listener.onRoomState(message.payload.toRoomSyncState())
                         is SyncMessage.RoomMembersChanged -> listener.onRoomMembersChanged(message.payload)
+                        is SyncMessage.RoomPresence -> listener.onRoomPresence(message.payload)
                         is SyncMessage.RoomDeviceWaiting -> listener.onRoomDeviceWaiting(message.payload)
                         is SyncMessage.RoomDeviceSwitchRequest -> listener.onRoomDeviceSwitchRequest(message.payload)
                         is SyncMessage.RoomDeviceSwitchResult -> listener.onRoomDeviceSwitchResult(message.payload)

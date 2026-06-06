@@ -75,6 +75,11 @@ func TestLoadServerRuntimeConfigFallsBackToDefaults(t *testing.T) {
 	if cfg.WebSocket.SeekMinIntervalMs != 250 {
 		t.Fatalf("expected default seek min interval 250ms, got %d", cfg.WebSocket.SeekMinIntervalMs)
 	}
+	if cfg.WebSocket.ControlIdempotencyTTLms != 600000 ||
+		cfg.WebSocket.PresenceLeaseTTLms != 45000 ||
+		cfg.WebSocket.PresenceRefreshIntervalMs != 15000 {
+		t.Fatalf("unexpected default websocket hardening config: %+v", cfg.WebSocket)
+	}
 	if cfg.WebSocket.CrossInstanceBroadcast {
 		t.Fatalf("expected cross-instance broadcast disabled by default")
 	}
@@ -294,7 +299,7 @@ func TestLoadServerRuntimeConfigLoadsWebSocketRuntimeSettings(t *testing.T) {
 	mustWriteConfigFile(
 		t,
 		filepath.Join(configDir, ".env"),
-		"WS_BROADCAST_CONCURRENCY_LIMIT=128\nWS_BROADCAST_TIMEOUT_MS=7000\nWS_BROADCAST_ENQUEUE_TIMEOUT_MS=1500\nWS_CLIENT_OUTBOX_CAPACITY=32\nWS_MAX_CONNECTIONS=1000\nROOM_MAX_CLIENTS=25\nWS_SEEK_MIN_INTERVAL_MS=100\nWS_CROSS_INSTANCE_BROADCAST_ENABLED=true\nWS_EVENT_BUS=nats_core\n",
+		"WS_BROADCAST_CONCURRENCY_LIMIT=128\nWS_BROADCAST_TIMEOUT_MS=7000\nWS_BROADCAST_ENQUEUE_TIMEOUT_MS=1500\nWS_CLIENT_OUTBOX_CAPACITY=32\nWS_MAX_CONNECTIONS=1000\nROOM_MAX_CLIENTS=25\nWS_SEEK_MIN_INTERVAL_MS=100\nCONTROL_IDEMPOTENCY_TTL_MS=120000\nPRESENCE_LEASE_TTL_MS=30000\nPRESENCE_REFRESH_INTERVAL_MS=10000\nWS_CROSS_INSTANCE_BROADCAST_ENABLED=true\nWS_EVENT_BUS=nats_core\n",
 	)
 
 	cfg, err := LoadServerRuntimeConfig(configDir)
@@ -322,6 +327,11 @@ func TestLoadServerRuntimeConfigLoadsWebSocketRuntimeSettings(t *testing.T) {
 	}
 	if cfg.WebSocket.SeekMinIntervalMs != 100 {
 		t.Fatalf("expected seek min interval 100ms, got %d", cfg.WebSocket.SeekMinIntervalMs)
+	}
+	if cfg.WebSocket.ControlIdempotencyTTLms != 120000 ||
+		cfg.WebSocket.PresenceLeaseTTLms != 30000 ||
+		cfg.WebSocket.PresenceRefreshIntervalMs != 10000 {
+		t.Fatalf("unexpected websocket hardening config: %+v", cfg.WebSocket)
 	}
 	if !cfg.WebSocket.CrossInstanceBroadcast {
 		t.Fatalf("expected cross-instance broadcast enabled")
