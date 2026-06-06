@@ -17,6 +17,7 @@ import (
 	"watch_together/server/internal/eventbus"
 	"watch_together/server/internal/home"
 	"watch_together/server/internal/media"
+	"watch_together/server/internal/observability"
 	"watch_together/server/internal/progress"
 	"watch_together/server/internal/recovery"
 	"watch_together/server/internal/room"
@@ -41,6 +42,7 @@ type Config struct {
 	NATS              eventbus.NATSConfig
 	Kafka             KafkaConfig
 	AuthorityRecovery AuthorityRecoveryConfig
+	Observability     observability.Config
 	Media             transport.MediaPlaybackConfig
 }
 
@@ -49,6 +51,7 @@ type WebSocketRuntimeConfig = transport.WebSocketRuntimeConfig
 type NATSConfig = eventbus.NATSConfig
 type MediaPlaybackConfig = transport.MediaPlaybackConfig
 type AuthTokenConfig = auth.TokenConfig
+type ObservabilityConfig = observability.Config
 
 type KafkaConfig struct {
 	Brokers                []string
@@ -97,6 +100,8 @@ func NewServer(config Config) *Server {
 	serverCtx, cancel := context.WithCancel(context.Background())
 	roomManager := room.NewManager()
 	tokenManager := auth.NewTokenManager(config.Auth)
+	observabilityConfig := config.Observability.Normalized()
+	metrics := observability.NewMetrics()
 	if distributedAuthority {
 		config.Redis.Required = true
 	}
@@ -107,6 +112,7 @@ func NewServer(config Config) *Server {
 	var authorityRegistry *cache.RoomAuthorityRegistry
 	var activeDeviceRegistry *cache.ActiveDeviceRegistry
 	var controlRequestRegistry *cache.ControlRequestRegistry
+	var controlRateRegistry *cache.ControlRateRegistry
 	var presenceRegistry *cache.PresenceRegistry
 	var roomStateCache *cache.RoomStateCache
 	if redisClient != nil {
@@ -114,6 +120,7 @@ func NewServer(config Config) *Server {
 		authorityRegistry = cache.NewRoomAuthorityRegistry(redisClient, 0)
 		activeDeviceRegistry = cache.NewActiveDeviceRegistry(redisClient, 0)
 		controlRequestRegistry = cache.NewControlRequestRegistry(redisClient, config.WebSocket.ControlIdempotencyTTL)
+		controlRateRegistry = cache.NewControlRateRegistry(redisClient)
 		presenceRegistry = cache.NewPresenceRegistry(redisClient, config.WebSocket.PresenceLeaseTTL)
 	}
 	db := newPostgresDB(config.DatabaseURL)
@@ -207,12 +214,16 @@ func NewServer(config Config) *Server {
 		mediaHTTPHandler,
 		progressHTTPHandler,
 		runtimeBoundaryFromConfig(config),
+		readinessSnapshotFromConfig(config, db, redisClient, roomBroadcastBus, roomControlBus, timelineOutboxStore, authorityRecovery),
+		observabilityConfig,
+		metrics,
 		broadcastInstanceID,
 		roomBroadcastBus,
 		roomControlBus,
 		authorityRegistry,
 		activeDeviceRegistry,
 		controlRequestRegistry,
+		controlRateRegistry,
 		presenceRegistry,
 		timelineRecorder,
 		authorityRecovery,
@@ -248,6 +259,52 @@ func runtimeBoundaryFromConfig(config Config) runtimeBoundary {
 		InstanceID:      strings.TrimSpace(config.InstanceID),
 		RoomRuntimeMode: normalizeRoomRuntimeMode(config.RoomRuntimeMode),
 	}
+}
+
+func readinessSnapshotFromConfig(
+	config Config,
+	db *gorm.DB,
+	redisClient *cache.RedisClient,
+	roomBroadcastBus eventbus.RoomBroadcastBus,
+	roomControlBus eventbus.RoomControlBus,
+	timelineOutboxStore *store.PostgresTimelineOutboxStore,
+	authorityRecovery *recovery.Service,
+) observability.ReadinessSnapshot {
+	distributedAuthority := normalizeRoomRuntimeMode(config.RoomRuntimeMode) == roomRuntimeModeDistributedAuthority
+	return observability.NewReadinessSnapshot(
+		config.AppEnv,
+		strings.TrimSpace(config.InstanceID),
+		normalizeRoomRuntimeMode(config.RoomRuntimeMode),
+		[]observability.DependencyStatus{
+			dependencyStatus("postgres", db != nil, distributedAuthority || strings.TrimSpace(config.DatabaseURL) != ""),
+			dependencyStatus("redis", redisClient != nil, distributedAuthority || config.Redis.Enabled()),
+			dependencyStatus("nats_broadcast", !isDisabledRoomBroadcastBus(roomBroadcastBus), distributedAuthority || config.WebSocket.CrossInstanceBroadcast),
+			dependencyStatus("nats_control", !isDisabledRoomControlBus(roomControlBus), distributedAuthority),
+			dependencyStatus("kafka", len(config.Kafka.Brokers) > 0, distributedAuthority),
+			dependencyStatus("outbox", timelineOutboxStore != nil, distributedAuthority),
+			dependencyStatus("recovery", authorityRecovery != nil, distributedAuthority),
+		},
+	)
+}
+
+func dependencyStatus(name string, ok bool, required bool) observability.DependencyStatus {
+	status := "disabled"
+	if ok {
+		status = "ok"
+	} else if required {
+		status = "unavailable"
+	}
+	return observability.DependencyStatus{Name: name, Status: status, Required: required}
+}
+
+func isDisabledRoomBroadcastBus(bus eventbus.RoomBroadcastBus) bool {
+	_, disabled := bus.(eventbus.DisabledRoomBroadcastBus)
+	return disabled || bus == nil
+}
+
+func isDisabledRoomControlBus(bus eventbus.RoomControlBus) bool {
+	_, disabled := bus.(eventbus.DisabledRoomControlBus)
+	return disabled || bus == nil
 }
 
 func roomBroadcastInstanceID(instanceID string) string {
@@ -361,12 +418,16 @@ func newGinRouter(
 	mediaHTTPHandler *transport.MediaHTTPHandler,
 	progressHTTPHandler *transport.ProgressHTTPHandler,
 	runtime runtimeBoundary,
+	readiness observability.ReadinessSnapshot,
+	observabilityConfig observability.Config,
+	metrics *observability.Metrics,
 	broadcastInstanceID string,
 	roomBroadcastBus eventbus.RoomBroadcastBus,
 	roomControlBus eventbus.RoomControlBus,
 	authorityRegistry *cache.RoomAuthorityRegistry,
 	activeDeviceRegistry *cache.ActiveDeviceRegistry,
 	controlRequestRegistry *cache.ControlRequestRegistry,
+	controlRateRegistry *cache.ControlRateRegistry,
 	presenceRegistry *cache.PresenceRegistry,
 	timelineRecorder timeline.Recorder,
 	authorityRecovery *recovery.Service,
@@ -382,6 +443,16 @@ func newGinRouter(
 		c.Header("X-Watch-Together-Room-Runtime", normalizeRoomRuntimeMode(runtime.RoomRuntimeMode))
 		c.String(http.StatusOK, "ok")
 	})
+	router.GET(observabilityConfig.ReadinessPath, func(c *gin.Context) {
+		status := http.StatusOK
+		if readiness.Status != "ready" {
+			status = http.StatusServiceUnavailable
+		}
+		c.JSON(status, readiness)
+	})
+	if observabilityConfig.MetricsEnabled {
+		router.GET(observabilityConfig.MetricsPath, gin.WrapH(metrics.Handler()))
+	}
 	router.Any("/auth/login", gin.WrapF(authHTTPHandler.Login))
 	router.Any("/auth/register", gin.WrapF(authHTTPHandler.Register))
 	router.Any("/home/summary", gin.WrapF(homeHTTPHandler.Summary))
@@ -400,6 +471,7 @@ func newGinRouter(
 		tokenManager,
 		roomHTTPHandler.RoomLeaver(),
 	)
+	webSocketHandler.SetMetrics(metrics)
 	webSocketHandler.SetRoomBroadcastBus(broadcastInstanceID, roomBroadcastBus)
 	if normalizeRoomRuntimeMode(runtime.RoomRuntimeMode) == roomRuntimeModeDistributedAuthority {
 		webSocketHandler.SetDistributedAuthorityRuntime(
@@ -414,6 +486,7 @@ func newGinRouter(
 			presenceRegistry,
 			webSocketConfig.PresenceRefreshInterval,
 		)
+		webSocketHandler.SetDistributedControlRateRegistry(controlRateRegistry)
 		webSocketHandler.SetRoomAuthorityRecovery(authorityRecovery)
 	}
 	if err := webSocketHandler.SubscribeRoomBroadcasts(ctx); err != nil {

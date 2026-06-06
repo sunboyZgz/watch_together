@@ -29,6 +29,7 @@ type ServerRuntimeConfig struct {
 	Kafka             KafkaConfig
 	OutboxWorker      OutboxWorkerConfig
 	AuthorityRecovery AuthorityRecoveryConfig
+	Observability     ObservabilityConfig
 	Media             MediaPlaybackConfig
 }
 
@@ -90,6 +91,13 @@ type AuthorityRecoveryConfig struct {
 	KafkaReplayTimeoutMs   int
 }
 
+type ObservabilityConfig struct {
+	MetricsEnabled bool
+	MetricsAddr    string
+	MetricsPath    string
+	ReadinessPath  string
+}
+
 type MediaPlaybackConfig struct {
 	DeliveryMode           string
 	SigningSecret          string
@@ -144,6 +152,10 @@ func LoadServerRuntimeConfig(configDir string) (ServerRuntimeConfig, error) {
 		"AUTHORITY_TAKEOVER_SCAN_INTERVAL_MS":   30000,
 		"AUTHORITY_RECOVERY_TIMEOUT_MS":         5000,
 		"KAFKA_REPLAY_TIMEOUT_MS":               1000,
+		"METRICS_ENABLED":                       true,
+		"METRICS_ADDR":                          "",
+		"METRICS_PATH":                          "/metrics",
+		"READINESS_PATH":                        "/readyz",
 		"MEDIA_DELIVERY_MODE":                   "signed_redirect",
 		"MEDIA_PLAYBACK_URL_TTL_SECONDS":        7200,
 		"MEDIA_STORAGE_FORCE_PATH_STYLE":        "true",
@@ -194,6 +206,10 @@ func LoadServerRuntimeConfig(configDir string) (ServerRuntimeConfig, error) {
 		"AUTHORITY_TAKEOVER_SCAN_INTERVAL_MS",
 		"AUTHORITY_RECOVERY_TIMEOUT_MS",
 		"KAFKA_REPLAY_TIMEOUT_MS",
+		"METRICS_ENABLED",
+		"METRICS_ADDR",
+		"METRICS_PATH",
+		"READINESS_PATH",
 		"MEDIA_DELIVERY_MODE",
 		"MEDIA_PLAYBACK_SIGNING_SECRET",
 		"MEDIA_PLAYBACK_URL_TTL_SECONDS",
@@ -279,6 +295,12 @@ func LoadServerRuntimeConfig(configDir string) (ServerRuntimeConfig, error) {
 			TakeoverScanIntervalMs: intFromConfig(loader, "AUTHORITY_TAKEOVER_SCAN_INTERVAL_MS"),
 			RecoveryTimeoutMs:      intFromConfig(loader, "AUTHORITY_RECOVERY_TIMEOUT_MS"),
 			KafkaReplayTimeoutMs:   intFromConfig(loader, "KAFKA_REPLAY_TIMEOUT_MS"),
+		},
+		Observability: ObservabilityConfig{
+			MetricsEnabled: boolFromConfig(loader, "METRICS_ENABLED"),
+			MetricsAddr:    trimmedString(loader, "METRICS_ADDR"),
+			MetricsPath:    trimmedString(loader, "METRICS_PATH"),
+			ReadinessPath:  trimmedString(loader, "READINESS_PATH"),
 		},
 		Media: MediaPlaybackConfig{
 			DeliveryMode:           trimmedString(loader, "MEDIA_DELIVERY_MODE"),

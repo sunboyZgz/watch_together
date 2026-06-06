@@ -42,16 +42,20 @@ Main backend boundaries:
 - `internal/room`: in-memory runtime room state, clients, host authority, lifecycle, reconnect, and device-switch logic.
 - `internal/transport`: HTTP handlers, WebSocket handler, response envelopes, media playback delivery.
 - `internal/store`: PostgreSQL persistence.
-- `internal/cache`: optional Redis `room_state` cache.
+- `internal/cache`: Redis room snapshots, authority leases, active-device ownership, idempotency, presence, and distributed rate limiting.
+- `internal/eventbus`: NATS Core broadcast and control request/reply.
+- `internal/timeline`: Kafka timeline events, outbox dispatch, and derived-topic dispatch.
+- `internal/recovery`: distributed authority takeover and Kafka replay recovery.
+- `internal/observability`: readiness snapshots and Prometheus metrics.
 - `internal/mediactl`: media ingestion CLI implementation.
 
 ## Runtime State
 
-PostgreSQL is the durable store for users, media metadata, rooms, room members, and user progress. The in-process room manager is the authority for live playback state while a room is active. Redis is optional and stores the latest `room_state` snapshot for rooms when configured.
+PostgreSQL is the durable store for users, media metadata, rooms, room members, and user progress. The in-process room manager owns live WebSocket connection objects. Redis stores runtime coordination state when configured: latest snapshots, authority leases, active-device leases, request idempotency, presence, and distributed seek rate limiting. Kafka stores the durable room timeline result log, and NATS Core handles realtime cross-instance fan-out and control forwarding.
 
 On startup, the server marks previously active persisted rooms as `grace_period`, starts an in-memory cleanup loop, and, when PostgreSQL is available, starts persistent room cleanup for expired rooms.
 
-The current room runtime mode is `local_process`: WebSocket connections, active room authority, control deduplication, and seek rate limiting remain process-local. See [Runtime Boundaries](./runtime-boundaries.md) for the Phase 1 boundary cleanup and remaining multi-instance gaps.
+The default room runtime mode is still `local_process`. `distributed_authority` enables Redis authority leases, NATS forwarding, Kafka timeline logging, authority recovery, distributed seek rate limiting, and Prometheus/readiness observability. See [Runtime Boundaries](./runtime-boundaries.md) and [Distributed Architecture](./distributed-architecture.md) for the current architecture.
 
 ## Media Model
 

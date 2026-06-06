@@ -87,6 +87,12 @@ func main() {
 			RecoveryTimeout:      time.Duration(runtimeConfig.AuthorityRecovery.RecoveryTimeoutMs) * time.Millisecond,
 			KafkaReplayTimeout:   time.Duration(runtimeConfig.AuthorityRecovery.KafkaReplayTimeoutMs) * time.Millisecond,
 		},
+		Observability: app.ObservabilityConfig{
+			MetricsEnabled: runtimeConfig.Observability.MetricsEnabled,
+			MetricsAddr:    runtimeConfig.Observability.MetricsAddr,
+			MetricsPath:    runtimeConfig.Observability.MetricsPath,
+			ReadinessPath:  runtimeConfig.Observability.ReadinessPath,
+		},
 		Media: app.MediaPlaybackConfig{
 			DeliveryMode:           runtimeConfig.Media.DeliveryMode,
 			SigningSecret:          runtimeConfig.Media.SigningSecret,

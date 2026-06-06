@@ -11,6 +11,7 @@ import (
 	"time"
 
 	wtconfig "watch_together/server/internal/config"
+	"watch_together/server/internal/observability"
 	"watch_together/server/internal/store"
 	"watch_together/server/internal/timeline"
 )
@@ -47,12 +48,19 @@ func main() {
 	defer publisher.Close()
 
 	outboxStore := store.NewPostgresTimelineOutboxStore(db, runtimeConfig.Kafka.TopicRoomTimeline)
+	metrics := observability.NewMetrics()
+	observability.StartMetricsServer(ctx, observability.Config{
+		MetricsEnabled: runtimeConfig.Observability.MetricsEnabled,
+		MetricsAddr:    runtimeConfig.Observability.MetricsAddr,
+		MetricsPath:    runtimeConfig.Observability.MetricsPath,
+	}, metrics)
 	dispatcher := timeline.NewOutboxDispatcher(
 		outboxStore,
 		publisher,
 		runtimeConfig.OutboxWorker.BatchSize,
 		time.Duration(runtimeConfig.OutboxWorker.PollIntervalMs)*time.Millisecond,
 	)
+	dispatcher.SetObserver(metrics)
 	log.Printf("outboxworker started topic=%s brokers=%v", runtimeConfig.Kafka.TopicRoomTimeline, runtimeConfig.Kafka.Brokers)
 	if err := dispatcher.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
 		log.Fatalf("outboxworker stopped: %v", err)

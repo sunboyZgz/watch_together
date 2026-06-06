@@ -13,6 +13,7 @@ import (
 
 	"watch_together/server/internal/cache"
 	"watch_together/server/internal/eventbus"
+	"watch_together/server/internal/observability"
 	"watch_together/server/internal/protocol"
 	"watch_together/server/internal/realtime"
 	"watch_together/server/internal/recovery"
@@ -45,9 +46,11 @@ type WebSocketHandler struct {
 	authorityRecovery   roomAuthorityRecovery
 	activeDevices       activeDeviceRegistry
 	controlRequests     controlRequestRegistry
+	controlRates        controlRateRegistry
 	presence            presenceRegistry
 	presenceRefresh     time.Duration
 	timelineRecorder    timeline.Recorder
+	metrics             *observability.Metrics
 	instanceID          string
 	roomRuntimeMode     string
 }
@@ -114,6 +117,11 @@ type controlRequestRegistry interface {
 	FinalizeAccepted(ctx context.Context, roomID string, requestID string, authorityEpoch int64, seq int64, envelope []byte) (cache.ControlRequestRecord, bool, error)
 	FinalizeRejected(ctx context.Context, roomID string, requestID string, authorityEpoch int64, seq int64, message string) (cache.ControlRequestRecord, bool, error)
 	Forget(ctx context.Context, roomID string, requestID string) error
+}
+
+type controlRateRegistry interface {
+	Reserve(ctx context.Context, roomID string, controlType string, interval time.Duration, authorityEpoch int64) (cache.ControlRateReservation, bool, error)
+	ReleaseIfMatch(ctx context.Context, reservation cache.ControlRateReservation) (bool, error)
 }
 
 type presenceRegistry interface {
@@ -236,6 +244,20 @@ func (h *WebSocketHandler) SetDistributedControlHardening(
 	if presenceRefreshInterval > 0 {
 		h.presenceRefresh = presenceRefreshInterval
 	}
+}
+
+func (h *WebSocketHandler) SetDistributedControlRateRegistry(controlRates controlRateRegistry) {
+	if h == nil {
+		return
+	}
+	h.controlRates = controlRates
+}
+
+func (h *WebSocketHandler) SetMetrics(metrics *observability.Metrics) {
+	if h == nil {
+		return
+	}
+	h.metrics = metrics
 }
 
 func (h *WebSocketHandler) SubscribeRoomBroadcasts(ctx context.Context) error {
@@ -386,6 +408,7 @@ func (h *WebSocketHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	client := room.NewClientConnectionWithOptions(conn, h.clientOptions)
 	client.SetIdentity(authUserID, "")
+	h.recordWebSocketConnection(1)
 	ctx, cancel := context.WithCancel(context.Background())
 	writerDone := make(chan struct{})
 	go func() {
@@ -412,6 +435,7 @@ func (h *WebSocketHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.releaseActiveDeviceForClient(context.Background(), client)
 		h.cancelRoomDeviceSwitchesForClient(client, "active_disconnected")
 		_ = client.Close(websocket.StatusNormalClosure, "connection closed")
+		h.recordWebSocketConnection(-1)
 	}()
 	go h.runHeartbeatLoop(ctx, client)
 
@@ -920,7 +944,11 @@ func (h *WebSocketHandler) recordControlAccepted(
 	seq int64,
 	envelope protocol.Envelope,
 ) error {
-	return h.recordTimelineEvent(ctx, timeline.EventTypeControlAccepted, roomID, meta.UserID, meta.DeviceID, eventType, seq, envelope)
+	err := h.recordTimelineEvent(ctx, timeline.EventTypeControlAccepted, roomID, meta.UserID, meta.DeviceID, eventType, seq, envelope)
+	if err == nil {
+		h.recordControlMetric(eventType, "accepted")
+	}
+	return err
 }
 
 func (h *WebSocketHandler) recordControlRejected(
@@ -930,6 +958,7 @@ func (h *WebSocketHandler) recordControlRejected(
 	meta controlEventMeta,
 	reason string,
 ) {
+	h.recordControlMetric(eventType, "rejected")
 	_ = h.recordTimelineEvent(ctx, timeline.EventTypeControlRejected, roomID, meta.UserID, meta.DeviceID, eventType, meta.ClientSeq, map[string]any{
 		"type":      eventType,
 		"requestId": meta.RequestID,
@@ -1478,30 +1507,50 @@ func (h *WebSocketHandler) applyLocalControlEvent(
 	}
 
 	var seekRateReservation time.Time
+	var distributedSeekRateReservation cache.ControlRateReservation
+	var distributedSeekRateReserved bool
 	if eventType == protocol.TypeSeek && h.seekRateLimiter != nil {
 		now := h.clock.Now()
-		seekRateReservation = now
-		if !h.seekRateLimiter.Reserve(roomID, now) {
-			h.forgetLocalControlRequest(roomID, meta.RequestID)
-			if h.debugSync {
-				log.Printf(
-					"sync control_rate_limited room=%s type=%s user=%s request_id=%q client_seq=%d server_seq=%d min_interval_ms=%d",
-					roomID,
-					eventType,
-					meta.UserID,
-					meta.RequestID,
-					meta.ClientSeq,
-					previous.Seq,
-					h.seekRateLimiter.interval.Milliseconds(),
-				)
+		if h.isDistributedAuthorityMode() {
+			if h.controlRates == nil {
+				h.finalizeDistributedControlRejected(ctx, roomID, meta, previous.Seq, "control rate limiter unavailable")
+				return protocol.Envelope{}, false, protocolMessageError{roomID: roomID, message: "control rate limiter unavailable"}
 			}
-			h.cacheRoomState(previous)
-			h.finalizeDistributedControlRejected(ctx, roomID, meta, previous.Seq, "control rate limited")
-			h.recordControlRejected(ctx, eventType, roomID, meta, "control rate limited")
-			return protocol.Envelope{
-				Type:    protocol.TypeRoomState,
-				Payload: mustJSONRaw(roomStatePayload(previous)),
-			}, false, nil
+			reservation, ok, err := h.controlRates.Reserve(ctx, roomID, protocol.TypeSeek, h.seekRateLimiter.interval, meta.AuthorityEpoch)
+			if err != nil {
+				h.recordSeekRateMetric("unavailable")
+				h.finalizeDistributedControlRejected(ctx, roomID, meta, previous.Seq, "control rate limiter unavailable")
+				return protocol.Envelope{}, false, protocolMessageError{roomID: roomID, message: "control rate limiter unavailable"}
+			}
+			if !ok {
+				h.recordSeekRateMetric("limited")
+				h.logControlRateLimited(roomID, eventType, meta, previous.Seq)
+				h.cacheRoomState(previous)
+				h.finalizeDistributedControlRejected(ctx, roomID, meta, previous.Seq, "control rate limited")
+				h.recordControlRejected(ctx, eventType, roomID, meta, "control rate limited")
+				return protocol.Envelope{
+					Type:    protocol.TypeRoomState,
+					Payload: mustJSONRaw(roomStatePayload(previous)),
+				}, false, nil
+			}
+			h.recordSeekRateMetric("accepted")
+			distributedSeekRateReservation = reservation
+			distributedSeekRateReserved = true
+		} else {
+			seekRateReservation = now
+			if !h.seekRateLimiter.Reserve(roomID, now) {
+				h.recordSeekRateMetric("limited")
+				h.forgetLocalControlRequest(roomID, meta.RequestID)
+				h.logControlRateLimited(roomID, eventType, meta, previous.Seq)
+				h.cacheRoomState(previous)
+				h.finalizeDistributedControlRejected(ctx, roomID, meta, previous.Seq, "control rate limited")
+				h.recordControlRejected(ctx, eventType, roomID, meta, "control rate limited")
+				return protocol.Envelope{
+					Type:    protocol.TypeRoomState,
+					Payload: mustJSONRaw(roomStatePayload(previous)),
+				}, false, nil
+			}
+			h.recordSeekRateMetric("accepted")
 		}
 	}
 
@@ -1510,6 +1559,11 @@ func (h *WebSocketHandler) applyLocalControlEvent(
 		h.forgetLocalControlRequest(roomID, meta.RequestID)
 		if eventType == protocol.TypeSeek && !seekRateReservation.IsZero() {
 			h.seekRateLimiter.ForgetReservation(roomID, seekRateReservation)
+		}
+		if eventType == protocol.TypeSeek && distributedSeekRateReserved {
+			if _, releaseErr := h.controlRates.ReleaseIfMatch(ctx, distributedSeekRateReservation); releaseErr != nil && h.debugSync {
+				log.Printf("distributed seek rate reservation release failed room=%s request_id=%q err=%v", roomID, meta.RequestID, releaseErr)
+			}
 		}
 		if errors.Is(err, room.ErrSeqMismatch) {
 			if h.debugSync {
@@ -1778,6 +1832,7 @@ func (h *WebSocketHandler) forwardControlEvent(
 		RequestedAtMs:    h.clock.NowUnixMilli(),
 	})
 	if err != nil {
+		h.recordNATSMetric("control_request", "failed")
 		protocolErr := protocolMessageError{
 			roomID:  roomID,
 			message: "room authority unavailable",
@@ -1786,6 +1841,7 @@ func (h *WebSocketHandler) forwardControlEvent(
 		h.recordControlRejected(ctx, eventType, roomID, meta, err.Error())
 		return protocolErr
 	}
+	h.recordNATSMetric("control_request", "ok")
 	if authorityEpoch > 0 && response.AuthorityEpoch > 0 && response.AuthorityEpoch != authorityEpoch {
 		h.forgetDistributedControlRequest(ctx, roomID, meta.RequestID)
 		protocolErr := protocolMessageError{
@@ -2228,8 +2284,11 @@ func (h *WebSocketHandler) publishRoomBroadcast(
 		PublishedAtMs:  h.clock.NowUnixMilli(),
 	}
 	if err := h.roomBroadcastBus.PublishRoomEnvelope(publishCtx, event); err != nil {
+		h.recordNATSMetric("broadcast_publish", "failed")
 		log.Printf("room broadcast publish failed room=%s type=%s seq=%d err=%v", roomID, envelope.Type, seq, err)
+		return
 	}
+	h.recordNATSMetric("broadcast_publish", "ok")
 }
 
 func (h *WebSocketHandler) handleRemoteRoomBroadcast(ctx context.Context, event eventbus.RoomBroadcastEvent) {
@@ -2261,11 +2320,15 @@ func (h *WebSocketHandler) handleRemoteRoomBroadcast(ctx context.Context, event 
 	}
 	if event.Type == protocol.TypeRoomPresence {
 		h.broadcastRoomPresenceToClients(broadcastCtx, event.RoomID, clients, roomPresenceReason(event.Payload), false)
+		h.recordNATSMetric("broadcast_receive", "ok")
 		return
 	}
 	if err := h.broadcastEnvelope(broadcastCtx, event.RoomID, clients, envelope); err != nil {
+		h.recordNATSMetric("broadcast_receive", "failed")
 		log.Printf("remote room broadcast delivery failed room=%s type=%s seq=%d source_instance=%s err=%v", event.RoomID, event.Type, event.Seq, event.InstanceID, err)
+		return
 	}
+	h.recordNATSMetric("broadcast_receive", "ok")
 }
 
 func (h *WebSocketHandler) writeRoomState(
@@ -2428,6 +2491,7 @@ func (h *WebSocketHandler) broadcastRoomPresenceToClients(
 		}
 		return
 	}
+	h.recordPresenceOnline(snapshot.OnlineCount)
 	for _, client := range clients {
 		if client == nil {
 			continue
@@ -2504,6 +2568,56 @@ func decodeControlRequestEnvelope(data []byte) (protocol.Envelope, error) {
 		return protocol.Envelope{}, err
 	}
 	return envelope, nil
+}
+
+func (h *WebSocketHandler) logControlRateLimited(roomID string, eventType string, meta controlEventMeta, serverSeq int64) {
+	if !h.debugSync {
+		return
+	}
+	minIntervalMs := int64(0)
+	if h.seekRateLimiter != nil {
+		minIntervalMs = h.seekRateLimiter.interval.Milliseconds()
+	}
+	log.Printf(
+		"sync control_rate_limited room=%s type=%s user=%s request_id=%q client_seq=%d server_seq=%d min_interval_ms=%d",
+		roomID,
+		eventType,
+		meta.UserID,
+		meta.RequestID,
+		meta.ClientSeq,
+		serverSeq,
+		minIntervalMs,
+	)
+}
+
+func (h *WebSocketHandler) recordWebSocketConnection(delta float64) {
+	if h.metrics != nil {
+		h.metrics.AddWebSocketConnection(delta)
+	}
+}
+
+func (h *WebSocketHandler) recordControlMetric(eventType string, result string) {
+	if h.metrics != nil {
+		h.metrics.RecordControlResult(eventType, result)
+	}
+}
+
+func (h *WebSocketHandler) recordSeekRateMetric(result string) {
+	if h.metrics != nil {
+		h.metrics.RecordSeekRateLimit(result)
+	}
+}
+
+func (h *WebSocketHandler) recordNATSMetric(kind string, result string) {
+	if h.metrics != nil {
+		h.metrics.RecordNATSEvent(kind, result)
+	}
+}
+
+func (h *WebSocketHandler) recordPresenceOnline(count int) {
+	if h.metrics != nil {
+		h.metrics.SetPresenceOnline(count)
+	}
 }
 
 func clientsWithout(clients []*room.ClientConnection, excluded *room.ClientConnection) []*room.ClientConnection {

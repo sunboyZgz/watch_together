@@ -10,6 +10,7 @@ import (
 
 	"watch_together/server/internal/cache"
 	"watch_together/server/internal/eventbus"
+	"watch_together/server/internal/observability"
 	"watch_together/server/internal/room"
 	"watch_together/server/internal/transport"
 )
@@ -49,9 +50,13 @@ func TestGinRouterHealthzExposesRuntimeBoundary(t *testing.T) {
 			InstanceID:      "roomserver-a",
 			RoomRuntimeMode: "local_process",
 		},
+		testReadinessSnapshot("roomserver-a", "local_process"),
+		observability.Config{},
+		observability.NewMetrics(),
 		"",
 		eventbus.NewDisabledRoomBroadcastBus(),
 		eventbus.NewDisabledRoomControlBus(),
+		nil,
 		nil,
 		nil,
 		nil,
@@ -71,6 +76,72 @@ func TestGinRouterHealthzExposesRuntimeBoundary(t *testing.T) {
 	}
 	if recorder.Header().Get("X-Watch-Together-Room-Runtime") != "local_process" {
 		t.Fatalf("expected room runtime health header, got %q", recorder.Header().Get("X-Watch-Together-Room-Runtime"))
+	}
+}
+
+func TestGinRouterReadyz(t *testing.T) {
+	router := newTestGinRouter()
+	recorder := httptest.NewRecorder()
+
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/readyz", nil))
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d body=%s", http.StatusOK, recorder.Code, recorder.Body.String())
+	}
+	if !strings.Contains(recorder.Body.String(), `"status":"ready"`) {
+		t.Fatalf("expected ready response, got %s", recorder.Body.String())
+	}
+}
+
+func TestGinRouterMetricsEnabled(t *testing.T) {
+	router := newTestGinRouter()
+	recorder := httptest.NewRecorder()
+
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, recorder.Code)
+	}
+	if !strings.Contains(recorder.Body.String(), "watch_together_websocket_connections_current") {
+		t.Fatalf("expected prometheus metrics, got %s", recorder.Body.String())
+	}
+}
+
+func TestGinRouterMetricsDisabled(t *testing.T) {
+	roomManager := room.NewManager()
+	router := newGinRouter(
+		context.Background(),
+		roomManager,
+		false,
+		WebSocketRuntimeConfig{},
+		nil,
+		nil,
+		transport.NewRoomHTTPHandler(roomManager, nil),
+		transport.NewAuthHTTPHandler(nil),
+		transport.NewHomeHTTPHandler(nil),
+		transport.NewMediaHTTPHandler(nil),
+		transport.NewProgressHTTPHandler(nil),
+		runtimeBoundary{},
+		testReadinessSnapshot("", "local_process"),
+		observability.Config{MetricsEnabled: false}.Normalized(),
+		observability.NewMetrics(),
+		"",
+		eventbus.NewDisabledRoomBroadcastBus(),
+		eventbus.NewDisabledRoomControlBus(),
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+	)
+	recorder := httptest.NewRecorder()
+
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+
+	if recorder.Code != http.StatusNotFound {
+		t.Fatalf("expected metrics disabled status %d, got %d", http.StatusNotFound, recorder.Code)
 	}
 }
 
@@ -164,6 +235,9 @@ func newTestGinRouter() http.Handler {
 		transport.NewMediaHTTPHandler(nil),
 		transport.NewProgressHTTPHandler(nil),
 		runtimeBoundary{},
+		testReadinessSnapshot("", "local_process"),
+		observability.Config{MetricsEnabled: true}.Normalized(),
+		observability.NewMetrics(),
 		"",
 		eventbus.NewDisabledRoomBroadcastBus(),
 		eventbus.NewDisabledRoomControlBus(),
@@ -173,7 +247,12 @@ func newTestGinRouter() http.Handler {
 		nil,
 		nil,
 		nil,
+		nil,
 	)
+}
+
+func testReadinessSnapshot(instanceID string, runtimeMode string) observability.ReadinessSnapshot {
+	return observability.NewReadinessSnapshot("test", instanceID, runtimeMode, nil)
 }
 
 type fakeAppJSONStore struct {

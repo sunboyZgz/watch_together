@@ -118,6 +118,12 @@ func TestLoadServerRuntimeConfigFallsBackToDefaults(t *testing.T) {
 		cfg.AuthorityRecovery.KafkaReplayTimeoutMs != 1000 {
 		t.Fatalf("unexpected default authority recovery config: %+v", cfg.AuthorityRecovery)
 	}
+	if !cfg.Observability.MetricsEnabled ||
+		cfg.Observability.MetricsAddr != "" ||
+		cfg.Observability.MetricsPath != "/metrics" ||
+		cfg.Observability.ReadinessPath != "/readyz" {
+		t.Fatalf("unexpected default observability config: %+v", cfg.Observability)
+	}
 	if cfg.Media.URLTTLSeconds != 7200 {
 		t.Fatalf("expected default media playback url ttl 7200s, got %d", cfg.Media.URLTTLSeconds)
 	}
@@ -400,6 +406,29 @@ func TestLoadServerRuntimeConfigLoadsKafkaAndOutboxSettings(t *testing.T) {
 		cfg.AuthorityRecovery.RecoveryTimeoutMs != 4500 ||
 		cfg.AuthorityRecovery.KafkaReplayTimeoutMs != 800 {
 		t.Fatalf("unexpected authority recovery config: %+v", cfg.AuthorityRecovery)
+	}
+}
+
+func TestLoadServerRuntimeConfigLoadsObservabilitySettings(t *testing.T) {
+	configDir := t.TempDir()
+	mustWriteConfigFile(
+		t,
+		filepath.Join(configDir, ".env"),
+		"METRICS_ENABLED=false\nMETRICS_ADDR=:9091\nMETRICS_PATH=/internal/metrics\nREADINESS_PATH=/internal/readyz\n",
+	)
+
+	cfg, err := LoadServerRuntimeConfig(configDir)
+	if err != nil {
+		t.Fatalf("load runtime config: %v", err)
+	}
+
+	if cfg.Observability.MetricsEnabled {
+		t.Fatalf("expected metrics disabled")
+	}
+	if cfg.Observability.MetricsAddr != ":9091" ||
+		cfg.Observability.MetricsPath != "/internal/metrics" ||
+		cfg.Observability.ReadinessPath != "/internal/readyz" {
+		t.Fatalf("unexpected observability config: %+v", cfg.Observability)
 	}
 }
 

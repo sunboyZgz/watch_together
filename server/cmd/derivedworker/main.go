@@ -10,6 +10,7 @@ import (
 	"syscall"
 
 	wtconfig "watch_together/server/internal/config"
+	"watch_together/server/internal/observability"
 	"watch_together/server/internal/timeline"
 )
 
@@ -41,11 +42,18 @@ func main() {
 	}
 	defer publisher.Close()
 
+	metrics := observability.NewMetrics()
+	observability.StartMetricsServer(ctx, observability.Config{
+		MetricsEnabled: runtimeConfig.Observability.MetricsEnabled,
+		MetricsAddr:    runtimeConfig.Observability.MetricsAddr,
+		MetricsPath:    runtimeConfig.Observability.MetricsPath,
+	}, metrics)
 	dispatcher := timeline.NewDerivedDispatcher(reader, publisher, timeline.Topics{
 		Canonical:     runtimeConfig.Kafka.TopicRoomTimeline,
 		ControlResult: runtimeConfig.Kafka.TopicRoomControlResult,
 		Membership:    runtimeConfig.Kafka.TopicRoomMembership,
 	})
+	dispatcher.SetObserver(metrics)
 	log.Printf("derivedworker started canonical=%s control=%s membership=%s brokers=%v",
 		runtimeConfig.Kafka.TopicRoomTimeline,
 		runtimeConfig.Kafka.TopicRoomControlResult,

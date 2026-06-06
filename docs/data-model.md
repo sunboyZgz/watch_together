@@ -176,12 +176,15 @@ In `distributed_authority`, Redis also stores:
 wt:room:authority:{roomId}:v1
 wt:room:active_device:{roomId}:{userId}:v1
 wt:room:control_request:{roomId}:{requestId}:v1
+wt:room:control_rate:{roomId}:seek:v1
 wt:room:presence:{roomId}:v1
 ```
 
 The authority value contains `instanceId`, `epoch`, `status`, and `leaseUntilMs`. `status=active` means the instance can apply room controls for the current epoch. `status=recovering` fences a takeover attempt while one instance replays Kafka and restores local room state. Same-instance renewals keep the epoch; successful takeover after lease expiry increments it. The active-device value contains `deviceId`, `instanceId`, `connectionId`, and `leaseUntilMs`.
 
 The control request value contains `roomId`, `requestId`, `status=pending|accepted|rejected`, `authorityEpoch`, `seq`, accepted WebSocket envelope, rejection error, and `leaseUntilMs`. It is the runtime idempotency layer for `distributed_authority`; recovered accepted events from Kafka/outbox backfill recent request records after authority takeover.
+
+The control rate value is a short-lived seek reservation. It lets `distributed_authority` enforce `WS_SEEK_MIN_INTERVAL_MS` across forwarded controls and authority recovery. It is runtime state only and is not part of the durable playback timeline.
 
 The presence value is a per-room user-level online registry. Internally it may keep `deviceId`, `connectionId`, `instanceId`, role, `lastSeenMs`, and `leaseUntilMs`, but client-facing `room_presence` snapshots expose only user-level fields. Presence is not PostgreSQL membership, not Kafka timeline data, and not a durable audit record.
 

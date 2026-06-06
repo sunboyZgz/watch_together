@@ -1,6 +1,6 @@
 # Runtime Boundaries
 
-This document records the runtime ownership boundaries for the room system. `local_process` remains the default runtime. Phase 4 adds a `distributed_authority` MVP for multi-instance room authority, and Phase 5 adds fenced authority recovery from the Kafka canonical timeline.
+This document records the runtime ownership boundaries for the room system. `local_process` remains the default runtime. Phase 4 adds a `distributed_authority` MVP for multi-instance room authority, Phase 5 adds fenced authority recovery from the Kafka canonical timeline, and Phase 6 adds distributed seek rate limiting plus observability.
 
 ## Phase 1 Boundary Markers
 
@@ -13,7 +13,7 @@ ROOM_RUNTIME_MODE=local_process
 
 - `SERVER_INSTANCE_ID` is optional metadata for logs, health checks, and load-balancer diagnostics. Set a unique value per roomserver replica in multi-instance experiments.
 - `ROOM_RUNTIME_MODE=local_process` keeps playback authority in one process.
-- `ROOM_RUNTIME_MODE=distributed_authority` enables Redis authority leases, Redis active-device ownership, NATS control forwarding, PostgreSQL outbox, Kafka timeline logging, and Phase 5 authority recovery.
+- `ROOM_RUNTIME_MODE=distributed_authority` enables Redis authority leases, Redis active-device ownership, Redis seek rate limiting, NATS control forwarding, PostgreSQL outbox, Kafka timeline logging, and authority recovery.
 
 `GET /healthz` still returns `ok`, and now includes:
 
@@ -38,7 +38,8 @@ X-Watch-Together-Room-Runtime: local_process
 | Durable room timeline | PostgreSQL outbox + Kafka | Only in `distributed_authority`; Kafka is a result log and recovery source, not a command ingress or online fan-out path. |
 | Authority recovery | Recovery service + Redis + Kafka + PostgreSQL outbox | Begins a recovering lease after expiry, replays Kafka, merges unpublished outbox rows, and completes a new active epoch. |
 | Control idempotency | Local memory or Redis request registry | `local_process` uses process-local deduplication. `distributed_authority` uses Redis `requestId` records and backfills recovered accepted requests after Kafka replay. |
-| Seek rate limiting | Local WebSocket handler memory | Still process-local; future phases should externalize or shard room authority. |
+| Seek rate limiting | Local memory or Redis control rate registry | `local_process` uses process-local throttling. `distributed_authority` uses Redis `wt:room:control_rate:{roomId}:seek:v1`. |
+| Observability | `internal/observability` | `/healthz`, `/readyz`, `/metrics`, Prometheus metrics, and worker metric hooks. |
 | Room metadata and membership | PostgreSQL | Durable business state. |
 | Media metadata | PostgreSQL | Durable catalog state. |
 | HLS files | Local/object storage via mediactl | Served through signed playback paths and Nginx/object storage depending on delivery mode. |
@@ -92,6 +93,7 @@ Redis keys:
 wt:room:authority:{roomId}:v1
 wt:room:active_device:{roomId}:{userId}:v1
 wt:room:control_request:{roomId}:{requestId}:v1
+wt:room:control_rate:{roomId}:seek:v1
 wt:room:presence:{roomId}:v1
 ```
 
@@ -100,6 +102,8 @@ The authority lease value contains `instanceId`, `epoch`, `status`, and `leaseUn
 The active-device lease stores `deviceId`, `instanceId`, `connectionId`, and `leaseUntilMs`. Disconnect and leave release only when both `deviceId` and `connectionId` match, preventing old sockets from clearing newer ownership.
 
 The control request registry stores recent `requestId` outcomes with `status=pending|accepted|rejected`, `authorityEpoch`, `seq`, accepted envelope, error text, and TTL. A duplicate accepted request returns the original accepted envelope. A duplicate pending request returns `room authority processing`.
+
+The control rate registry stores the current seek throttle reservation for a room. In `distributed_authority`, the authority instance reserves this key before applying seek. If the seek is rate-limited, the server returns current `room_state`, finalizes the request as rejected, and does not broadcast an accepted seek.
 
 The presence registry stores one online entry per room user. Internal values may include `deviceId`, `connectionId`, and `instanceId`, but WebSocket `room_presence` exposes only user-level fields: `userId`, `role`, `isHost`, and per-recipient `isSelf`.
 
@@ -129,6 +133,19 @@ Phase 5 hardening requires accepted controls in `distributed_authority` to write
 
 Heartbeat acks refresh Redis presence leases at `PRESENCE_REFRESH_INTERVAL_MS`. Join, leave, disconnect, active-device lease loss, and device switch publish a fresh user-level `room_presence` snapshot. Presence is runtime state only; it is not PostgreSQL membership and is not written to Kafka.
 
+## Phase 6 Observability Boundary
+
+Phase 6 adds:
+
+```text
+METRICS_ENABLED=true
+METRICS_ADDR=
+METRICS_PATH=/metrics
+READINESS_PATH=/readyz
+```
+
+`GET /healthz` remains lightweight liveness. `GET /readyz` reports JSON dependency readiness for PostgreSQL, Redis, NATS, Kafka, outbox, and recovery. `GET /metrics` exposes Prometheus metrics when enabled. `roomserver` exposes metrics on the main HTTP server; worker processes expose metrics only when `METRICS_ADDR` is set. The observability module only records and exposes runtime state; it does not participate in room authority, playback decisions, or recovery decisions.
+
 ## Multi-Instance Readiness After Phase 1
 
 Safe or mostly safe now:
@@ -137,13 +154,15 @@ Safe or mostly safe now:
 - Media signing when all instances share the same media signing secret.
 - Health diagnostics can identify which instance handled a request.
 - Cross-instance WebSocket broadcast fan-out for already-authoritative local events, when NATS Core is enabled.
+- Distributed seek rate limiting in `distributed_authority`.
+- Readiness and Prometheus metrics endpoints.
 
 Still not complete:
 
 - Automatic takeover before Redis lease expiry.
-- Distributed seek rate limiting beyond the authority instance.
 - Device-level presence management and full multi-device UI.
 - WebSocket connection migration between instances.
 - Kafka command-ingress logging.
+- OpenTelemetry tracing.
 
-See [distributed-architecture.md](./distributed-architecture.md) for the Phase 5 module map and data flows.
+See [distributed-architecture.md](./distributed-architecture.md) for the current module map, business flows, and monitoring data flow.

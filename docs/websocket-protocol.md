@@ -127,7 +127,7 @@ Implemented safeguards:
 - Non-host control attempts return an `error` event.
 - Stale `seq` values return the current `room_state`.
 - Duplicate non-empty `requestId` values are deduplicated for a short TTL. In `distributed_authority`, Redis stores `pending`, `accepted`, and `rejected` outcomes so duplicates can return the original accepted envelope or the same rejection semantics across instances.
-- `seek` events are rate-limited by `WS_SEEK_MIN_INTERVAL_MS`.
+- `seek` events are rate-limited by `WS_SEEK_MIN_INTERVAL_MS`. `local_process` uses process-local throttling; `distributed_authority` uses Redis `wt:room:control_rate:{roomId}:seek:v1`.
 - The broadcaster has bounded concurrency, per-client outbox capacity, enqueue timeouts, and room-state coalescing.
 - In `distributed_authority`, controls are accepted only from the current Redis active-device lease.
 - In `distributed_authority`, non-authority instances forward controls to the Redis-declared authority instance over NATS request/reply.

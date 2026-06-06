@@ -359,6 +359,85 @@ func TestWebSocketDistributedAuthorityFinalEpochFenceRejectsStaleApply(t *testin
 	}
 }
 
+func TestWebSocketDistributedAuthorityRateLimitsSeek(t *testing.T) {
+	broadcastBus := eventbus.NewMemoryRoomBroadcastBus()
+	defer broadcastBus.Close()
+	controlBus := eventbus.NewMemoryRoomControlBus()
+	defer controlBus.Close()
+
+	roomManager := room.NewManager()
+	createdRoom, err := roomManager.CreateRoom("user_a", "sample_001")
+	if err != nil {
+		t.Fatalf("create room: %v", err)
+	}
+	authority := newFakeAuthorityRegistry(createdRoom.ID(), "instance-a")
+	activeDevices := newFakeActiveDeviceRegistry()
+	server := newDistributedWebSocketServerWithHardening(
+		t,
+		roomManager,
+		"instance-a",
+		authority,
+		activeDevices,
+		broadcastBus,
+		controlBus,
+		nil,
+		newFakeControlRequestRegistry(),
+		nil,
+		timeline.NoopRecorder{},
+	)
+	defer server.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	host := mustDialWebSocket(t, ctx, wsURL(server.URL), "user_a")
+	defer host.Close(websocket.StatusNormalClosure, "test done")
+
+	mustJoinRoom(t, ctx, host, createdRoom.ID(), "user_a")
+	if envelope := mustReadEnvelope(t, ctx, host); envelope.Type != protocol.TypeRoomState {
+		t.Fatalf("expected host room_state, got %s", envelope.Type)
+	}
+
+	mustSendEnvelope(t, ctx, host, protocol.Envelope{
+		Type: protocol.TypeSeek,
+		Payload: mustJSONRaw(protocol.SeekPayload{
+			RoomID:     createdRoom.ID(),
+			UserID:     "user_a",
+			RequestID:  "distributed-seek-1",
+			PositionMs: 10_000,
+			Seq:        1,
+		}),
+	})
+	assertControlBroadcast(t, ctx, host, protocol.TypeSeek, 10_000, 2)
+
+	mustSendEnvelope(t, ctx, host, protocol.Envelope{
+		Type: protocol.TypeSeek,
+		Payload: mustJSONRaw(protocol.SeekPayload{
+			RoomID:     createdRoom.ID(),
+			UserID:     "user_a",
+			RequestID:  "distributed-seek-2",
+			PositionMs: 20_000,
+			Seq:        2,
+		}),
+	})
+
+	envelope := mustReadEnvelope(t, ctx, host)
+	if envelope.Type != protocol.TypeRoomState {
+		t.Fatalf("expected rate-limited distributed seek to return room_state, got %s", envelope.Type)
+	}
+	var payload protocol.RoomStatePayload
+	if err := json.Unmarshal(envelope.Payload, &payload); err != nil {
+		t.Fatalf("unmarshal room_state: %v", err)
+	}
+	if payload.PositionMs != 10_000 || payload.Seq != 2 {
+		t.Fatalf("expected previous seek state after rate limit, got %+v", payload)
+	}
+	state := createdRoom.StateSnapshot()
+	if state.PositionMs != 10_000 || state.Seq != 2 {
+		t.Fatalf("expected authority state to remain at first seek, got %+v", state)
+	}
+}
+
 func TestWebSocketDistributedAuthorityBroadcastsUserLevelPresenceAcrossInstances(t *testing.T) {
 	broadcastBus := eventbus.NewMemoryRoomBroadcastBus()
 	defer broadcastBus.Close()
@@ -543,6 +622,7 @@ func newDistributedWebSocketServerWithHardening(
 	handler.SetRoomBroadcastBus(instanceID, broadcastBus)
 	handler.SetDistributedAuthorityRuntime(instanceID, authority, activeDevices, controlBus, recorder)
 	handler.SetDistributedControlHardening(controlRequests, presence, 0)
+	handler.SetDistributedControlRateRegistry(newFakeControlRateRegistry())
 	handler.SetRoomAuthorityRecovery(recoverer)
 	if err := handler.SubscribeRoomBroadcasts(context.Background()); err != nil {
 		t.Fatalf("subscribe broadcasts: %v", err)
@@ -707,6 +787,56 @@ func (r *fakeControlRequestRegistry) Reserve(
 	}
 	r.records[key] = record
 	return record, true, nil
+}
+
+type fakeControlRateRegistry struct {
+	mu           sync.Mutex
+	reservations map[string]cache.ControlRateReservation
+}
+
+func newFakeControlRateRegistry() *fakeControlRateRegistry {
+	return &fakeControlRateRegistry{reservations: make(map[string]cache.ControlRateReservation)}
+}
+
+func (r *fakeControlRateRegistry) Reserve(
+	ctx context.Context,
+	roomID string,
+	controlType string,
+	interval time.Duration,
+	authorityEpoch int64,
+) (cache.ControlRateReservation, bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if interval <= 0 {
+		return cache.ControlRateReservation{}, true, nil
+	}
+	key := cache.ControlRateKey(roomID, controlType)
+	now := time.Now()
+	if existing, ok := r.reservations[key]; ok && existing.LeaseUntilMs > now.UnixMilli() {
+		return existing, false, nil
+	}
+	reservation := cache.ControlRateReservation{
+		RoomID:         roomID,
+		ControlType:    controlType,
+		AuthorityEpoch: authorityEpoch,
+		Token:          roomID + ":" + controlType,
+		ReservedAtMs:   now.UnixMilli(),
+		LeaseUntilMs:   now.Add(interval).UnixMilli(),
+	}
+	r.reservations[key] = reservation
+	return reservation, true, nil
+}
+
+func (r *fakeControlRateRegistry) ReleaseIfMatch(ctx context.Context, reservation cache.ControlRateReservation) (bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	key := cache.ControlRateKey(reservation.RoomID, reservation.ControlType)
+	existing, ok := r.reservations[key]
+	if !ok || existing.Token != reservation.Token {
+		return false, nil
+	}
+	delete(r.reservations, key)
+	return true, nil
 }
 
 func (r *fakeControlRequestRegistry) FinalizeAccepted(

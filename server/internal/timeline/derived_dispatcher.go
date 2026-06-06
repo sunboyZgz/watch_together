@@ -75,6 +75,7 @@ type DerivedDispatcher struct {
 	reader    MessageReader
 	publisher Publisher
 	topics    Topics
+	observer  WorkerObserver
 }
 
 func NewDerivedDispatcher(reader MessageReader, publisher Publisher, topics Topics) *DerivedDispatcher {
@@ -83,6 +84,13 @@ func NewDerivedDispatcher(reader MessageReader, publisher Publisher, topics Topi
 		publisher: publisher,
 		topics:    topics.Normalize(),
 	}
+}
+
+func (d *DerivedDispatcher) SetObserver(observer WorkerObserver) {
+	if d == nil {
+		return
+	}
+	d.observer = observer
 }
 
 func (d *DerivedDispatcher) Run(ctx context.Context) error {
@@ -115,8 +123,16 @@ func (d *DerivedDispatcher) DispatchMessage(ctx context.Context, message Message
 	}
 	for _, publication := range publications {
 		if err := d.publisher.Publish(ctx, publication.Topic, publication.Key, publication.Value); err != nil {
+			d.recordWorkerEvent("derivedworker", "publish_failed")
 			return err
 		}
+		d.recordWorkerEvent("derivedworker", "published")
 	}
 	return nil
+}
+
+func (d *DerivedDispatcher) recordWorkerEvent(worker string, result string) {
+	if d != nil && d.observer != nil {
+		d.observer.RecordWorkerEvent(worker, result)
+	}
 }

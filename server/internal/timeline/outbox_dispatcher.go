@@ -27,6 +27,11 @@ type OutboxDispatcher struct {
 	batchSize    int
 	pollInterval time.Duration
 	now          func() time.Time
+	observer     WorkerObserver
+}
+
+type WorkerObserver interface {
+	RecordWorkerEvent(worker string, result string)
 }
 
 func NewOutboxDispatcher(
@@ -48,6 +53,13 @@ func NewOutboxDispatcher(
 		pollInterval: pollInterval,
 		now:          time.Now,
 	}
+}
+
+func (d *OutboxDispatcher) SetObserver(observer WorkerObserver) {
+	if d == nil {
+		return
+	}
+	d.observer = observer
 }
 
 func (d *OutboxDispatcher) Run(ctx context.Context) error {
@@ -75,6 +87,7 @@ func (d *OutboxDispatcher) DispatchOnce(ctx context.Context) error {
 	}
 	for _, row := range rows {
 		if err := d.publisher.Publish(ctx, row.Topic, []byte(row.RoomID), row.Payload); err != nil {
+			d.recordWorkerEvent("outboxworker", "publish_failed")
 			nextAttempts := row.Attempts + 1
 			nextAttemptAt := d.now().Add(backoff(nextAttempts))
 			if markErr := d.store.MarkPublishFailed(ctx, row.ID, nextAttempts, err.Error(), nextAttemptAt); markErr != nil {
@@ -83,10 +96,19 @@ func (d *OutboxDispatcher) DispatchOnce(ctx context.Context) error {
 			continue
 		}
 		if err := d.store.MarkPublished(ctx, row.ID); err != nil {
+			d.recordWorkerEvent("outboxworker", "mark_published_failed")
 			log.Printf("timeline outbox mark published failed id=%s err=%v", row.ID, err)
+			continue
 		}
+		d.recordWorkerEvent("outboxworker", "published")
 	}
 	return nil
+}
+
+func (d *OutboxDispatcher) recordWorkerEvent(worker string, result string) {
+	if d != nil && d.observer != nil {
+		d.observer.RecordWorkerEvent(worker, result)
+	}
 }
 
 func backoff(attempts int) time.Duration {

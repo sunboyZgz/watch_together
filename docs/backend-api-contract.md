@@ -61,6 +61,34 @@ Returns plain text:
 ok
 ```
 
+Includes runtime headers:
+
+```text
+X-Watch-Together-Room-Runtime: local_process
+X-Watch-Together-Instance-ID: roomserver-a
+```
+
+### `GET /readyz`
+
+Returns JSON dependency readiness. Status is `200 OK` when all required dependencies are ready and `503 Service Unavailable` when a required dependency is unavailable.
+
+```json
+{
+  "status": "ready",
+  "appEnv": "local",
+  "instanceId": "roomserver-a",
+  "roomRuntimeMode": "distributed_authority",
+  "dependencies": [
+    { "name": "postgres", "status": "ok", "required": true },
+    { "name": "redis", "status": "ok", "required": true }
+  ]
+}
+```
+
+### `GET /metrics`
+
+Available when `METRICS_ENABLED=true`. Returns Prometheus text format and should be exposed only to internal monitoring infrastructure.
+
 ## Auth
 
 ### `POST /auth/register`

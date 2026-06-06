@@ -97,6 +97,10 @@ AUTHORITY_RENEW_INTERVAL_MS=10000
 AUTHORITY_TAKEOVER_SCAN_INTERVAL_MS=30000
 AUTHORITY_RECOVERY_TIMEOUT_MS=5000
 KAFKA_REPLAY_TIMEOUT_MS=1000
+METRICS_ENABLED=true
+METRICS_ADDR=
+METRICS_PATH=/metrics
+READINESS_PATH=/readyz
 MEDIA_DELIVERY_MODE=signed_redirect
 MEDIA_PLAYBACK_SIGNING_SECRET=<secret>
 MEDIA_PLAYBACK_URL_TTL_SECONDS=7200
@@ -141,7 +145,21 @@ Distributed control hardening settings:
 
 Presence is runtime state only. It is stored in Redis, broadcast as user-level `room_presence` snapshots, and is not PostgreSQL membership or a Kafka timeline event.
 
-See [distributed-architecture.md](./distributed-architecture.md) for the Phase 5 module map and data flows.
+Distributed seek rate limiting:
+
+- `WS_SEEK_MIN_INTERVAL_MS` still controls the minimum interval between accepted seek controls.
+- `local_process` uses process-local throttling.
+- `distributed_authority` uses Redis `wt:room:control_rate:{roomId}:seek:v1`, so forwarded controls and recovered authority instances share the same limit.
+
+Observability settings:
+
+- `METRICS_ENABLED` controls whether `METRICS_PATH` is registered.
+- `METRICS_ADDR` is optional for worker processes. Leave it empty for `roomserver`, which exposes metrics on the main HTTP server; set it for workers such as `:9091`.
+- `METRICS_PATH` defaults to `/metrics` and exposes Prometheus metrics.
+- `READINESS_PATH` defaults to `/readyz` and reports dependency readiness as JSON.
+- `/healthz` remains lightweight liveness and keeps the runtime headers.
+
+See [distributed-architecture.md](./distributed-architecture.md) for the current module map, business flows, and monitoring data flow.
 
 Worker examples:
 
@@ -162,6 +180,8 @@ Health check:
 
 ```text
 GET http://127.0.0.1:8080/healthz
+GET http://127.0.0.1:8080/readyz
+GET http://127.0.0.1:8080/metrics
 ```
 
 The response body remains `ok`. Health responses include `X-Watch-Together-Room-Runtime` and include `X-Watch-Together-Instance-ID` when `SERVER_INSTANCE_ID` is configured.
@@ -217,6 +237,14 @@ cd android
 ./gradlew assembleProdRelease
 ```
 
+On Windows, when Java is available through Android Studio but not on `PATH`, run unit tests with:
+
+```powershell
+cd android
+$env:JAVA_HOME='C:\Program Files\Android\Android Studio\jbr'
+./gradlew testLocalDebugUnitTest
+```
+
 ## Production Compose
 
 Production deployment uses `server/compose.prod.yaml`. Its intended boundary is:
@@ -225,6 +253,7 @@ Production deployment uses `server/compose.prod.yaml`. Its intended boundary is:
 - Go `roomserver`, workers, PostgreSQL, Redis, Kafka, NATS, and MinIO stay on the Docker network.
 - NATS stays on the Docker network and is used for WebSocket fan-out and internal control forwarding.
 - Kafka stays on the Docker network and stores durable timeline result events.
+- `/metrics` should be scraped from an internal network or blocked at the public reverse proxy.
 - Media delivery defaults to `MEDIA_DELIVERY_MODE=nginx_auth_request`.
 
 See [server/deploy/README.md](../server/deploy/README.md) for deployment-specific commands and Nginx details.

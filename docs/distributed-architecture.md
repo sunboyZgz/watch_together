@@ -1,6 +1,6 @@
 # Distributed Architecture
 
-Phase 4 introduced the distributed room infrastructure MVP while keeping the public HTTP API and playback control payloads small. `local_process` remains supported. `distributed_authority` adds Redis authority leases, Redis active-device ownership, NATS Core internal routing, PostgreSQL outbox, and Kafka timeline topics. Phase 5 adds authority recovery and hardening: expired authority leases can be fenced, recovered from Kafka canonical timeline events, completed as a new active authority epoch, resumed without moving WebSocket connections, protected by Redis `requestId` idempotency, and exposed through user-level Redis presence.
+Phase 4 introduced the distributed room infrastructure MVP while keeping the public HTTP API and playback control payloads small. `local_process` remains supported. `distributed_authority` adds Redis authority leases, Redis active-device ownership, NATS Core internal routing, PostgreSQL outbox, and Kafka timeline topics. Phase 5 adds authority recovery and hardening: expired authority leases can be fenced, recovered from Kafka canonical timeline events, completed as a new active authority epoch, resumed without moving WebSocket connections, protected by Redis `requestId` idempotency, and exposed through user-level Redis presence. Phase 6 adds distributed seek rate limiting and observability: seek throttling moves to Redis in `distributed_authority`, `/readyz` reports dependency readiness, and `/metrics` exposes Prometheus metrics.
 
 ## Architecture Mode
 
@@ -16,15 +16,48 @@ Backend mode in `distributed_authority`:
 
 - `transport` owns HTTP and WebSocket protocol handling.
 - `room` owns in-process room state for the authoritative instance.
-- `cache` owns Redis latest snapshots, authority leases, active-device leases, control request idempotency, and user-level presence.
+- `cache` owns Redis latest snapshots, authority leases, active-device leases, control request idempotency, distributed seek rate limiting, and user-level presence.
 - `eventbus` owns NATS Core broadcast and control request/reply.
 - `store` owns PostgreSQL durable business state and outbox rows.
 - `timeline` owns Kafka JSON v1 event shape, outbox dispatch, and derived-topic dispatch.
 - `cmd/outboxworker` publishes outbox rows to the canonical Kafka topic.
 - `cmd/derivedworker` derives control-result and membership topics from the canonical timeline.
 - `recovery` owns authority takeover, Kafka replay, unpublished outbox merge, and recovered `room.Manager` registration.
+- `observability` owns readiness snapshots, Prometheus metrics, and worker metric hooks.
 
-## Module View
+## Business Architecture
+
+```mermaid
+flowchart TD
+  Login[Login and register]
+  Home[Home summary and media catalog]
+  Create[Create room]
+  Join[Join room by code]
+  WSJoin[WebSocket join_room]
+  Presence[room_presence online snapshot]
+  Control[Host playback controls]
+  Authority[Authority decision]
+  Timeline[Kafka room timeline]
+  Derived[Derived business topics]
+  Recovery[Authority recovery]
+  Progress[Low-frequency progress]
+
+  Login --> Home
+  Home --> Create
+  Home --> Join
+  Create --> WSJoin
+  Join --> WSJoin
+  WSJoin --> Presence
+  WSJoin --> Control
+  Control --> Authority
+  Authority --> Presence
+  Authority --> Timeline
+  Timeline --> Derived
+  Timeline --> Recovery
+  Home --> Progress
+```
+
+## Core Module View
 
 ```mermaid
 flowchart LR
@@ -41,6 +74,10 @@ flowchart LR
   Kafka[(Kafka)]
   Derived[cmd/derivedworker]
   Recovery[recovery service]
+  Obs[observability]
+  Metrics[Prometheus]
+  Mediactl[mediactl]
+  Storage[(Media storage)]
 
   Android -->|HTTP bootstrap| HTTP
   Android -->|WebSocket envelopes| WS
@@ -50,7 +87,7 @@ flowchart LR
   HTTP -->|register local room mirror| Room
   HTTP -->|claim authority lease| Redis
   WS -->|local authoritative apply| Room
-  WS -->|authority, active-device, requestId, presence| Redis
+  WS -->|authority, active-device, requestId, rate-limit, presence| Redis
   WS -->|control request/reply| NATS
   WS -->|broadcast accepted envelopes| NATS
   WS -->|timeline result event| Outbox
@@ -64,17 +101,25 @@ flowchart LR
   Recovery -->|replay canonical events| Kafka
   Recovery -->|merge pending/publishing rows| Outbox
   Recovery -->|register recovered state| Room
+  Mediactl -->|ingest HLS| Storage
+  HTTP -->|signed playback| Storage
+  App -->|health/readiness/metrics| Obs
+  WS -->|control, presence, connection metrics| Obs
+  OutboxWorker -->|worker metrics| Obs
+  Derived -->|worker metrics| Obs
+  Metrics -->|scrape| Obs
 ```
 
 ## Runtime Boundaries
 
-| Boundary | Owner | Phase 5 role |
+| Boundary | Owner | Phase 6 role |
 | --- | --- | --- |
 | Local WebSocket connection | `roomserver` process | Never leaves process memory. |
 | Latest room snapshot | Redis `wt:room:state:{roomId}:v1` | Recovery-oriented cache, not authority. |
-| Room authority lease | Redis `wt:room:authority:{roomId}:v1` | Identifies the instance allowed to mutate room playback state; Phase 5 adds `epoch` and `status`. |
+| Room authority lease | Redis `wt:room:authority:{roomId}:v1` | Identifies the instance allowed to mutate room playback state. |
 | Active device lease | Redis `wt:room:active_device:{roomId}:{userId}:v1` | Guards one active client device per room user. |
 | Control request idempotency | Redis `wt:room:control_request:{roomId}:{requestId}:v1` | Stores pending, accepted, and rejected request outcomes across instances. |
+| Distributed seek rate limit | Redis `wt:room:control_rate:{roomId}:seek:v1` | Enforces seek min interval across authority takeovers and forwarded controls. |
 | User-level presence | Redis `wt:room:presence:{roomId}:v1` | Runtime online occupancy by user; does not expose device, connection, or instance IDs. |
 | Durable room business state | PostgreSQL | Rooms, members, media, users, progress. |
 | Reliable Kafka compensation | PostgreSQL outbox | Pending canonical timeline events. |
@@ -82,6 +127,7 @@ flowchart LR
 | Derived topics | Kafka | `wt.room.control_result.v1`, `wt.room.membership.v1`. |
 | Realtime internal routing | NATS Core | Broadcast fan-out and non-authority control request/reply. |
 | Recovery replay | Kafka + PostgreSQL outbox | Rebuilds authority state after an expired authority lease. |
+| Monitoring | `observability` + Prometheus | `/healthz`, `/readyz`, `/metrics`, and worker metric hooks. |
 
 ## Control Flow
 
@@ -107,6 +153,7 @@ sequenceDiagram
     B->>N: request control to A
     N->>A: forwarded original envelope + connection context
     A->>R: validate active-device lease
+    A->>R: reserve seek rate limit when type=seek
     A->>A: apply to room.Manager
     A->>P: insert room_timeline_outbox
     A->>R: finalize requestId accepted
@@ -115,6 +162,7 @@ sequenceDiagram
     N-->>B: reply accepted envelope
     B-->>C: accepted envelope
   else B is authority
+    B->>R: reserve seek rate limit when type=seek
     B->>B: apply to room.Manager
     B->>P: insert room_timeline_outbox
     B->>R: finalize requestId accepted
@@ -123,6 +171,35 @@ sequenceDiagram
   N-->>B: realtime broadcast to local clients
   P->>K: outboxworker publishes canonical event
   K->>K: derivedworker publishes domain topics
+```
+
+## Monitoring Flow
+
+```mermaid
+flowchart LR
+  Roomserver[roomserver]
+  Ready[/GET /readyz/]
+  MetricsEndpoint[/GET /metrics/]
+  WorkerMetrics[/worker METRICS_ADDR metrics/]
+  Prom[Prometheus]
+  Grafana[Grafana and alerts]
+  WS[WebSocket handler]
+  Recovery[recovery service]
+  OutboxWorker[outboxworker]
+  DerivedWorker[derivedworker]
+  Obs[observability]
+
+  Roomserver --> Ready
+  Roomserver --> MetricsEndpoint
+  WS -->|connections, controls, seek limits, presence| Obs
+  Recovery -->|recovery attempts| Obs
+  OutboxWorker -->|publish success/failure| Obs
+  DerivedWorker -->|derived publish success/failure| Obs
+  Obs --> MetricsEndpoint
+  Obs --> WorkerMetrics
+  Prom -->|scrape| MetricsEndpoint
+  Prom -->|scrape| WorkerMetrics
+  Prom --> Grafana
 ```
 
 ## Recovery Flow
@@ -182,6 +259,13 @@ Local authoritative control:
 6. Server broadcasts the accepted WebSocket envelope locally and through NATS.
 7. If the outbox write fails in `distributed_authority`, the accepted envelope is not broadcast and the client receives an error or current `room_state`.
 
+Distributed seek rate limiting:
+
+1. `local_process` keeps process-local seek limiting.
+2. `distributed_authority` reserves `wt:room:control_rate:{roomId}:seek:v1` before applying seek.
+3. A rate-limited seek returns current `room_state`, finalizes the request as rejected, and does not broadcast an accepted seek.
+4. If apply later fails, the matching Redis reservation token is released.
+
 Non-authority control forwarding:
 
 1. Ingress instance reserves Redis requestId and validates the source active-device lease.
@@ -225,6 +309,14 @@ Realtime fan-out:
 3. Subscribers drop their own `instanceId`.
 4. Remote events are delivered only to local WebSocket clients for that room and do not mutate local authority state.
 
+Observability:
+
+1. `/healthz` stays a lightweight liveness endpoint and keeps runtime headers.
+2. `/readyz` reports configured dependency readiness for PostgreSQL, Redis, NATS, Kafka, outbox, and recovery.
+3. `/metrics` exposes Prometheus metrics when `METRICS_ENABLED=true`.
+4. `roomserver` serves metrics on the main HTTP server; `outboxworker` and `derivedworker` serve metrics when `METRICS_ADDR` is set.
+5. Metrics include WebSocket connections, control accepted/rejected counts, seek rate-limit decisions, NATS room events, authority recovery attempts, presence online gauge, and worker publish results.
+
 Authority recovery:
 
 1. A join, room state request, control event, or low-frequency scanner discovers a missing or expired authority lease.
@@ -237,11 +329,11 @@ Authority recovery:
 8. Redis authority is completed as `status=active` for the new epoch.
 9. NATS control forwarding and broadcast messages carry `authorityEpoch`; stale epoch messages are rejected or dropped.
 
-## Not Phase 5 Goals
+## Not Phase 6 Goals
 
 - Kafka is not the online broadcast final hop.
 - Kafka is not the command ingress log.
 - JetStream is not enabled.
-- Distributed seek rate-limit is not complete.
 - Device-level presence management and full multi-device UI are not complete.
 - WebSocket connection objects never move between instances.
+- OpenTelemetry tracing is not enabled.
