@@ -118,6 +118,20 @@ services:
       METRICS_ADDR: ${ROOMSERVER_METRICS_ADDR:-}
       METRICS_PATH: ${METRICS_PATH:-/metrics}
       READINESS_PATH: ${READINESS_PATH:-/readyz}
+      SERVICE_NAME: ${SERVICE_NAME:-watch-together-roomserver}
+      SERVICE_VERSION: ${SERVICE_VERSION:-dev}
+      INTERNAL_RPC_PATH_PREFIX: ${INTERNAL_RPC_PATH_PREFIX:-/internal.rpc}
+      INTERNAL_RPC_TIMEOUT_MS: ${INTERNAL_RPC_TIMEOUT_MS:-1000}
+      INTERNAL_RPC_AUTH_TOKEN: ${INTERNAL_RPC_AUTH_TOKEN:-}
+      SERVICE_DISCOVERY_MODE: ${SERVICE_DISCOVERY_MODE:-static}
+      MEDIA_SERVICE_MODE: ${MEDIA_SERVICE_MODE:-local}
+      MEDIA_SERVICE_ADDR: ${MEDIA_SERVICE_ADDR:-http://mediaservice:8090}
+      TIMELINE_SERVICE_MODE: ${TIMELINE_SERVICE_MODE:-local}
+      TIMELINE_SERVICE_ADDR: ${TIMELINE_SERVICE_ADDR:-http://timelineservice:8090}
+      OTEL_TRACING_ENABLED: ${OTEL_TRACING_ENABLED:-false}
+      OTEL_SERVICE_NAME: ${OTEL_SERVICE_NAME:-watch-together-roomserver}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+      OTEL_TRACE_SAMPLE_RATIO: ${OTEL_TRACE_SAMPLE_RATIO:-0.1}
       AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:-watch_together_local_dev_jwt_secret_change_me}
       DATABASE_URL: postgres://app:app@postgres:5432/anime_watch_dev?sslmode=disable
       REDIS_ADDR: redis:6380
@@ -182,6 +196,62 @@ services:
       METRICS_ADDR: ${DERIVED_WORKER_METRICS_ADDR:-:9093}
       METRICS_PATH: ${METRICS_PATH:-/metrics}
     command: ["/app/derivedworker"]
+
+  mediaservice:
+    profiles: ["services"]
+    image: watch-together-roomserver:dev
+    container_name: anime-watch-mediaservice
+    restart: unless-stopped
+    depends_on:
+      - postgres
+      - minio-init
+    env_file:
+      - .env
+    environment:
+      APP_ENV: local
+      SERVICE_NAME: watch-together-mediaservice
+      SERVICE_VERSION: ${SERVICE_VERSION:-dev}
+      INTERNAL_RPC_ADDR: :8090
+      INTERNAL_RPC_PATH_PREFIX: ${INTERNAL_RPC_PATH_PREFIX:-/internal.rpc}
+      INTERNAL_RPC_AUTH_TOKEN: ${INTERNAL_RPC_AUTH_TOKEN:-}
+      METRICS_ENABLED: ${METRICS_ENABLED:-true}
+      METRICS_PATH: ${METRICS_PATH:-/metrics}
+      READINESS_PATH: ${READINESS_PATH:-/readyz}
+      DATABASE_URL: postgres://app:app@postgres:5432/anime_watch_dev?sslmode=disable
+      MEDIA_STORAGE_ENDPOINT: http://minio:9000
+      MEDIA_STORAGE_BUCKET: watch-together-media
+      MEDIA_STORAGE_REGION: auto
+      MEDIA_STORAGE_ACCESS_KEY_ID: minioadmin
+      MEDIA_STORAGE_SECRET_ACCESS_KEY: minioadmin
+      MEDIA_STORAGE_FORCE_PATH_STYLE: "true"
+    command: ["/app/mediaservice"]
+
+  timelineservice:
+    profiles: ["services"]
+    image: watch-together-roomserver:dev
+    container_name: anime-watch-timelineservice
+    restart: unless-stopped
+    depends_on:
+      - postgres
+      - kafka
+    env_file:
+      - .env
+    environment:
+      APP_ENV: local
+      SERVICE_NAME: watch-together-timelineservice
+      SERVICE_VERSION: ${SERVICE_VERSION:-dev}
+      INTERNAL_RPC_ADDR: :8090
+      INTERNAL_RPC_PATH_PREFIX: ${INTERNAL_RPC_PATH_PREFIX:-/internal.rpc}
+      INTERNAL_RPC_AUTH_TOKEN: ${INTERNAL_RPC_AUTH_TOKEN:-}
+      METRICS_ENABLED: ${METRICS_ENABLED:-true}
+      METRICS_PATH: ${METRICS_PATH:-/metrics}
+      READINESS_PATH: ${READINESS_PATH:-/readyz}
+      DATABASE_URL: postgres://app:app@postgres:5432/anime_watch_dev?sslmode=disable
+      KAFKA_BROKERS: ${KAFKA_BROKERS:-kafka:9092}
+      KAFKA_CLIENT_ID: ${KAFKA_CLIENT_ID:-watch-together-timelineservice}
+      KAFKA_TOPIC_ROOM_TIMELINE: ${KAFKA_TOPIC_ROOM_TIMELINE:-wt.room.timeline.v1}
+      KAFKA_REPLAY_TIMEOUT_MS: ${KAFKA_REPLAY_TIMEOUT_MS:-1000}
+    command: ["/app/timelineservice"]
 
   nginx:
     profiles: ["app"]

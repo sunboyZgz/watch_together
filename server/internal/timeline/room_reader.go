@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/segmentio/kafka-go"
+	"go.opentelemetry.io/otel"
 )
 
 type RoomEventReader interface {
@@ -48,6 +49,8 @@ func NewKafkaRoomEventReader(
 }
 
 func (r *KafkaRoomEventReader) ReadRoomEvents(ctx context.Context, roomID string) ([]Event, error) {
+	ctx, span := otel.Tracer("watch_together/kafka").Start(ctx, "kafka.read_room_events")
+	defer span.End()
 	if r == nil || len(r.brokers) == 0 {
 		return nil, errors.New("kafka room event reader is disabled")
 	}

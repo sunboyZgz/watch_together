@@ -101,6 +101,22 @@ METRICS_ENABLED=true
 METRICS_ADDR=
 METRICS_PATH=/metrics
 READINESS_PATH=/readyz
+SERVICE_NAME=watch-together-roomserver
+SERVICE_VERSION=dev
+INTERNAL_RPC_ENABLED=false
+INTERNAL_RPC_ADDR=:8090
+INTERNAL_RPC_PATH_PREFIX=/internal.rpc
+INTERNAL_RPC_TIMEOUT_MS=1000
+INTERNAL_RPC_AUTH_TOKEN=
+SERVICE_DISCOVERY_MODE=static
+MEDIA_SERVICE_MODE=local
+MEDIA_SERVICE_ADDR=
+TIMELINE_SERVICE_MODE=local
+TIMELINE_SERVICE_ADDR=
+OTEL_TRACING_ENABLED=false
+OTEL_SERVICE_NAME=watch-together-roomserver
+OTEL_EXPORTER_OTLP_ENDPOINT=
+OTEL_TRACE_SAMPLE_RATIO=0.1
 MEDIA_DELIVERY_MODE=signed_redirect
 MEDIA_PLAYBACK_SIGNING_SECRET=<secret>
 MEDIA_PLAYBACK_URL_TTL_SECONDS=7200
@@ -159,6 +175,15 @@ Observability settings:
 - `READINESS_PATH` defaults to `/readyz` and reports dependency readiness as JSON.
 - `/healthz` remains lightweight liveness and keeps the runtime headers.
 
+Service foundation settings:
+
+- `SERVICE_NAME` and `SERVICE_VERSION` identify the current process in logs, internal RPC metadata, and traces.
+- `INTERNAL_RPC_*` configures optional ConnectRPC service endpoints. `INTERNAL_RPC_AUTH_TOKEN` protects internal calls when configured and is required for production internal RPC.
+- `SERVICE_DISCOVERY_MODE=static` is the only supported discovery mode in Phase 7.
+- `MEDIA_SERVICE_MODE` and `TIMELINE_SERVICE_MODE` accept `local` or `rpc`. `local` keeps current in-process adapters. `rpc` calls `MEDIA_SERVICE_ADDR` or `TIMELINE_SERVICE_ADDR`.
+- `OTEL_TRACING_ENABLED` turns on OpenTelemetry tracing. `OTEL_EXPORTER_OTLP_ENDPOINT` points at the internal OTLP collector, and `OTEL_TRACE_SAMPLE_RATIO` must be between `0` and `1`.
+- Phase 7 keeps one PostgreSQL database. Table owners and future split rules are documented in [Database Ownership](./database-ownership.md).
+
 See [distributed-architecture.md](./distributed-architecture.md) for the current module map, business flows, and monitoring data flow.
 
 Worker examples:
@@ -167,6 +192,8 @@ Worker examples:
 cd server
 APP_ENV=local go run ./cmd/outboxworker
 APP_ENV=local go run ./cmd/derivedworker
+APP_ENV=local INTERNAL_RPC_ADDR=:8090 go run ./cmd/mediaservice
+APP_ENV=local INTERNAL_RPC_ADDR=:8091 go run ./cmd/timelineservice
 ```
 
 Start the server:

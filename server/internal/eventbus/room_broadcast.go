@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/nats-io/nats.go"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/propagation"
 )
 
 const (
@@ -188,6 +190,8 @@ func OpenNATSRoomBroadcastBus(config NATSConfig) (*NATSRoomBroadcastBus, error) 
 }
 
 func (b *NATSRoomBroadcastBus) PublishRoomEnvelope(ctx context.Context, event RoomBroadcastEvent) error {
+	ctx, span := otel.Tracer("watch_together/nats").Start(ctx, "nats.broadcast.publish")
+	defer span.End()
 	if b == nil || b.conn == nil {
 		return ErrEventBusDisabled
 	}
@@ -200,7 +204,13 @@ func (b *NATSRoomBroadcastBus) PublishRoomEnvelope(ctx context.Context, event Ro
 	}
 	done := make(chan error, 1)
 	go func() {
-		done <- b.conn.Publish(b.subject, data)
+		message := &nats.Msg{
+			Subject: b.subject,
+			Data:    data,
+			Header:  nats.Header{},
+		}
+		otel.GetTextMapPropagator().Inject(ctx, propagation.HeaderCarrier(message.Header))
+		done <- b.conn.PublishMsg(message)
 	}()
 	select {
 	case <-ctx.Done():
@@ -218,11 +228,14 @@ func (b *NATSRoomBroadcastBus) SubscribeRoomBroadcasts(ctx context.Context, hand
 		return nil
 	}
 	sub, err := b.conn.Subscribe(b.subject, func(message *nats.Msg) {
+		messageCtx := otel.GetTextMapPropagator().Extract(context.Background(), propagation.HeaderCarrier(message.Header))
+		messageCtx, span := otel.Tracer("watch_together/nats").Start(messageCtx, "nats.broadcast.receive")
+		defer span.End()
 		event, err := DecodeRoomBroadcastEvent(message.Data)
 		if err != nil {
 			return
 		}
-		handler(context.Background(), event)
+		handler(messageCtx, event)
 	})
 	if err != nil {
 		return err

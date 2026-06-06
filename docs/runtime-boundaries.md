@@ -1,6 +1,6 @@
 # Runtime Boundaries
 
-This document records the runtime ownership boundaries for the room system. `local_process` remains the default runtime. Phase 4 adds a `distributed_authority` MVP for multi-instance room authority, Phase 5 adds fenced authority recovery from the Kafka canonical timeline, and Phase 6 adds distributed seek rate limiting plus observability.
+This document records the runtime ownership boundaries for the room system. `local_process` remains the default runtime. Phase 4 adds a `distributed_authority` MVP for multi-instance room authority, Phase 5 adds fenced authority recovery from the Kafka canonical timeline, Phase 6 adds distributed seek rate limiting plus observability, and Phase 7 adds service foundation boundaries with optional media/timeline RPC adapters and logical database ownership.
 
 ## Phase 1 Boundary Markers
 
@@ -40,6 +40,10 @@ X-Watch-Together-Room-Runtime: local_process
 | Control idempotency | Local memory or Redis request registry | `local_process` uses process-local deduplication. `distributed_authority` uses Redis `requestId` records and backfills recovered accepted requests after Kafka replay. |
 | Seek rate limiting | Local memory or Redis control rate registry | `local_process` uses process-local throttling. `distributed_authority` uses Redis `wt:room:control_rate:{roomId}:seek:v1`. |
 | Observability | `internal/observability` | `/healthz`, `/readyz`, `/metrics`, Prometheus metrics, and worker metric hooks. |
+| Service foundation metadata | `internal/servicekit` | Request id, service name/version, deadlines, internal auth, and trace metadata. |
+| Optional internal RPC | ConnectRPC helper layer | `media` and `timeline` can run through local adapters or optional RPC services. |
+| OpenTelemetry tracing | `internal/telemetry` | Optional traces across HTTP, WebSocket control, RPC, Redis, NATS, Kafka, and PostgreSQL. |
+| Logical database ownership | PostgreSQL + docs | Phase 7 assigns table owners but does not physically split the database. |
 | Room metadata and membership | PostgreSQL | Durable business state. |
 | Media metadata | PostgreSQL | Durable catalog state. |
 | HLS files | Local/object storage via mediactl | Served through signed playback paths and Nginx/object storage depending on delivery mode. |
@@ -146,6 +150,35 @@ READINESS_PATH=/readyz
 
 `GET /healthz` remains lightweight liveness. `GET /readyz` reports JSON dependency readiness for PostgreSQL, Redis, NATS, Kafka, outbox, and recovery. `GET /metrics` exposes Prometheus metrics when enabled. `roomserver` exposes metrics on the main HTTP server; worker processes expose metrics only when `METRICS_ADDR` is set. The observability module only records and exposes runtime state; it does not participate in room authority, playback decisions, or recovery decisions.
 
+## Phase 7 Service Foundation Boundary
+
+Phase 7 adds:
+
+```text
+SERVICE_NAME=watch-together-roomserver
+SERVICE_VERSION=dev
+INTERNAL_RPC_ENABLED=false
+INTERNAL_RPC_ADDR=:8090
+INTERNAL_RPC_PATH_PREFIX=/internal.rpc
+INTERNAL_RPC_TIMEOUT_MS=1000
+INTERNAL_RPC_AUTH_TOKEN=
+SERVICE_DISCOVERY_MODE=static
+MEDIA_SERVICE_MODE=local
+MEDIA_SERVICE_ADDR=
+TIMELINE_SERVICE_MODE=local
+TIMELINE_SERVICE_ADDR=
+OTEL_TRACING_ENABLED=false
+OTEL_SERVICE_NAME=watch-together-roomserver
+OTEL_EXPORTER_OTLP_ENDPOINT=
+OTEL_TRACE_SAMPLE_RATIO=0.1
+```
+
+`MEDIA_SERVICE_MODE` and `TIMELINE_SERVICE_MODE` accept `local` or `rpc`. `local` keeps current in-process adapters. `rpc` calls optional `cmd/mediaservice` or `cmd/timelineservice` over ConnectRPC. Service discovery is static endpoint configuration in this phase; Consul, etcd, and Kubernetes service discovery integration are not required by the code.
+
+OpenTelemetry tracing is opt-in. Trace metadata can cross internal RPC, NATS, and Kafka boundaries, but it is not exposed in Android HTTP/WebSocket payloads.
+
+Database ownership is logical only. PostgreSQL remains a single database, but table owners and cross-context access rules are documented in [Database Ownership](./database-ownership.md). Future physical database splitting must replace cross-context writes and reads with service calls, events, or read models first.
+
 ## Multi-Instance Readiness After Phase 1
 
 Safe or mostly safe now:
@@ -163,6 +196,7 @@ Still not complete:
 - Device-level presence management and full multi-device UI.
 - WebSocket connection migration between instances.
 - Kafka command-ingress logging.
-- OpenTelemetry tracing.
+- Physical PostgreSQL splitting by service.
+- Extracting `room authority` to a standalone microservice.
 
 See [distributed-architecture.md](./distributed-architecture.md) for the current module map, business flows, and monitoring data flow.

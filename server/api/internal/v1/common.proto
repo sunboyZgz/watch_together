@@ -1,0 +1,17 @@
+syntax = "proto3";
+
+package watch_together.internal.v1;
+
+option go_package = "watch_together/server/api/internal/v1;internalv1";
+
+message RequestMetadata {
+  string request_id = 1;
+  string service_name = 2;
+  string service_version = 3;
+  string traceparent = 4;
+}
+
+message CommonError {
+  string code = 1;
+  string message = 2;
+}

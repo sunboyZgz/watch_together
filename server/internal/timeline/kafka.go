@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/segmentio/kafka-go"
+	"go.opentelemetry.io/otel"
 )
 
 type Publisher interface {
@@ -46,6 +47,8 @@ func NewKafkaPublisher(brokers []string, clientID string) (*KafkaPublisher, erro
 }
 
 func (p *KafkaPublisher) Publish(ctx context.Context, topic string, key []byte, value []byte) error {
+	ctx, span := otel.Tracer("watch_together/kafka").Start(ctx, "kafka.publish."+topic)
+	defer span.End()
 	if p == nil || p.writer == nil {
 		return errors.New("kafka publisher is disabled")
 	}

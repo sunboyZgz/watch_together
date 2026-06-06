@@ -30,6 +30,10 @@ type ServerRuntimeConfig struct {
 	OutboxWorker      OutboxWorkerConfig
 	AuthorityRecovery AuthorityRecoveryConfig
 	Observability     ObservabilityConfig
+	Service           ServiceConfig
+	InternalRPC       InternalRPCConfig
+	ServiceClients    ServiceClientsConfig
+	Telemetry         TelemetryConfig
 	Media             MediaPlaybackConfig
 }
 
@@ -98,6 +102,34 @@ type ObservabilityConfig struct {
 	ReadinessPath  string
 }
 
+type ServiceConfig struct {
+	Name    string
+	Version string
+}
+
+type InternalRPCConfig struct {
+	Enabled    bool
+	Addr       string
+	PathPrefix string
+	TimeoutMs  int
+	AuthToken  string
+}
+
+type ServiceClientsConfig struct {
+	DiscoveryMode string
+	MediaMode     string
+	MediaAddr     string
+	TimelineMode  string
+	TimelineAddr  string
+}
+
+type TelemetryConfig struct {
+	TracingEnabled   bool
+	ServiceName      string
+	OTLPEndpoint     string
+	TraceSampleRatio float64
+}
+
 type MediaPlaybackConfig struct {
 	DeliveryMode           string
 	SigningSecret          string
@@ -156,6 +188,22 @@ func LoadServerRuntimeConfig(configDir string) (ServerRuntimeConfig, error) {
 		"METRICS_ADDR":                          "",
 		"METRICS_PATH":                          "/metrics",
 		"READINESS_PATH":                        "/readyz",
+		"SERVICE_NAME":                          "watch-together-roomserver",
+		"SERVICE_VERSION":                       "dev",
+		"INTERNAL_RPC_ENABLED":                  false,
+		"INTERNAL_RPC_ADDR":                     ":8090",
+		"INTERNAL_RPC_PATH_PREFIX":              "/internal.rpc",
+		"INTERNAL_RPC_TIMEOUT_MS":               1000,
+		"INTERNAL_RPC_AUTH_TOKEN":               "",
+		"SERVICE_DISCOVERY_MODE":                "static",
+		"MEDIA_SERVICE_MODE":                    "local",
+		"MEDIA_SERVICE_ADDR":                    "",
+		"TIMELINE_SERVICE_MODE":                 "local",
+		"TIMELINE_SERVICE_ADDR":                 "",
+		"OTEL_TRACING_ENABLED":                  false,
+		"OTEL_SERVICE_NAME":                     "watch-together-roomserver",
+		"OTEL_EXPORTER_OTLP_ENDPOINT":           "",
+		"OTEL_TRACE_SAMPLE_RATIO":               "0.1",
 		"MEDIA_DELIVERY_MODE":                   "signed_redirect",
 		"MEDIA_PLAYBACK_URL_TTL_SECONDS":        7200,
 		"MEDIA_STORAGE_FORCE_PATH_STYLE":        "true",
@@ -210,6 +258,22 @@ func LoadServerRuntimeConfig(configDir string) (ServerRuntimeConfig, error) {
 		"METRICS_ADDR",
 		"METRICS_PATH",
 		"READINESS_PATH",
+		"SERVICE_NAME",
+		"SERVICE_VERSION",
+		"INTERNAL_RPC_ENABLED",
+		"INTERNAL_RPC_ADDR",
+		"INTERNAL_RPC_PATH_PREFIX",
+		"INTERNAL_RPC_TIMEOUT_MS",
+		"INTERNAL_RPC_AUTH_TOKEN",
+		"SERVICE_DISCOVERY_MODE",
+		"MEDIA_SERVICE_MODE",
+		"MEDIA_SERVICE_ADDR",
+		"TIMELINE_SERVICE_MODE",
+		"TIMELINE_SERVICE_ADDR",
+		"OTEL_TRACING_ENABLED",
+		"OTEL_SERVICE_NAME",
+		"OTEL_EXPORTER_OTLP_ENDPOINT",
+		"OTEL_TRACE_SAMPLE_RATIO",
 		"MEDIA_DELIVERY_MODE",
 		"MEDIA_PLAYBACK_SIGNING_SECRET",
 		"MEDIA_PLAYBACK_URL_TTL_SECONDS",
@@ -302,6 +366,30 @@ func LoadServerRuntimeConfig(configDir string) (ServerRuntimeConfig, error) {
 			MetricsPath:    trimmedString(loader, "METRICS_PATH"),
 			ReadinessPath:  trimmedString(loader, "READINESS_PATH"),
 		},
+		Service: ServiceConfig{
+			Name:    trimmedString(loader, "SERVICE_NAME"),
+			Version: trimmedString(loader, "SERVICE_VERSION"),
+		},
+		InternalRPC: InternalRPCConfig{
+			Enabled:    boolFromConfig(loader, "INTERNAL_RPC_ENABLED"),
+			Addr:       trimmedString(loader, "INTERNAL_RPC_ADDR"),
+			PathPrefix: trimmedString(loader, "INTERNAL_RPC_PATH_PREFIX"),
+			TimeoutMs:  intFromConfig(loader, "INTERNAL_RPC_TIMEOUT_MS"),
+			AuthToken:  trimmedString(loader, "INTERNAL_RPC_AUTH_TOKEN"),
+		},
+		ServiceClients: ServiceClientsConfig{
+			DiscoveryMode: strings.ToLower(trimmedString(loader, "SERVICE_DISCOVERY_MODE")),
+			MediaMode:     strings.ToLower(trimmedString(loader, "MEDIA_SERVICE_MODE")),
+			MediaAddr:     trimmedString(loader, "MEDIA_SERVICE_ADDR"),
+			TimelineMode:  strings.ToLower(trimmedString(loader, "TIMELINE_SERVICE_MODE")),
+			TimelineAddr:  trimmedString(loader, "TIMELINE_SERVICE_ADDR"),
+		},
+		Telemetry: TelemetryConfig{
+			TracingEnabled:   boolFromConfig(loader, "OTEL_TRACING_ENABLED"),
+			ServiceName:      trimmedString(loader, "OTEL_SERVICE_NAME"),
+			OTLPEndpoint:     trimmedString(loader, "OTEL_EXPORTER_OTLP_ENDPOINT"),
+			TraceSampleRatio: floatFromConfig(loader, "OTEL_TRACE_SAMPLE_RATIO"),
+		},
 		Media: MediaPlaybackConfig{
 			DeliveryMode:           trimmedString(loader, "MEDIA_DELIVERY_MODE"),
 			SigningSecret:          trimmedString(loader, "MEDIA_PLAYBACK_SIGNING_SECRET"),
@@ -339,6 +427,9 @@ func parseRoomRuntimeMode(value string) (string, error) {
 }
 
 func validateServerRuntimeConfig(config ServerRuntimeConfig) error {
+	if err := validateServiceConfig(config); err != nil {
+		return err
+	}
 	if config.RoomRuntimeMode != roomRuntimeModeDistributedAuthority {
 		return nil
 	}
@@ -366,6 +457,47 @@ func validateServerRuntimeConfig(config ServerRuntimeConfig) error {
 		return fmt.Errorf("Kafka room timeline and derived topics are required when ROOM_RUNTIME_MODE=%s", roomRuntimeModeDistributedAuthority)
 	}
 	return nil
+}
+
+func validateServiceConfig(config ServerRuntimeConfig) error {
+	if config.InternalRPC.Enabled && strings.TrimSpace(config.InternalRPC.Addr) == "" {
+		return fmt.Errorf("INTERNAL_RPC_ADDR is required when INTERNAL_RPC_ENABLED=true")
+	}
+	if config.InternalRPC.Enabled && strings.TrimSpace(config.InternalRPC.AuthToken) == "" &&
+		strings.EqualFold(strings.TrimSpace(config.AppEnv), "prod") {
+		return fmt.Errorf("INTERNAL_RPC_AUTH_TOKEN is required in prod when INTERNAL_RPC_ENABLED=true")
+	}
+	if mode := normalizeServiceMode(config.ServiceClients.MediaMode); mode != "local" && mode != "rpc" {
+		return fmt.Errorf("unsupported MEDIA_SERVICE_MODE %q; supported values: local, rpc", config.ServiceClients.MediaMode)
+	}
+	if mode := normalizeServiceMode(config.ServiceClients.TimelineMode); mode != "local" && mode != "rpc" {
+		return fmt.Errorf("unsupported TIMELINE_SERVICE_MODE %q; supported values: local, rpc", config.ServiceClients.TimelineMode)
+	}
+	if normalizeServiceMode(config.ServiceClients.MediaMode) == "rpc" && strings.TrimSpace(config.ServiceClients.MediaAddr) == "" {
+		return fmt.Errorf("MEDIA_SERVICE_ADDR is required when MEDIA_SERVICE_MODE=rpc")
+	}
+	if normalizeServiceMode(config.ServiceClients.TimelineMode) == "rpc" && strings.TrimSpace(config.ServiceClients.TimelineAddr) == "" {
+		return fmt.Errorf("TIMELINE_SERVICE_ADDR is required when TIMELINE_SERVICE_MODE=rpc")
+	}
+	discoveryMode := strings.TrimSpace(config.ServiceClients.DiscoveryMode)
+	if discoveryMode == "" {
+		discoveryMode = "static"
+	}
+	if discoveryMode != "static" {
+		return fmt.Errorf("unsupported SERVICE_DISCOVERY_MODE %q; supported values: static", config.ServiceClients.DiscoveryMode)
+	}
+	if config.Telemetry.TraceSampleRatio < 0 || config.Telemetry.TraceSampleRatio > 1 {
+		return fmt.Errorf("OTEL_TRACE_SAMPLE_RATIO must be between 0 and 1")
+	}
+	return nil
+}
+
+func normalizeServiceMode(mode string) string {
+	mode = strings.ToLower(strings.TrimSpace(mode))
+	if mode == "" {
+		return "local"
+	}
+	return mode
 }
 
 func parseEventBus(value string) (string, error) {
@@ -401,6 +533,18 @@ func int64FromConfig(loader interface{ GetString(string) string }, key string) i
 		return 0
 	}
 	parsed, err := strconv.ParseInt(value, 10, 64)
+	if err != nil {
+		return 0
+	}
+	return parsed
+}
+
+func floatFromConfig(loader interface{ GetString(string) string }, key string) float64 {
+	value := strings.TrimSpace(loader.GetString(key))
+	if value == "" {
+		return 0
+	}
+	parsed, err := strconv.ParseFloat(value, 64)
 	if err != nil {
 		return 0
 	}

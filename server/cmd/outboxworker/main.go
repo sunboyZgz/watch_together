@@ -12,7 +12,9 @@ import (
 
 	wtconfig "watch_together/server/internal/config"
 	"watch_together/server/internal/observability"
+	"watch_together/server/internal/servicekit"
 	"watch_together/server/internal/store"
+	"watch_together/server/internal/telemetry"
 	"watch_together/server/internal/timeline"
 )
 
@@ -29,6 +31,25 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	serviceConfig := servicekit.Config{
+		ServiceName:    serviceName(runtimeConfig.Service.Name, "watch-together-outboxworker"),
+		ServiceVersion: runtimeConfig.Service.Version,
+		InstanceID:     runtimeConfig.InstanceID,
+	}.Normalized("watch-together-outboxworker")
+	shutdownTelemetry, err := telemetry.Start(ctx, telemetry.Config{
+		Enabled:      runtimeConfig.Telemetry.TracingEnabled,
+		ServiceName:  runtimeConfig.Telemetry.ServiceName,
+		OTLPEndpoint: runtimeConfig.Telemetry.OTLPEndpoint,
+		SampleRatio:  runtimeConfig.Telemetry.TraceSampleRatio,
+	}.Normalized(serviceConfig.ServiceName))
+	if err != nil {
+		log.Printf("failed to start telemetry; tracing disabled: %v", err)
+	}
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = telemetry.Shutdown(shutdownCtx, shutdownTelemetry)
+	}()
 
 	db, err := store.OpenPostgres(ctx, runtimeConfig.DatabaseURL)
 	if err != nil {
@@ -65,4 +86,11 @@ func main() {
 	if err := dispatcher.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
 		log.Fatalf("outboxworker stopped: %v", err)
 	}
+}
+
+func serviceName(configured string, fallback string) string {
+	if configured != "" && configured != "watch-together-roomserver" {
+		return configured
+	}
+	return fallback
 }

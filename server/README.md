@@ -67,6 +67,7 @@ go run ./cmd/mediactl plan --library-root ../media/raw --input ../media/raw/samp
 - [Backend API contract](../docs/backend-api-contract.md)
 - [WebSocket protocol](../docs/websocket-protocol.md)
 - [Runtime boundaries](../docs/runtime-boundaries.md)
+- [Database ownership](../docs/database-ownership.md)
 - [Media operations](../docs/media-operations.md)
 - [Data model](../docs/data-model.md)
 - [Deployment notes](./deploy/README.md)

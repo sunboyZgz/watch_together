@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/nats-io/nats.go"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/propagation"
 )
 
 type RoomControlRequest struct {
@@ -193,6 +195,8 @@ func (b *NATSRoomControlBus) RequestRoomControl(
 	authorityInstanceID string,
 	request RoomControlRequest,
 ) (RoomControlResponse, error) {
+	ctx, span := otel.Tracer("watch_together/nats").Start(ctx, "nats.control.request")
+	defer span.End()
 	if b == nil || b.conn == nil {
 		return RoomControlResponse{}, ErrEventBusDisabled
 	}
@@ -218,7 +222,13 @@ func (b *NATSRoomControlBus) RequestRoomControl(
 		err     error
 	}, 1)
 	go func() {
-		message, err := b.conn.Request(roomControlSubject(b.controlTopic, authorityInstanceID), data, timeout)
+		requestMsg := &nats.Msg{
+			Subject: roomControlSubject(b.controlTopic, authorityInstanceID),
+			Data:    data,
+			Header:  nats.Header{},
+		}
+		otel.GetTextMapPropagator().Inject(ctx, propagation.HeaderCarrier(requestMsg.Header))
+		message, err := b.conn.RequestMsg(requestMsg, timeout)
 		responseCh <- struct {
 			message *nats.Msg
 			err     error
@@ -247,16 +257,21 @@ func (b *NATSRoomControlBus) SubscribeRoomControls(
 		return nil
 	}
 	sub, err := b.conn.Subscribe(roomControlSubject(b.controlTopic, instanceID), func(message *nats.Msg) {
+		messageCtx := otel.GetTextMapPropagator().Extract(context.Background(), propagation.HeaderCarrier(message.Header))
+		messageCtx, span := otel.Tracer("watch_together/nats").Start(messageCtx, "nats.control.handle")
+		defer span.End()
 		request, err := DecodeRoomControlRequest(message.Data)
 		if err != nil {
 			return
 		}
-		response := handler(context.Background(), request)
+		response := handler(messageCtx, request)
 		data, err := EncodeRoomControlResponse(response)
 		if err != nil {
 			return
 		}
-		_ = message.Respond(data)
+		responseMsg := &nats.Msg{Data: data, Header: nats.Header{}}
+		otel.GetTextMapPropagator().Inject(messageCtx, propagation.HeaderCarrier(responseMsg.Header))
+		_ = message.RespondMsg(responseMsg)
 	})
 	if err != nil {
 		return err

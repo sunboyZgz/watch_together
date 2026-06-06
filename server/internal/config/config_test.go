@@ -124,6 +124,25 @@ func TestLoadServerRuntimeConfigFallsBackToDefaults(t *testing.T) {
 		cfg.Observability.ReadinessPath != "/readyz" {
 		t.Fatalf("unexpected default observability config: %+v", cfg.Observability)
 	}
+	if cfg.Service.Name != "watch-together-roomserver" || cfg.Service.Version != "dev" {
+		t.Fatalf("unexpected default service config: %+v", cfg.Service)
+	}
+	if cfg.InternalRPC.Enabled ||
+		cfg.InternalRPC.Addr != ":8090" ||
+		cfg.InternalRPC.PathPrefix != "/internal.rpc" ||
+		cfg.InternalRPC.TimeoutMs != 1000 {
+		t.Fatalf("unexpected default internal rpc config: %+v", cfg.InternalRPC)
+	}
+	if cfg.ServiceClients.DiscoveryMode != "static" ||
+		cfg.ServiceClients.MediaMode != "local" ||
+		cfg.ServiceClients.TimelineMode != "local" {
+		t.Fatalf("unexpected default service client config: %+v", cfg.ServiceClients)
+	}
+	if cfg.Telemetry.TracingEnabled ||
+		cfg.Telemetry.ServiceName != "watch-together-roomserver" ||
+		cfg.Telemetry.TraceSampleRatio != 0.1 {
+		t.Fatalf("unexpected default telemetry config: %+v", cfg.Telemetry)
+	}
 	if cfg.Media.URLTTLSeconds != 7200 {
 		t.Fatalf("expected default media playback url ttl 7200s, got %d", cfg.Media.URLTTLSeconds)
 	}
@@ -429,6 +448,63 @@ func TestLoadServerRuntimeConfigLoadsObservabilitySettings(t *testing.T) {
 		cfg.Observability.MetricsPath != "/internal/metrics" ||
 		cfg.Observability.ReadinessPath != "/internal/readyz" {
 		t.Fatalf("unexpected observability config: %+v", cfg.Observability)
+	}
+}
+
+func TestLoadServerRuntimeConfigLoadsServiceFoundationSettings(t *testing.T) {
+	configDir := t.TempDir()
+	mustWriteConfigFile(
+		t,
+		filepath.Join(configDir, ".env"),
+		"SERVICE_NAME=watch-together-roomserver-a\nSERVICE_VERSION=2026.06\nINTERNAL_RPC_ENABLED=true\nINTERNAL_RPC_ADDR=:8095\nINTERNAL_RPC_PATH_PREFIX=/internal.test\nINTERNAL_RPC_TIMEOUT_MS=2500\nINTERNAL_RPC_AUTH_TOKEN=secret\nSERVICE_DISCOVERY_MODE=static\nMEDIA_SERVICE_MODE=rpc\nMEDIA_SERVICE_ADDR=http://media:8090\nTIMELINE_SERVICE_MODE=rpc\nTIMELINE_SERVICE_ADDR=http://timeline:8090\nOTEL_TRACING_ENABLED=true\nOTEL_SERVICE_NAME=roomserver-traced\nOTEL_EXPORTER_OTLP_ENDPOINT=otel:4318\nOTEL_TRACE_SAMPLE_RATIO=0.25\n",
+	)
+
+	cfg, err := LoadServerRuntimeConfig(configDir)
+	if err != nil {
+		t.Fatalf("load runtime config: %v", err)
+	}
+	if cfg.Service.Name != "watch-together-roomserver-a" || cfg.Service.Version != "2026.06" {
+		t.Fatalf("unexpected service config: %+v", cfg.Service)
+	}
+	if !cfg.InternalRPC.Enabled ||
+		cfg.InternalRPC.Addr != ":8095" ||
+		cfg.InternalRPC.PathPrefix != "/internal.test" ||
+		cfg.InternalRPC.TimeoutMs != 2500 ||
+		cfg.InternalRPC.AuthToken != "secret" {
+		t.Fatalf("unexpected internal rpc config: %+v", cfg.InternalRPC)
+	}
+	if cfg.ServiceClients.MediaMode != "rpc" ||
+		cfg.ServiceClients.MediaAddr != "http://media:8090" ||
+		cfg.ServiceClients.TimelineMode != "rpc" ||
+		cfg.ServiceClients.TimelineAddr != "http://timeline:8090" {
+		t.Fatalf("unexpected service clients config: %+v", cfg.ServiceClients)
+	}
+	if !cfg.Telemetry.TracingEnabled ||
+		cfg.Telemetry.ServiceName != "roomserver-traced" ||
+		cfg.Telemetry.OTLPEndpoint != "otel:4318" ||
+		cfg.Telemetry.TraceSampleRatio != 0.25 {
+		t.Fatalf("unexpected telemetry config: %+v", cfg.Telemetry)
+	}
+}
+
+func TestLoadServerRuntimeConfigRejectsInvalidServiceFoundationSettings(t *testing.T) {
+	cases := []struct {
+		name    string
+		content string
+	}{
+		{name: "media rpc missing addr", content: "MEDIA_SERVICE_MODE=rpc\n"},
+		{name: "timeline rpc missing addr", content: "TIMELINE_SERVICE_MODE=rpc\n"},
+		{name: "invalid discovery", content: "SERVICE_DISCOVERY_MODE=consul\n"},
+		{name: "invalid sample ratio", content: "OTEL_TRACE_SAMPLE_RATIO=1.5\n"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			configDir := t.TempDir()
+			mustWriteConfigFile(t, filepath.Join(configDir, ".env"), tc.content)
+			if _, err := LoadServerRuntimeConfig(configDir); err == nil {
+				t.Fatalf("expected invalid service foundation config to fail")
+			}
+		})
 	}
 }
 

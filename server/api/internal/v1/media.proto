@@ -1,0 +1,52 @@
+syntax = "proto3";
+
+package watch_together.internal.v1;
+
+import "google/protobuf/struct.proto";
+import "server/api/internal/v1/common.proto";
+
+option go_package = "watch_together/server/api/internal/v1;internalv1";
+
+service MediaInternalService {
+  rpc ListTags(ListTagsRequest) returns (ListTagsResponse);
+  rpc SearchItems(SearchItemsRequest) returns (SearchItemsResponse);
+  rpc GetPlaybackItem(GetPlaybackItemRequest) returns (GetPlaybackItemResponse);
+  rpc AuthorizePlayback(AuthorizePlaybackRequest) returns (AuthorizePlaybackResponse);
+}
+
+message ListTagsRequest {
+  RequestMetadata metadata = 1;
+  int32 all_limit = 2;
+}
+
+message ListTagsResponse {
+  google.protobuf.Struct tags = 1;
+}
+
+message SearchItemsRequest {
+  RequestMetadata metadata = 1;
+  google.protobuf.Struct params = 2;
+}
+
+message SearchItemsResponse {
+  repeated google.protobuf.Struct items = 1;
+}
+
+message GetPlaybackItemRequest {
+  RequestMetadata metadata = 1;
+  string episode_id = 2;
+}
+
+message GetPlaybackItemResponse {
+  google.protobuf.Struct item = 1;
+}
+
+message AuthorizePlaybackRequest {
+  RequestMetadata metadata = 1;
+  string episode_id = 2;
+  string asset_path = 3;
+}
+
+message AuthorizePlaybackResponse {
+  bool authorized = 1;
+}

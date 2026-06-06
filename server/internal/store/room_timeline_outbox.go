@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"go.opentelemetry.io/otel"
 	"gorm.io/gorm"
 
 	"watch_together/server/internal/timeline"
@@ -29,6 +30,8 @@ func NewPostgresTimelineOutboxStore(db *gorm.DB, canonicalTopic string) *Postgre
 }
 
 func (s *PostgresTimelineOutboxStore) RecordTimelineEvent(ctx context.Context, event timeline.Event) error {
+	ctx, span := otel.Tracer("watch_together/postgres").Start(ctx, "room_timeline_outbox.record")
+	defer span.End()
 	if s == nil || s.db == nil {
 		return nil
 	}
@@ -148,6 +151,8 @@ func (s *PostgresTimelineOutboxStore) ReadRoomUnpublishedTimelineEvents(
 	ctx context.Context,
 	roomID string,
 ) ([]timeline.Event, error) {
+	ctx, span := otel.Tracer("watch_together/postgres").Start(ctx, "room_timeline_outbox.read_unpublished")
+	defer span.End()
 	if s == nil || s.db == nil || roomID == "" {
 		return nil, nil
 	}

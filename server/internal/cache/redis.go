@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/redis/go-redis/v9"
+	"go.opentelemetry.io/otel"
 )
 
 var ErrRedisDisabled = errors.New("redis is disabled")
@@ -31,6 +32,8 @@ type RedisClient struct {
 }
 
 func OpenRedis(ctx context.Context, config RedisConfig) (*RedisClient, error) {
+	ctx, span := otel.Tracer("watch_together/redis").Start(ctx, "redis.open")
+	defer span.End()
 	if !config.Enabled() {
 		return nil, ErrRedisDisabled
 	}
@@ -68,6 +71,8 @@ func (c *RedisClient) Raw() *redis.Client {
 }
 
 func (c *RedisClient) GetJSON(ctx context.Context, key string, dest any) (bool, error) {
+	ctx, span := otel.Tracer("watch_together/redis").Start(ctx, "redis.get_json")
+	defer span.End()
 	if c == nil || c.client == nil {
 		return false, ErrRedisDisabled
 	}
@@ -85,6 +90,8 @@ func (c *RedisClient) GetJSON(ctx context.Context, key string, dest any) (bool, 
 }
 
 func (c *RedisClient) SetJSON(ctx context.Context, key string, value any, ttl time.Duration) error {
+	ctx, span := otel.Tracer("watch_together/redis").Start(ctx, "redis.set_json")
+	defer span.End()
 	if c == nil || c.client == nil {
 		return ErrRedisDisabled
 	}
@@ -96,6 +103,8 @@ func (c *RedisClient) SetJSON(ctx context.Context, key string, value any, ttl ti
 }
 
 func (c *RedisClient) Delete(ctx context.Context, keys ...string) error {
+	ctx, span := otel.Tracer("watch_together/redis").Start(ctx, "redis.delete")
+	defer span.End()
 	if c == nil || c.client == nil {
 		return ErrRedisDisabled
 	}
@@ -104,4 +113,3 @@ func (c *RedisClient) Delete(ctx context.Context, keys ...string) error {
 	}
 	return c.client.Del(ctx, keys...).Err()
 }
-

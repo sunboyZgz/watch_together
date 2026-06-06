@@ -11,6 +11,8 @@ import (
 
 	wtconfig "watch_together/server/internal/config"
 	"watch_together/server/internal/observability"
+	"watch_together/server/internal/servicekit"
+	"watch_together/server/internal/telemetry"
 	"watch_together/server/internal/timeline"
 )
 
@@ -23,6 +25,23 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	serviceConfig := servicekit.Config{
+		ServiceName:    serviceName(runtimeConfig.Service.Name, "watch-together-derivedworker"),
+		ServiceVersion: runtimeConfig.Service.Version,
+		InstanceID:     runtimeConfig.InstanceID,
+	}.Normalized("watch-together-derivedworker")
+	shutdownTelemetry, err := telemetry.Start(ctx, telemetry.Config{
+		Enabled:      runtimeConfig.Telemetry.TracingEnabled,
+		ServiceName:  runtimeConfig.Telemetry.ServiceName,
+		OTLPEndpoint: runtimeConfig.Telemetry.OTLPEndpoint,
+		SampleRatio:  runtimeConfig.Telemetry.TraceSampleRatio,
+	}.Normalized(serviceConfig.ServiceName))
+	if err != nil {
+		log.Printf("failed to start telemetry; tracing disabled: %v", err)
+	}
+	defer func() {
+		_ = telemetry.Shutdown(context.Background(), shutdownTelemetry)
+	}()
 
 	reader, err := timeline.NewKafkaTimelineReader(
 		runtimeConfig.Kafka.Brokers,
@@ -63,4 +82,11 @@ func main() {
 	if err := dispatcher.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
 		log.Fatalf("derivedworker stopped: %v", err)
 	}
+}
+
+func serviceName(configured string, fallback string) string {
+	if configured != "" && configured != "watch-together-roomserver" {
+		return configured
+	}
+	return fallback
 }

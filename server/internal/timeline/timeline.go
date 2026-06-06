@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 )
@@ -21,6 +22,8 @@ const (
 	DefaultControlResultTopic = "wt.room.control_result.v1"
 	DefaultMembershipTopic    = "wt.room.membership.v1"
 )
+
+var ErrTimelineUnavailable = errors.New("timeline service is unavailable")
 
 type Event struct {
 	EventID      string          `json:"eventId"`

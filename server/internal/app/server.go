@@ -10,19 +10,23 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"go.opentelemetry.io/otel"
 	"gorm.io/gorm"
 
 	"watch_together/server/internal/auth"
 	"watch_together/server/internal/cache"
 	"watch_together/server/internal/eventbus"
 	"watch_together/server/internal/home"
+	"watch_together/server/internal/internalrpc"
 	"watch_together/server/internal/media"
 	"watch_together/server/internal/observability"
 	"watch_together/server/internal/progress"
 	"watch_together/server/internal/recovery"
 	"watch_together/server/internal/room"
 	"watch_together/server/internal/roomapi"
+	"watch_together/server/internal/servicekit"
 	"watch_together/server/internal/store"
+	"watch_together/server/internal/telemetry"
 	"watch_together/server/internal/timeline"
 	"watch_together/server/internal/transport"
 )
@@ -43,6 +47,10 @@ type Config struct {
 	Kafka             KafkaConfig
 	AuthorityRecovery AuthorityRecoveryConfig
 	Observability     observability.Config
+	Service           servicekit.Config
+	InternalRPC       InternalRPCConfig
+	ServiceClients    ServiceClientsConfig
+	Telemetry         telemetry.Config
 	Media             transport.MediaPlaybackConfig
 }
 
@@ -52,6 +60,24 @@ type NATSConfig = eventbus.NATSConfig
 type MediaPlaybackConfig = transport.MediaPlaybackConfig
 type AuthTokenConfig = auth.TokenConfig
 type ObservabilityConfig = observability.Config
+type ServiceConfig = servicekit.Config
+type TelemetryConfig = telemetry.Config
+
+type InternalRPCConfig struct {
+	Enabled    bool
+	Addr       string
+	PathPrefix string
+	Timeout    time.Duration
+	AuthToken  string
+}
+
+type ServiceClientsConfig struct {
+	DiscoveryMode string
+	MediaMode     string
+	MediaAddr     string
+	TimelineMode  string
+	TimelineAddr  string
+}
 
 type KafkaConfig struct {
 	Brokers                []string
@@ -70,14 +96,15 @@ type AuthorityRecoveryConfig struct {
 }
 
 type Server struct {
-	config      Config
-	httpServer  *http.Server
-	roomManager *room.Manager
-	redis       *cache.RedisClient
-	db          *gorm.DB
-	cancel      context.CancelFunc
-	eventBus    eventbus.RoomBroadcastBus
-	controlBus  eventbus.RoomControlBus
+	config            Config
+	httpServer        *http.Server
+	roomManager       *room.Manager
+	redis             *cache.RedisClient
+	db                *gorm.DB
+	cancel            context.CancelFunc
+	eventBus          eventbus.RoomBroadcastBus
+	controlBus        eventbus.RoomControlBus
+	telemetryShutdown telemetry.ShutdownFunc
 }
 
 const (
@@ -101,6 +128,11 @@ func NewServer(config Config) *Server {
 	roomManager := room.NewManager()
 	tokenManager := auth.NewTokenManager(config.Auth)
 	observabilityConfig := config.Observability.Normalized()
+	serviceConfig := config.Service.Normalized("watch-together-roomserver")
+	telemetryShutdown, err := telemetry.Start(serverCtx, config.Telemetry.Normalized(serviceConfig.ServiceName))
+	if err != nil {
+		log.Printf("failed to start telemetry; tracing disabled: %v", err)
+	}
 	metrics := observability.NewMetrics()
 	if distributedAuthority {
 		config.Redis.Required = true
@@ -129,10 +161,21 @@ func NewServer(config Config) *Server {
 	}
 	roomService, roomStore := newRoomService(db)
 	var timelineRecorder timeline.Recorder = timeline.NoopRecorder{}
+	var timelineReader timeline.RoomEventReader
+	var pendingOutboxReader recovery.PendingOutboxReader
 	var timelineOutboxStore *store.PostgresTimelineOutboxStore
 	if distributedAuthority && db != nil {
 		timelineOutboxStore = store.NewPostgresTimelineOutboxStore(db, config.Kafka.TopicRoomTimeline)
 		timelineRecorder = timelineOutboxStore
+		pendingOutboxReader = timelineOutboxStore
+	}
+	if isRPCMode(config.ServiceClients.TimelineMode) {
+		timelineClient := timeline.NewRPCClient(config.ServiceClients.TimelineAddr, internalRPCClientConfig(config, serviceConfig))
+		if timelineClient != nil {
+			timelineRecorder = timelineClient
+			timelineReader = timelineClient
+			pendingOutboxReader = timelineClient
+		}
 	}
 	installRoomLifecycleHooks(roomManager, roomStore, roomStateCache)
 	if roomStore != nil {
@@ -165,13 +208,16 @@ func NewServer(config Config) *Server {
 	}
 	var authorityRecovery *recovery.Service
 	if distributedAuthority {
-		kafkaReader, err := timeline.NewKafkaRoomEventReader(
-			config.Kafka.Brokers,
-			config.Kafka.TopicRoomTimeline,
-			config.AuthorityRecovery.KafkaReplayTimeout,
-		)
-		if err != nil {
-			log.Fatalf("failed to open kafka room timeline reader: %v", err)
+		if timelineReader == nil {
+			kafkaReader, err := timeline.NewKafkaRoomEventReader(
+				config.Kafka.Brokers,
+				config.Kafka.TopicRoomTimeline,
+				config.AuthorityRecovery.KafkaReplayTimeout,
+			)
+			if err != nil {
+				log.Fatalf("failed to open kafka room timeline reader: %v", err)
+			}
+			timelineReader = kafkaReader
 		}
 		authorityRecovery = recovery.NewService(
 			recovery.Config{
@@ -181,8 +227,8 @@ func NewServer(config Config) *Server {
 			authorityRegistry,
 			roomManager,
 			roomStore,
-			kafkaReader,
-			timelineOutboxStore,
+			timelineReader,
+			pendingOutboxReader,
 			roomStateCache,
 		)
 		roomHTTPHandler.SetRoomAuthorityRecovery(authorityRecovery)
@@ -199,7 +245,7 @@ func NewServer(config Config) *Server {
 	roomControlBus := newRoomControlBus(config.WebSocket, config.NATS, distributedAuthority)
 	authHTTPHandler := transport.NewAuthHTTPHandler(newAuthService(db, tokenManager))
 	homeHTTPHandler := transport.NewHomeHTTPHandlerWithTokenVerifier(newHomeService(db), tokenManager)
-	mediaHTTPHandler := transport.NewMediaHTTPHandlerWithTokenVerifier(newMediaService(db), tokenManager, config.Media)
+	mediaHTTPHandler := transport.NewMediaHTTPHandlerWithTokenVerifier(newMediaService(db, config, serviceConfig), tokenManager, config.Media)
 	progressHTTPHandler := transport.NewProgressHTTPHandlerWithTokenVerifier(newProgressService(db), tokenManager)
 	router := newGinRouter(
 		serverCtx,
@@ -235,15 +281,29 @@ func NewServer(config Config) *Server {
 	}
 
 	return &Server{
-		config:      config,
-		httpServer:  httpServer,
-		roomManager: roomManager,
-		redis:       redisClient,
-		db:          db,
-		cancel:      cancel,
-		eventBus:    roomBroadcastBus,
-		controlBus:  roomControlBus,
+		config:            config,
+		httpServer:        httpServer,
+		roomManager:       roomManager,
+		redis:             redisClient,
+		db:                db,
+		cancel:            cancel,
+		eventBus:          roomBroadcastBus,
+		controlBus:        roomControlBus,
+		telemetryShutdown: telemetryShutdown,
 	}
+}
+
+func internalRPCClientConfig(config Config, service servicekit.Config) internalrpc.ClientConfig {
+	return internalrpc.ClientConfig{
+		PathPrefix: config.InternalRPC.PathPrefix,
+		Timeout:    config.InternalRPC.Timeout,
+		AuthToken:  config.InternalRPC.AuthToken,
+		Service:    service,
+	}
+}
+
+func isRPCMode(mode string) bool {
+	return strings.EqualFold(strings.TrimSpace(mode), "rpc")
 }
 
 func normalizeRoomRuntimeMode(mode string) string {
@@ -281,8 +341,10 @@ func readinessSnapshotFromConfig(
 			dependencyStatus("nats_broadcast", !isDisabledRoomBroadcastBus(roomBroadcastBus), distributedAuthority || config.WebSocket.CrossInstanceBroadcast),
 			dependencyStatus("nats_control", !isDisabledRoomControlBus(roomControlBus), distributedAuthority),
 			dependencyStatus("kafka", len(config.Kafka.Brokers) > 0, distributedAuthority),
-			dependencyStatus("outbox", timelineOutboxStore != nil, distributedAuthority),
+			dependencyStatus("outbox", timelineOutboxStore != nil || isRPCMode(config.ServiceClients.TimelineMode), distributedAuthority),
 			dependencyStatus("recovery", authorityRecovery != nil, distributedAuthority),
+			dependencyStatus("media_rpc", strings.TrimSpace(config.ServiceClients.MediaAddr) != "", isRPCMode(config.ServiceClients.MediaMode)),
+			dependencyStatus("timeline_rpc", strings.TrimSpace(config.ServiceClients.TimelineAddr) != "", isRPCMode(config.ServiceClients.TimelineMode)),
 		},
 	)
 }
@@ -435,6 +497,13 @@ func newGinRouter(
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
 	router.Use(gin.Recovery())
+	router.Use(func(c *gin.Context) {
+		spanName := c.Request.Method + " " + c.Request.URL.Path
+		ctx, span := otel.Tracer("watch_together/http").Start(c.Request.Context(), spanName)
+		defer span.End()
+		c.Request = c.Request.WithContext(ctx)
+		c.Next()
+	})
 
 	router.GET("/healthz", func(c *gin.Context) {
 		if runtime.InstanceID != "" {
@@ -517,7 +586,14 @@ func newHomeService(db *gorm.DB) *home.Service {
 }
 
 // newMediaService connects media catalog APIs to the shared PostgreSQL handle when available.
-func newMediaService(db *gorm.DB) *media.Service {
+func newMediaService(db *gorm.DB, config Config, service servicekit.Config) *media.Service {
+	if isRPCMode(config.ServiceClients.MediaMode) {
+		rpcStore := media.NewRPCStore(config.ServiceClients.MediaAddr, internalRPCClientConfig(config, service))
+		if rpcStore == nil {
+			return nil
+		}
+		return media.NewService(rpcStore)
+	}
 	if db == nil {
 		return nil
 	}
@@ -707,6 +783,11 @@ func (s *Server) Close() error {
 				closeErr = err
 			}
 		} else if err := sqlDB.Close(); err != nil && closeErr == nil {
+			closeErr = err
+		}
+	}
+	if s.telemetryShutdown != nil {
+		if err := telemetry.Shutdown(context.Background(), s.telemetryShutdown); err != nil && closeErr == nil {
 			closeErr = err
 		}
 	}

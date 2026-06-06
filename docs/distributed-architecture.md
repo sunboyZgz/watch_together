@@ -1,6 +1,6 @@
 # Distributed Architecture
 
-Phase 4 introduced the distributed room infrastructure MVP while keeping the public HTTP API and playback control payloads small. `local_process` remains supported. `distributed_authority` adds Redis authority leases, Redis active-device ownership, NATS Core internal routing, PostgreSQL outbox, and Kafka timeline topics. Phase 5 adds authority recovery and hardening: expired authority leases can be fenced, recovered from Kafka canonical timeline events, completed as a new active authority epoch, resumed without moving WebSocket connections, protected by Redis `requestId` idempotency, and exposed through user-level Redis presence. Phase 6 adds distributed seek rate limiting and observability: seek throttling moves to Redis in `distributed_authority`, `/readyz` reports dependency readiness, and `/metrics` exposes Prometheus metrics.
+Phase 4 introduced the distributed room infrastructure MVP while keeping the public HTTP API and playback control payloads small. `local_process` remains supported. `distributed_authority` adds Redis authority leases, Redis active-device ownership, NATS Core internal routing, PostgreSQL outbox, and Kafka timeline topics. Phase 5 adds authority recovery and hardening: expired authority leases can be fenced, recovered from Kafka canonical timeline events, completed as a new active authority epoch, resumed without moving WebSocket connections, protected by Redis `requestId` idempotency, and exposed through user-level Redis presence. Phase 6 adds distributed seek rate limiting and observability: seek throttling moves to Redis in `distributed_authority`, `/readyz` reports dependency readiness, and `/metrics` exposes Prometheus metrics. Phase 7 adds the service foundation: servicekit, internal ConnectRPC contracts, optional media/timeline service skeletons, OpenTelemetry tracing, static service discovery, and logical database ownership design.
 
 ## Architecture Mode
 
@@ -24,6 +24,73 @@ Backend mode in `distributed_authority`:
 - `cmd/derivedworker` derives control-result and membership topics from the canonical timeline.
 - `recovery` owns authority takeover, Kafka replay, unpublished outbox merge, and recovered `room.Manager` registration.
 - `observability` owns readiness snapshots, Prometheus metrics, and worker metric hooks.
+- `servicekit` owns internal request metadata, deadline, service identity, and internal auth conventions.
+- `internalrpc` owns ConnectRPC server/client helpers for local/RPC dual-mode adapters.
+- `telemetry` owns OpenTelemetry tracing setup and propagation.
+- `cmd/mediaservice` and `cmd/timelineservice` are optional service skeletons for the first serviceization candidates.
+
+## Service Evolution Architecture
+
+Phase 7 is not a full microservice split. The default deployment still runs `roomserver` with local adapters. `MEDIA_SERVICE_MODE=rpc` and `TIMELINE_SERVICE_MODE=rpc` switch selected boundaries to the optional internal services.
+
+```mermaid
+flowchart LR
+  Roomserver[roomserver]
+  App[app composition root]
+  MediaPort[media port]
+  TimelinePort[timeline port]
+  MediaLocal[local media adapter]
+  TimelineLocal[local timeline adapter]
+  MediaRPC[media RPC adapter]
+  TimelineRPC[timeline RPC adapter]
+  MediaService[cmd/mediaservice]
+  TimelineService[cmd/timelineservice]
+  PG[(single PostgreSQL)]
+  Kafka[(Kafka)]
+  Redis[(Redis)]
+  NATS[(NATS)]
+
+  Roomserver --> App
+  App --> MediaPort
+  App --> TimelinePort
+  MediaPort -->|MEDIA_SERVICE_MODE=local| MediaLocal
+  MediaPort -->|MEDIA_SERVICE_MODE=rpc| MediaRPC
+  TimelinePort -->|TIMELINE_SERVICE_MODE=local| TimelineLocal
+  TimelinePort -->|TIMELINE_SERVICE_MODE=rpc| TimelineRPC
+  MediaRPC --> MediaService
+  TimelineRPC --> TimelineService
+  MediaLocal --> PG
+  TimelineLocal --> PG
+  MediaService --> PG
+  TimelineService --> PG
+  TimelineService --> Kafka
+  Roomserver --> Redis
+  Roomserver --> NATS
+```
+
+## Database Ownership
+
+Phase 7 keeps one PostgreSQL database and introduces logical ownership boundaries. Table owners and cross-context access rules live in [Database Ownership](./database-ownership.md).
+
+```mermaid
+flowchart TD
+  PG[(PostgreSQL)]
+  Identity[identity owns users]
+  Media[media owns media tables]
+  RoomSession[room-session owns rooms and room_members]
+  Progress[progress owns user_media_progress]
+  Timeline[timeline owns room_timeline_outbox]
+  Home[home-composition owns no tables]
+
+  PG --> Identity
+  PG --> Media
+  PG --> RoomSession
+  PG --> Progress
+  PG --> Timeline
+  Home -->|read model/composition only| Identity
+  Home -->|read model/composition only| Media
+  Home -->|read model/composition only| Progress
+```
 
 ## Business Architecture
 
@@ -78,6 +145,10 @@ flowchart LR
   Metrics[Prometheus]
   Mediactl[mediactl]
   Storage[(Media storage)]
+  Servicekit[servicekit/internalrpc]
+  OTel[OpenTelemetry]
+  MediaSvc[cmd/mediaservice]
+  TimelineSvc[cmd/timelineservice]
 
   Android -->|HTTP bootstrap| HTTP
   Android -->|WebSocket envelopes| WS
@@ -104,10 +175,19 @@ flowchart LR
   Mediactl -->|ingest HLS| Storage
   HTTP -->|signed playback| Storage
   App -->|health/readiness/metrics| Obs
+  App -->|service metadata and RPC adapters| Servicekit
   WS -->|control, presence, connection metrics| Obs
   OutboxWorker -->|worker metrics| Obs
   Derived -->|worker metrics| Obs
   Metrics -->|scrape| Obs
+  Servicekit -->|optional ConnectRPC| MediaSvc
+  Servicekit -->|optional ConnectRPC| TimelineSvc
+  MediaSvc --> PG
+  TimelineSvc --> PG
+  TimelineSvc --> Kafka
+  OTel -->|traces| App
+  OTel -->|traces| MediaSvc
+  OTel -->|traces| TimelineSvc
 ```
 
 ## Runtime Boundaries
@@ -128,6 +208,10 @@ flowchart LR
 | Realtime internal routing | NATS Core | Broadcast fan-out and non-authority control request/reply. |
 | Recovery replay | Kafka + PostgreSQL outbox | Rebuilds authority state after an expired authority lease. |
 | Monitoring | `observability` + Prometheus | `/healthz`, `/readyz`, `/metrics`, and worker metric hooks. |
+| Service metadata | `servicekit` | Request id, service name/version, deadline, internal auth, and trace metadata conventions. |
+| Internal RPC | ConnectRPC over HTTP | Optional media/timeline RPC adapters; Android protocol remains unchanged. |
+| Logical database ownership | PostgreSQL + docs | One database remains, but tables have context owners and cross-context access rules. |
+| Tracing | OpenTelemetry | Optional trace spans across HTTP, WebSocket control, Redis, NATS, Kafka, RPC, and PostgreSQL. |
 
 ## Control Flow
 
@@ -329,11 +413,21 @@ Authority recovery:
 8. Redis authority is completed as `status=active` for the new epoch.
 9. NATS control forwarding and broadcast messages carry `authorityEpoch`; stale epoch messages are rejected or dropped.
 
-## Not Phase 6 Goals
+## Service Foundation Flow
+
+1. `internal/app` chooses local or RPC adapters for media and timeline based on `MEDIA_SERVICE_MODE` and `TIMELINE_SERVICE_MODE`.
+2. Local adapters keep the current PostgreSQL/Kafka code path.
+3. RPC adapters call `cmd/mediaservice` or `cmd/timelineservice` through ConnectRPC.
+4. `servicekit` attaches request id, service name/version, deadline, internal auth, and trace metadata.
+5. OpenTelemetry tracing is opt-in and does not change Android payloads.
+
+## Not Phase 7 Goals
 
 - Kafka is not the online broadcast final hop.
 - Kafka is not the command ingress log.
 - JetStream is not enabled.
 - Device-level presence management and full multi-device UI are not complete.
 - WebSocket connection objects never move between instances.
-- OpenTelemetry tracing is not enabled.
+- PostgreSQL is not physically split into per-service databases.
+- `room authority` is not extracted to a separate microservice.
+- Kratos, go-zero, and go-kit are not adopted as the main framework.

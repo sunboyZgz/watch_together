@@ -1,0 +1,41 @@
+syntax = "proto3";
+
+package watch_together.internal.v1;
+
+import "google/protobuf/struct.proto";
+import "server/api/internal/v1/common.proto";
+
+option go_package = "watch_together/server/api/internal/v1;internalv1";
+
+service TimelineInternalService {
+  rpc RecordTimelineEvent(RecordTimelineEventRequest) returns (RecordTimelineEventResponse);
+  rpc ListRoomEvents(ListRoomEventsRequest) returns (ListRoomEventsResponse);
+  rpc ListUnpublishedRoomEvents(ListUnpublishedRoomEventsRequest) returns (ListUnpublishedRoomEventsResponse);
+}
+
+message RecordTimelineEventRequest {
+  RequestMetadata metadata = 1;
+  google.protobuf.Struct event = 2;
+}
+
+message RecordTimelineEventResponse {
+  bool recorded = 1;
+}
+
+message ListRoomEventsRequest {
+  RequestMetadata metadata = 1;
+  string room_id = 2;
+}
+
+message ListRoomEventsResponse {
+  repeated google.protobuf.Struct events = 1;
+}
+
+message ListUnpublishedRoomEventsRequest {
+  RequestMetadata metadata = 1;
+  string room_id = 2;
+}
+
+message ListUnpublishedRoomEventsResponse {
+  repeated google.protobuf.Struct events = 1;
+}

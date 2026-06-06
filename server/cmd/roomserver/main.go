@@ -93,6 +93,31 @@ func main() {
 			MetricsPath:    runtimeConfig.Observability.MetricsPath,
 			ReadinessPath:  runtimeConfig.Observability.ReadinessPath,
 		},
+		Service: app.ServiceConfig{
+			ServiceName:    runtimeConfig.Service.Name,
+			ServiceVersion: runtimeConfig.Service.Version,
+			InstanceID:     runtimeConfig.InstanceID,
+		},
+		InternalRPC: app.InternalRPCConfig{
+			Enabled:    runtimeConfig.InternalRPC.Enabled,
+			Addr:       runtimeConfig.InternalRPC.Addr,
+			PathPrefix: runtimeConfig.InternalRPC.PathPrefix,
+			Timeout:    time.Duration(runtimeConfig.InternalRPC.TimeoutMs) * time.Millisecond,
+			AuthToken:  runtimeConfig.InternalRPC.AuthToken,
+		},
+		ServiceClients: app.ServiceClientsConfig{
+			DiscoveryMode: runtimeConfig.ServiceClients.DiscoveryMode,
+			MediaMode:     runtimeConfig.ServiceClients.MediaMode,
+			MediaAddr:     runtimeConfig.ServiceClients.MediaAddr,
+			TimelineMode:  runtimeConfig.ServiceClients.TimelineMode,
+			TimelineAddr:  runtimeConfig.ServiceClients.TimelineAddr,
+		},
+		Telemetry: app.TelemetryConfig{
+			Enabled:      runtimeConfig.Telemetry.TracingEnabled,
+			ServiceName:  runtimeConfig.Telemetry.ServiceName,
+			OTLPEndpoint: runtimeConfig.Telemetry.OTLPEndpoint,
+			SampleRatio:  runtimeConfig.Telemetry.TraceSampleRatio,
+		},
 		Media: app.MediaPlaybackConfig{
 			DeliveryMode:           runtimeConfig.Media.DeliveryMode,
 			SigningSecret:          runtimeConfig.Media.SigningSecret,
