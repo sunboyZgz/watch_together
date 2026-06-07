@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"connectrpc.com/connect"
 	"github.com/coder/websocket"
 
 	"watch_together/server/internal/cache"
@@ -301,6 +302,159 @@ func TestWebSocketDistributedAuthorityOutboxFailureRejectsAcceptedControl(t *tes
 	for _, event := range broadcastBus.events() {
 		if event.Type == protocol.TypePlay {
 			t.Fatalf("expected no accepted play broadcast when outbox fails, got %+v", event)
+		}
+	}
+}
+
+func TestWebSocketDistributedAuthorityTimelineRPCUnavailableRejectsAcceptedControl(t *testing.T) {
+	broadcastBus := &recordingRoomBroadcastBus{}
+	controlBus := eventbus.NewMemoryRoomControlBus()
+	defer controlBus.Close()
+	controlRequests := newFakeControlRequestRegistry()
+
+	roomManager := room.NewManager()
+	createdRoom, err := roomManager.CreateRoom("user_a", "sample_001")
+	if err != nil {
+		t.Fatalf("create room: %v", err)
+	}
+	authority := newFakeAuthorityRegistry(createdRoom.ID(), "instance-a")
+	activeDevices := newFakeActiveDeviceRegistry()
+	server := newDistributedWebSocketServerWithHardening(
+		t,
+		roomManager,
+		"instance-a",
+		authority,
+		activeDevices,
+		broadcastBus,
+		controlBus,
+		nil,
+		controlRequests,
+		nil,
+		errorTimelineRecorder{err: connect.NewError(connect.CodeUnavailable, errors.New("timeline rpc unavailable"))},
+	)
+	defer server.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	host := mustDialWebSocket(t, ctx, wsURL(server.URL), "user_a")
+	defer host.Close(websocket.StatusNormalClosure, "test done")
+
+	mustJoinRoom(t, ctx, host, createdRoom.ID(), "user_a")
+	if envelope := mustReadEnvelope(t, ctx, host); envelope.Type != protocol.TypeRoomState {
+		t.Fatalf("expected host room_state, got %s", envelope.Type)
+	}
+
+	mustSendEnvelope(t, ctx, host, protocol.Envelope{
+		Type: protocol.TypePlay,
+		Payload: mustJSONRaw(protocol.PlayPayload{
+			RoomID:     createdRoom.ID(),
+			UserID:     "user_a",
+			RequestID:  "timeline-rpc-unavailable-play",
+			PositionMs: 0,
+			Seq:        1,
+		}),
+	})
+
+	var envelope protocol.ErrorEnvelope
+	readMessageAs(t, ctx, host, &envelope)
+	if envelope.Type != protocol.TypeError || envelope.Payload.Message != "room timeline unavailable" {
+		t.Fatalf("unexpected timeline rpc failure response: %+v", envelope)
+	}
+	state := createdRoom.StateSnapshot()
+	if state.Seq != 1 || !state.Paused {
+		t.Fatalf("expected failed accepted control to roll back, got seq=%d paused=%t", state.Seq, state.Paused)
+	}
+	record := controlRequests.record(createdRoom.ID(), "timeline-rpc-unavailable-play")
+	if record.Status == cache.ControlRequestStatusAccepted {
+		t.Fatalf("expected request not to finalize accepted, got %+v", record)
+	}
+	for _, event := range broadcastBus.events() {
+		if event.Type == protocol.TypePlay {
+			t.Fatalf("expected no accepted play broadcast when timeline rpc fails, got %+v", event)
+		}
+	}
+}
+
+func TestWebSocketDistributedAuthorityForwardedControlTimelineFailureReturnsError(t *testing.T) {
+	broadcastBus := &recordingRoomBroadcastBus{}
+	controlBus := eventbus.NewMemoryRoomControlBus()
+	defer controlBus.Close()
+	controlRequests := newFakeControlRequestRegistry()
+
+	roomManagerA := room.NewManager()
+	roomA, err := roomManagerA.CreateRoom("user_a", "sample_001")
+	if err != nil {
+		t.Fatalf("create room A: %v", err)
+	}
+	roomManagerB := room.NewManager()
+	roomManagerB.RegisterCreatedRoom(roomA.ID(), "user_a", "sample_001")
+
+	authority := newFakeAuthorityRegistry(roomA.ID(), "instance-a")
+	activeDevices := newFakeActiveDeviceRegistry()
+	serverA := newDistributedWebSocketServerWithHardening(
+		t,
+		roomManagerA,
+		"instance-a",
+		authority,
+		activeDevices,
+		broadcastBus,
+		controlBus,
+		nil,
+		controlRequests,
+		nil,
+		errorTimelineRecorder{err: context.DeadlineExceeded},
+	)
+	defer serverA.Close()
+	serverB := newDistributedWebSocketServerWithHardening(
+		t,
+		roomManagerB,
+		"instance-b",
+		authority,
+		activeDevices,
+		broadcastBus,
+		controlBus,
+		nil,
+		controlRequests,
+		nil,
+		timeline.NoopRecorder{},
+	)
+	defer serverB.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	hostB := mustDialWebSocket(t, ctx, wsURL(serverB.URL), "user_a")
+	defer hostB.Close(websocket.StatusNormalClosure, "test done")
+
+	mustJoinRoom(t, ctx, hostB, roomA.ID(), "user_a")
+	if envelope := mustReadEnvelope(t, ctx, hostB); envelope.Type != protocol.TypeRoomState {
+		t.Fatalf("expected host room_state, got %s", envelope.Type)
+	}
+
+	mustSendEnvelope(t, ctx, hostB, protocol.Envelope{
+		Type: protocol.TypePlay,
+		Payload: mustJSONRaw(protocol.PlayPayload{
+			RoomID:     roomA.ID(),
+			UserID:     "user_a",
+			RequestID:  "forwarded-timeline-timeout-play",
+			PositionMs: 0,
+			Seq:        1,
+		}),
+	})
+
+	var envelope protocol.ErrorEnvelope
+	readMessageAs(t, ctx, hostB, &envelope)
+	if envelope.Type != protocol.TypeError || envelope.Payload.Message != "room timeline unavailable" {
+		t.Fatalf("unexpected forwarded timeline failure response: %+v", envelope)
+	}
+	stateA := roomA.StateSnapshot()
+	if stateA.Seq != 1 || !stateA.Paused {
+		t.Fatalf("expected authority state to roll back, got seq=%d paused=%t", stateA.Seq, stateA.Paused)
+	}
+	for _, event := range broadcastBus.events() {
+		if event.Type == protocol.TypePlay {
+			t.Fatalf("expected no accepted play broadcast when forwarded timeline fails, got %+v", event)
 		}
 	}
 }
@@ -868,6 +1022,12 @@ func (r *fakeControlRequestRegistry) Forget(ctx context.Context, roomID string, 
 	return nil
 }
 
+func (r *fakeControlRequestRegistry) record(roomID string, requestID string) cache.ControlRequestRecord {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.records[roomMembershipKey(roomID, requestID)]
+}
+
 func (r *fakeControlRequestRegistry) finalize(
 	roomID string,
 	requestID string,
@@ -971,6 +1131,14 @@ type failingTimelineRecorder struct{}
 
 func (failingTimelineRecorder) RecordTimelineEvent(context.Context, timeline.Event) error {
 	return errors.New("outbox unavailable")
+}
+
+type errorTimelineRecorder struct {
+	err error
+}
+
+func (r errorTimelineRecorder) RecordTimelineEvent(context.Context, timeline.Event) error {
+	return r.err
 }
 
 func assertRoomPresence(

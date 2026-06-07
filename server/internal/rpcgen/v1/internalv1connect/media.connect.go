@@ -45,6 +45,12 @@ const (
 	// MediaInternalServiceAuthorizePlaybackProcedure is the fully-qualified name of the
 	// MediaInternalService's AuthorizePlayback RPC.
 	MediaInternalServiceAuthorizePlaybackProcedure = "/watch_together.internal.v1.MediaInternalService/AuthorizePlayback"
+	// MediaInternalServiceGetEpisodeDetailProcedure is the fully-qualified name of the
+	// MediaInternalService's GetEpisodeDetail RPC.
+	MediaInternalServiceGetEpisodeDetailProcedure = "/watch_together.internal.v1.MediaInternalService/GetEpisodeDetail"
+	// MediaInternalServiceValidatePlayableEpisodeProcedure is the fully-qualified name of the
+	// MediaInternalService's ValidatePlayableEpisode RPC.
+	MediaInternalServiceValidatePlayableEpisodeProcedure = "/watch_together.internal.v1.MediaInternalService/ValidatePlayableEpisode"
 )
 
 // MediaInternalServiceClient is a client for the watch_together.internal.v1.MediaInternalService
@@ -54,6 +60,8 @@ type MediaInternalServiceClient interface {
 	SearchItems(context.Context, *connect.Request[v1.SearchItemsRequest]) (*connect.Response[v1.SearchItemsResponse], error)
 	GetPlaybackItem(context.Context, *connect.Request[v1.GetPlaybackItemRequest]) (*connect.Response[v1.GetPlaybackItemResponse], error)
 	AuthorizePlayback(context.Context, *connect.Request[v1.AuthorizePlaybackRequest]) (*connect.Response[v1.AuthorizePlaybackResponse], error)
+	GetEpisodeDetail(context.Context, *connect.Request[v1.GetEpisodeDetailRequest]) (*connect.Response[v1.GetEpisodeDetailResponse], error)
+	ValidatePlayableEpisode(context.Context, *connect.Request[v1.ValidatePlayableEpisodeRequest]) (*connect.Response[v1.ValidatePlayableEpisodeResponse], error)
 }
 
 // NewMediaInternalServiceClient constructs a client for the
@@ -92,15 +100,29 @@ func NewMediaInternalServiceClient(httpClient connect.HTTPClient, baseURL string
 			connect.WithSchema(mediaInternalServiceMethods.ByName("AuthorizePlayback")),
 			connect.WithClientOptions(opts...),
 		),
+		getEpisodeDetail: connect.NewClient[v1.GetEpisodeDetailRequest, v1.GetEpisodeDetailResponse](
+			httpClient,
+			baseURL+MediaInternalServiceGetEpisodeDetailProcedure,
+			connect.WithSchema(mediaInternalServiceMethods.ByName("GetEpisodeDetail")),
+			connect.WithClientOptions(opts...),
+		),
+		validatePlayableEpisode: connect.NewClient[v1.ValidatePlayableEpisodeRequest, v1.ValidatePlayableEpisodeResponse](
+			httpClient,
+			baseURL+MediaInternalServiceValidatePlayableEpisodeProcedure,
+			connect.WithSchema(mediaInternalServiceMethods.ByName("ValidatePlayableEpisode")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
 // mediaInternalServiceClient implements MediaInternalServiceClient.
 type mediaInternalServiceClient struct {
-	listTags          *connect.Client[v1.ListTagsRequest, v1.ListTagsResponse]
-	searchItems       *connect.Client[v1.SearchItemsRequest, v1.SearchItemsResponse]
-	getPlaybackItem   *connect.Client[v1.GetPlaybackItemRequest, v1.GetPlaybackItemResponse]
-	authorizePlayback *connect.Client[v1.AuthorizePlaybackRequest, v1.AuthorizePlaybackResponse]
+	listTags                *connect.Client[v1.ListTagsRequest, v1.ListTagsResponse]
+	searchItems             *connect.Client[v1.SearchItemsRequest, v1.SearchItemsResponse]
+	getPlaybackItem         *connect.Client[v1.GetPlaybackItemRequest, v1.GetPlaybackItemResponse]
+	authorizePlayback       *connect.Client[v1.AuthorizePlaybackRequest, v1.AuthorizePlaybackResponse]
+	getEpisodeDetail        *connect.Client[v1.GetEpisodeDetailRequest, v1.GetEpisodeDetailResponse]
+	validatePlayableEpisode *connect.Client[v1.ValidatePlayableEpisodeRequest, v1.ValidatePlayableEpisodeResponse]
 }
 
 // ListTags calls watch_together.internal.v1.MediaInternalService.ListTags.
@@ -123,6 +145,17 @@ func (c *mediaInternalServiceClient) AuthorizePlayback(ctx context.Context, req 
 	return c.authorizePlayback.CallUnary(ctx, req)
 }
 
+// GetEpisodeDetail calls watch_together.internal.v1.MediaInternalService.GetEpisodeDetail.
+func (c *mediaInternalServiceClient) GetEpisodeDetail(ctx context.Context, req *connect.Request[v1.GetEpisodeDetailRequest]) (*connect.Response[v1.GetEpisodeDetailResponse], error) {
+	return c.getEpisodeDetail.CallUnary(ctx, req)
+}
+
+// ValidatePlayableEpisode calls
+// watch_together.internal.v1.MediaInternalService.ValidatePlayableEpisode.
+func (c *mediaInternalServiceClient) ValidatePlayableEpisode(ctx context.Context, req *connect.Request[v1.ValidatePlayableEpisodeRequest]) (*connect.Response[v1.ValidatePlayableEpisodeResponse], error) {
+	return c.validatePlayableEpisode.CallUnary(ctx, req)
+}
+
 // MediaInternalServiceHandler is an implementation of the
 // watch_together.internal.v1.MediaInternalService service.
 type MediaInternalServiceHandler interface {
@@ -130,6 +163,8 @@ type MediaInternalServiceHandler interface {
 	SearchItems(context.Context, *connect.Request[v1.SearchItemsRequest]) (*connect.Response[v1.SearchItemsResponse], error)
 	GetPlaybackItem(context.Context, *connect.Request[v1.GetPlaybackItemRequest]) (*connect.Response[v1.GetPlaybackItemResponse], error)
 	AuthorizePlayback(context.Context, *connect.Request[v1.AuthorizePlaybackRequest]) (*connect.Response[v1.AuthorizePlaybackResponse], error)
+	GetEpisodeDetail(context.Context, *connect.Request[v1.GetEpisodeDetailRequest]) (*connect.Response[v1.GetEpisodeDetailResponse], error)
+	ValidatePlayableEpisode(context.Context, *connect.Request[v1.ValidatePlayableEpisodeRequest]) (*connect.Response[v1.ValidatePlayableEpisodeResponse], error)
 }
 
 // NewMediaInternalServiceHandler builds an HTTP handler from the service implementation. It returns
@@ -163,6 +198,18 @@ func NewMediaInternalServiceHandler(svc MediaInternalServiceHandler, opts ...con
 		connect.WithSchema(mediaInternalServiceMethods.ByName("AuthorizePlayback")),
 		connect.WithHandlerOptions(opts...),
 	)
+	mediaInternalServiceGetEpisodeDetailHandler := connect.NewUnaryHandler(
+		MediaInternalServiceGetEpisodeDetailProcedure,
+		svc.GetEpisodeDetail,
+		connect.WithSchema(mediaInternalServiceMethods.ByName("GetEpisodeDetail")),
+		connect.WithHandlerOptions(opts...),
+	)
+	mediaInternalServiceValidatePlayableEpisodeHandler := connect.NewUnaryHandler(
+		MediaInternalServiceValidatePlayableEpisodeProcedure,
+		svc.ValidatePlayableEpisode,
+		connect.WithSchema(mediaInternalServiceMethods.ByName("ValidatePlayableEpisode")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/watch_together.internal.v1.MediaInternalService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case MediaInternalServiceListTagsProcedure:
@@ -173,6 +220,10 @@ func NewMediaInternalServiceHandler(svc MediaInternalServiceHandler, opts ...con
 			mediaInternalServiceGetPlaybackItemHandler.ServeHTTP(w, r)
 		case MediaInternalServiceAuthorizePlaybackProcedure:
 			mediaInternalServiceAuthorizePlaybackHandler.ServeHTTP(w, r)
+		case MediaInternalServiceGetEpisodeDetailProcedure:
+			mediaInternalServiceGetEpisodeDetailHandler.ServeHTTP(w, r)
+		case MediaInternalServiceValidatePlayableEpisodeProcedure:
+			mediaInternalServiceValidatePlayableEpisodeHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -196,4 +247,12 @@ func (UnimplementedMediaInternalServiceHandler) GetPlaybackItem(context.Context,
 
 func (UnimplementedMediaInternalServiceHandler) AuthorizePlayback(context.Context, *connect.Request[v1.AuthorizePlaybackRequest]) (*connect.Response[v1.AuthorizePlaybackResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("watch_together.internal.v1.MediaInternalService.AuthorizePlayback is not implemented"))
+}
+
+func (UnimplementedMediaInternalServiceHandler) GetEpisodeDetail(context.Context, *connect.Request[v1.GetEpisodeDetailRequest]) (*connect.Response[v1.GetEpisodeDetailResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("watch_together.internal.v1.MediaInternalService.GetEpisodeDetail is not implemented"))
+}
+
+func (UnimplementedMediaInternalServiceHandler) ValidatePlayableEpisode(context.Context, *connect.Request[v1.ValidatePlayableEpisodeRequest]) (*connect.Response[v1.ValidatePlayableEpisodeResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("watch_together.internal.v1.MediaInternalService.ValidatePlayableEpisode is not implemented"))
 }

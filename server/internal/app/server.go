@@ -159,7 +159,8 @@ func NewServer(config Config) *Server {
 	if distributedAuthority && db == nil {
 		log.Fatal("distributed_authority requires postgres")
 	}
-	roomService, roomStore := newRoomService(db)
+	mediaService := newMediaService(db, config, serviceConfig)
+	roomService, roomStore := newRoomService(db, mediaService)
 	var timelineRecorder timeline.Recorder = timeline.NoopRecorder{}
 	var timelineReader timeline.RoomEventReader
 	var pendingOutboxReader recovery.PendingOutboxReader
@@ -245,8 +246,8 @@ func NewServer(config Config) *Server {
 	roomControlBus := newRoomControlBus(config.WebSocket, config.NATS, distributedAuthority)
 	authHTTPHandler := transport.NewAuthHTTPHandler(newAuthService(db, tokenManager))
 	homeHTTPHandler := transport.NewHomeHTTPHandlerWithTokenVerifier(newHomeService(db), tokenManager)
-	mediaHTTPHandler := transport.NewMediaHTTPHandlerWithTokenVerifier(newMediaService(db, config, serviceConfig), tokenManager, config.Media)
-	progressHTTPHandler := transport.NewProgressHTTPHandlerWithTokenVerifier(newProgressService(db), tokenManager)
+	mediaHTTPHandler := transport.NewMediaHTTPHandlerWithTokenVerifier(mediaService, tokenManager, config.Media)
+	progressHTTPHandler := transport.NewProgressHTTPHandlerWithTokenVerifier(newProgressService(db, mediaService), tokenManager)
 	router := newGinRouter(
 		serverCtx,
 		roomManager,
@@ -601,20 +602,27 @@ func newMediaService(db *gorm.DB, config Config, service servicekit.Config) *med
 }
 
 // newRoomService connects room business APIs to the shared PostgreSQL handle when available.
-func newRoomService(db *gorm.DB) (*roomapi.Service, *store.PostgresRoomStore) {
+func newRoomService(db *gorm.DB, mediaService *media.Service) (*roomapi.Service, *store.PostgresRoomStore) {
 	if db == nil {
 		return nil, nil
 	}
 	roomStore := store.NewPostgresRoomStore(db)
-	return roomapi.NewService(roomStore), roomStore
+	if mediaService == nil {
+		return nil, roomStore
+	}
+	var mediaLookup roomapi.MediaDetailLookup
+	mediaLookup = mediaService
+	return roomapi.NewServiceWithMediaLookup(roomStore, mediaLookup), roomStore
 }
 
 // newProgressService connects media progress writes to the shared PostgreSQL handle when available.
-func newProgressService(db *gorm.DB) *progress.Service {
-	if db == nil {
+func newProgressService(db *gorm.DB, mediaService *media.Service) *progress.Service {
+	if db == nil || mediaService == nil {
 		return nil
 	}
-	return progress.NewService(store.NewPostgresProgressStore(db))
+	var mediaValidator progress.MediaValidator
+	mediaValidator = mediaService
+	return progress.NewServiceWithMediaValidator(store.NewPostgresProgressStore(db), mediaValidator)
 }
 
 func startPersistentRoomCleanupLoop(

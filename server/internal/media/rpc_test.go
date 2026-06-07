@@ -22,6 +22,12 @@ func TestRPCStoreMatchesLocalMediaStore(t *testing.T) {
 			MediaURL: "episode-1/hls/master.m3u8",
 		}},
 		playback: PlaybackItem{ID: "episode-1", MediaURL: "episode-1/hls/master.m3u8"},
+		detail: EpisodeDetail{
+			ID:       "episode-1",
+			Title:    "Episode 1",
+			MediaURL: "episode-1/hls/master.m3u8",
+		},
+		playable: PlayableEpisode{ID: "episode-1", Playable: true},
 	}
 	mux := http.NewServeMux()
 	RegisterInternalRPC(mux, "", "secret", NewService(localStore))
@@ -60,11 +66,29 @@ func TestRPCStoreMatchesLocalMediaStore(t *testing.T) {
 	if !authorized {
 		t.Fatalf("expected playback authorization")
 	}
+	detail, err := rpcStore.FindEpisodeDetail(context.Background(), "episode-1")
+	if err != nil {
+		t.Fatalf("episode detail through rpc: %v", err)
+	}
+	if detail.ID != "episode-1" || detail.Title != "Episode 1" {
+		t.Fatalf("unexpected episode detail: %+v", detail)
+	}
+	playable, err := rpcStore.ValidatePlayableEpisode(context.Background(), "episode-1")
+	if err != nil {
+		t.Fatalf("playable validation through rpc: %v", err)
+	}
+	if playable.ID != "episode-1" || !playable.Playable {
+		t.Fatalf("unexpected playable episode: %+v", playable)
+	}
 }
 
 func TestRPCStoreMapsPlaybackNotFound(t *testing.T) {
 	mux := http.NewServeMux()
-	RegisterInternalRPC(mux, "", "", NewService(fakeRPCMediaStore{playbackErr: ErrMediaNotFound}))
+	RegisterInternalRPC(mux, "", "", NewService(fakeRPCMediaStore{
+		playbackErr: ErrMediaNotFound,
+		detailErr:   ErrMediaNotFound,
+		playableErr: ErrMediaNotFound,
+	}))
 	server := httptest.NewServer(mux)
 	defer server.Close()
 
@@ -72,6 +96,14 @@ func TestRPCStoreMapsPlaybackNotFound(t *testing.T) {
 	_, err := rpcStore.FindPlaybackItem(context.Background(), "missing")
 	if !errors.Is(err, ErrMediaNotFound) {
 		t.Fatalf("expected ErrMediaNotFound, got %v", err)
+	}
+	_, err = rpcStore.FindEpisodeDetail(context.Background(), "missing")
+	if !errors.Is(err, ErrMediaNotFound) {
+		t.Fatalf("expected ErrMediaNotFound for detail, got %v", err)
+	}
+	_, err = rpcStore.ValidatePlayableEpisode(context.Background(), "missing")
+	if !errors.Is(err, ErrMediaNotFound) {
+		t.Fatalf("expected ErrMediaNotFound for playable validation, got %v", err)
 	}
 }
 
@@ -96,7 +128,11 @@ type fakeRPCMediaStore struct {
 	tags        TagList
 	items       []Item
 	playback    PlaybackItem
+	detail      EpisodeDetail
+	playable    PlayableEpisode
 	playbackErr error
+	detailErr   error
+	playableErr error
 }
 
 func (s fakeRPCMediaStore) ListTags(context.Context, int) (TagList, error) {
@@ -112,4 +148,18 @@ func (s fakeRPCMediaStore) FindPlaybackItem(context.Context, string) (PlaybackIt
 		return PlaybackItem{}, s.playbackErr
 	}
 	return s.playback, nil
+}
+
+func (s fakeRPCMediaStore) FindEpisodeDetail(context.Context, string) (EpisodeDetail, error) {
+	if s.detailErr != nil {
+		return EpisodeDetail{}, s.detailErr
+	}
+	return s.detail, nil
+}
+
+func (s fakeRPCMediaStore) ValidatePlayableEpisode(context.Context, string) (PlayableEpisode, error) {
+	if s.playableErr != nil {
+		return PlayableEpisode{}, s.playableErr
+	}
+	return s.playable, nil
 }

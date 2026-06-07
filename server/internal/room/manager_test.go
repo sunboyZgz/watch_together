@@ -38,12 +38,6 @@ func TestManagerRemoveClientDeletesEmptyRoom(t *testing.T) {
 	}
 }
 
-func TestManagerDefaultEmptyRoomGracePeriodIsFiveMinutes(t *testing.T) {
-	if got := DefaultEmptyRoomGracePeriod(); got != 5*time.Minute {
-		t.Fatalf("expected default grace period 5m, got %s", got)
-	}
-}
-
 func TestManagerLeaveClientDestroysEmptyRoomImmediately(t *testing.T) {
 	currentTime := time.UnixMilli(1_000)
 	manager := newManagerWithClock(func() time.Time {

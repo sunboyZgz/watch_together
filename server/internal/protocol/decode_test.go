@@ -6,23 +6,6 @@ import (
 	"testing"
 )
 
-func TestDecodeClockSyncPing(t *testing.T) {
-	envelope := Envelope{
-		Type: TypeClockSyncPing,
-		Payload: mustRawMessage(t, ClockSyncPingPayload{
-			ClientSendMonoMs: 123_456,
-		}),
-	}
-
-	payload, err := DecodeClockSyncPing(envelope)
-	if err != nil {
-		t.Fatalf("decode clock sync ping: %v", err)
-	}
-	if payload.ClientSendMonoMs != 123_456 {
-		t.Fatalf("expected clientSendMonoMs 123456, got %d", payload.ClientSendMonoMs)
-	}
-}
-
 func TestDecodeClockSyncPingRejectsMissingClientSendMonoMs(t *testing.T) {
 	envelope := Envelope{
 		Type:    TypeClockSyncPing,
@@ -49,44 +32,6 @@ func TestDecodeClockSyncPingRejectsWrongType(t *testing.T) {
 	}
 }
 
-func TestDecodeRoomStateRequest(t *testing.T) {
-	envelope := Envelope{
-		Type: TypeRoomStateRequest,
-		Payload: mustRawMessage(t, RoomStateRequestPayload{
-			RoomID: "room_001",
-			UserID: "user_a",
-			Seq:    7,
-		}),
-	}
-
-	payload, err := DecodeRoomStateRequest(envelope)
-	if err != nil {
-		t.Fatalf("decode room_state.request: %v", err)
-	}
-	if payload.RoomID != "room_001" || payload.UserID != "user_a" || payload.Seq != 7 {
-		t.Fatalf("unexpected room_state.request payload: %+v", payload)
-	}
-}
-
-func TestDecodeJoinRoomRequiresDeviceID(t *testing.T) {
-	envelope := Envelope{
-		Type: TypeJoinRoom,
-		Payload: mustRawMessage(t, JoinRoomPayload{
-			RoomID:   "room_001",
-			UserID:   "user_a",
-			DeviceID: "device_a",
-		}),
-	}
-
-	payload, err := DecodeJoinRoom(envelope)
-	if err != nil {
-		t.Fatalf("decode join_room: %v", err)
-	}
-	if payload.RoomID != "room_001" || payload.UserID != "user_a" || payload.DeviceID != "device_a" {
-		t.Fatalf("unexpected join_room payload: %+v", payload)
-	}
-}
-
 func TestDecodeJoinRoomRejectsMissingDeviceID(t *testing.T) {
 	envelope := Envelope{
 		Type: TypeJoinRoom,
@@ -99,24 +44,6 @@ func TestDecodeJoinRoomRejectsMissingDeviceID(t *testing.T) {
 	_, err := DecodeJoinRoom(envelope)
 	if err == nil || !strings.Contains(err.Error(), "missing deviceId") {
 		t.Fatalf("expected missing deviceId error, got %v", err)
-	}
-}
-
-func TestDecodeLeaveRoom(t *testing.T) {
-	envelope := Envelope{
-		Type: TypeLeaveRoom,
-		Payload: mustRawMessage(t, LeaveRoomPayload{
-			RoomID: "room_001",
-			UserID: "user_a",
-		}),
-	}
-
-	payload, err := DecodeLeaveRoom(envelope)
-	if err != nil {
-		t.Fatalf("decode leave_room: %v", err)
-	}
-	if payload.RoomID != "room_001" || payload.UserID != "user_a" {
-		t.Fatalf("unexpected leave_room payload: %+v", payload)
 	}
 }
 

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -90,16 +91,8 @@ func main() {
 		runtimeConfig,
 		serviceConfig,
 		metrics,
-		observability.NewReadinessSnapshot(
-			runtimeConfig.AppEnv,
-			runtimeConfig.InstanceID,
-			"timelineservice",
-			[]observability.DependencyStatus{
-				{Name: "postgres", Status: "ok", Required: true},
-				dependencyStatus("kafka", roomReader != nil, false),
-				{Name: "internal_rpc", Status: "ok", Required: true},
-			},
-		),
+		sqlDB,
+		roomReader != nil,
 	)
 	timeline.RegisterInternalRPC(
 		mux,
@@ -140,7 +133,8 @@ func installServiceEndpoints(
 	config wtconfig.ServerRuntimeConfig,
 	service servicekit.Config,
 	metrics *observability.Metrics,
-	readiness observability.ReadinessSnapshot,
+	sqlDB *sql.DB,
+	kafkaReaderAvailable bool,
 ) {
 	metricsPath := strings.TrimSpace(config.Observability.MetricsPath)
 	if metricsPath == "" {
@@ -156,6 +150,7 @@ func installServiceEndpoints(
 		_, _ = w.Write([]byte("ok"))
 	})
 	mux.HandleFunc(readinessPath, func(w http.ResponseWriter, r *http.Request) {
+		readiness := timelineserviceReadiness(r.Context(), config, sqlDB, kafkaReaderAvailable)
 		status := http.StatusOK
 		if readiness.Status != "ready" {
 			status = http.StatusServiceUnavailable
@@ -167,6 +162,46 @@ func installServiceEndpoints(
 	if config.Observability.MetricsEnabled {
 		mux.Handle(metricsPath, metrics.Handler())
 	}
+}
+
+func timelineserviceReadiness(
+	ctx context.Context,
+	config wtconfig.ServerRuntimeConfig,
+	sqlDB *sql.DB,
+	kafkaReaderAvailable bool,
+) observability.ReadinessSnapshot {
+	return observability.NewReadinessSnapshot(
+		config.AppEnv,
+		config.InstanceID,
+		"timelineservice",
+		[]observability.DependencyStatus{
+			postgresDependency(ctx, sqlDB),
+			kafkaDependency(config, kafkaReaderAvailable),
+			{Name: "internal_rpc", Status: "ok", Required: true},
+		},
+	)
+}
+
+func postgresDependency(ctx context.Context, sqlDB *sql.DB) observability.DependencyStatus {
+	status := "unavailable"
+	if sqlDB != nil {
+		pingCtx, cancel := context.WithTimeout(ctx, 200*time.Millisecond)
+		defer cancel()
+		if err := sqlDB.PingContext(pingCtx); err == nil {
+			status = "ok"
+		}
+	}
+	return observability.DependencyStatus{Name: "postgres", Status: status, Required: true}
+}
+
+func kafkaDependency(config wtconfig.ServerRuntimeConfig, readerAvailable bool) observability.DependencyStatus {
+	if len(config.Kafka.Brokers) == 0 {
+		return observability.DependencyStatus{Name: "kafka", Status: "disabled", Required: false}
+	}
+	if readerAvailable {
+		return observability.DependencyStatus{Name: "kafka", Status: "ok", Required: false}
+	}
+	return observability.DependencyStatus{Name: "kafka", Status: "unavailable", Required: false}
 }
 
 func dependencyStatus(name string, ok bool, required bool) observability.DependencyStatus {

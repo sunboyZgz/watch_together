@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -78,15 +79,7 @@ func main() {
 		runtimeConfig,
 		serviceConfig,
 		metrics,
-		observability.NewReadinessSnapshot(
-			runtimeConfig.AppEnv,
-			runtimeConfig.InstanceID,
-			"mediaservice",
-			[]observability.DependencyStatus{
-				{Name: "postgres", Status: "ok", Required: true},
-				{Name: "internal_rpc", Status: "ok", Required: true},
-			},
-		),
+		sqlDB,
 	)
 	media.RegisterInternalRPC(mux, runtimeConfig.InternalRPC.PathPrefix, runtimeConfig.InternalRPC.AuthToken, mediaService)
 
@@ -120,7 +113,7 @@ func installServiceEndpoints(
 	config wtconfig.ServerRuntimeConfig,
 	service servicekit.Config,
 	metrics *observability.Metrics,
-	readiness observability.ReadinessSnapshot,
+	sqlDB *sql.DB,
 ) {
 	metricsPath := strings.TrimSpace(config.Observability.MetricsPath)
 	if metricsPath == "" {
@@ -136,6 +129,7 @@ func installServiceEndpoints(
 		_, _ = w.Write([]byte("ok"))
 	})
 	mux.HandleFunc(readinessPath, func(w http.ResponseWriter, r *http.Request) {
+		readiness := mediaserviceReadiness(r.Context(), config, sqlDB)
 		status := http.StatusOK
 		if readiness.Status != "ready" {
 			status = http.StatusServiceUnavailable
@@ -147,6 +141,30 @@ func installServiceEndpoints(
 	if config.Observability.MetricsEnabled {
 		mux.Handle(metricsPath, metrics.Handler())
 	}
+}
+
+func mediaserviceReadiness(ctx context.Context, config wtconfig.ServerRuntimeConfig, sqlDB *sql.DB) observability.ReadinessSnapshot {
+	return observability.NewReadinessSnapshot(
+		config.AppEnv,
+		config.InstanceID,
+		"mediaservice",
+		[]observability.DependencyStatus{
+			postgresDependency(ctx, sqlDB),
+			{Name: "internal_rpc", Status: "ok", Required: true},
+		},
+	)
+}
+
+func postgresDependency(ctx context.Context, sqlDB *sql.DB) observability.DependencyStatus {
+	status := "unavailable"
+	if sqlDB != nil {
+		pingCtx, cancel := context.WithTimeout(ctx, 200*time.Millisecond)
+		defer cancel()
+		if err := sqlDB.PingContext(pingCtx); err == nil {
+			status = "ok"
+		}
+	}
+	return observability.DependencyStatus{Name: "postgres", Status: status, Required: true}
 }
 
 func serviceName(configured string, fallback string) string {

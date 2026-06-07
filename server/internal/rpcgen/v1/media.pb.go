@@ -421,6 +421,206 @@ func (x *AuthorizePlaybackResponse) GetAuthorized() bool {
 	return false
 }
 
+type GetEpisodeDetailRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Metadata      *RequestMetadata       `protobuf:"bytes,1,opt,name=metadata,proto3" json:"metadata,omitempty"`
+	EpisodeId     string                 `protobuf:"bytes,2,opt,name=episode_id,json=episodeId,proto3" json:"episode_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetEpisodeDetailRequest) Reset() {
+	*x = GetEpisodeDetailRequest{}
+	mi := &file_server_api_internal_v1_media_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetEpisodeDetailRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetEpisodeDetailRequest) ProtoMessage() {}
+
+func (x *GetEpisodeDetailRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_server_api_internal_v1_media_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetEpisodeDetailRequest.ProtoReflect.Descriptor instead.
+func (*GetEpisodeDetailRequest) Descriptor() ([]byte, []int) {
+	return file_server_api_internal_v1_media_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *GetEpisodeDetailRequest) GetMetadata() *RequestMetadata {
+	if x != nil {
+		return x.Metadata
+	}
+	return nil
+}
+
+func (x *GetEpisodeDetailRequest) GetEpisodeId() string {
+	if x != nil {
+		return x.EpisodeId
+	}
+	return ""
+}
+
+type GetEpisodeDetailResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Episode       *EpisodeDetail         `protobuf:"bytes,1,opt,name=episode,proto3" json:"episode,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetEpisodeDetailResponse) Reset() {
+	*x = GetEpisodeDetailResponse{}
+	mi := &file_server_api_internal_v1_media_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetEpisodeDetailResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetEpisodeDetailResponse) ProtoMessage() {}
+
+func (x *GetEpisodeDetailResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_server_api_internal_v1_media_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetEpisodeDetailResponse.ProtoReflect.Descriptor instead.
+func (*GetEpisodeDetailResponse) Descriptor() ([]byte, []int) {
+	return file_server_api_internal_v1_media_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *GetEpisodeDetailResponse) GetEpisode() *EpisodeDetail {
+	if x != nil {
+		return x.Episode
+	}
+	return nil
+}
+
+type ValidatePlayableEpisodeRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Metadata      *RequestMetadata       `protobuf:"bytes,1,opt,name=metadata,proto3" json:"metadata,omitempty"`
+	EpisodeId     string                 `protobuf:"bytes,2,opt,name=episode_id,json=episodeId,proto3" json:"episode_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ValidatePlayableEpisodeRequest) Reset() {
+	*x = ValidatePlayableEpisodeRequest{}
+	mi := &file_server_api_internal_v1_media_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ValidatePlayableEpisodeRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ValidatePlayableEpisodeRequest) ProtoMessage() {}
+
+func (x *ValidatePlayableEpisodeRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_server_api_internal_v1_media_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ValidatePlayableEpisodeRequest.ProtoReflect.Descriptor instead.
+func (*ValidatePlayableEpisodeRequest) Descriptor() ([]byte, []int) {
+	return file_server_api_internal_v1_media_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *ValidatePlayableEpisodeRequest) GetMetadata() *RequestMetadata {
+	if x != nil {
+		return x.Metadata
+	}
+	return nil
+}
+
+func (x *ValidatePlayableEpisodeRequest) GetEpisodeId() string {
+	if x != nil {
+		return x.EpisodeId
+	}
+	return ""
+}
+
+type ValidatePlayableEpisodeResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	EpisodeId     string                 `protobuf:"bytes,1,opt,name=episode_id,json=episodeId,proto3" json:"episode_id,omitempty"`
+	Playable      bool                   `protobuf:"varint,2,opt,name=playable,proto3" json:"playable,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ValidatePlayableEpisodeResponse) Reset() {
+	*x = ValidatePlayableEpisodeResponse{}
+	mi := &file_server_api_internal_v1_media_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ValidatePlayableEpisodeResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ValidatePlayableEpisodeResponse) ProtoMessage() {}
+
+func (x *ValidatePlayableEpisodeResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_server_api_internal_v1_media_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ValidatePlayableEpisodeResponse.ProtoReflect.Descriptor instead.
+func (*ValidatePlayableEpisodeResponse) Descriptor() ([]byte, []int) {
+	return file_server_api_internal_v1_media_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *ValidatePlayableEpisodeResponse) GetEpisodeId() string {
+	if x != nil {
+		return x.EpisodeId
+	}
+	return ""
+}
+
+func (x *ValidatePlayableEpisodeResponse) GetPlayable() bool {
+	if x != nil {
+		return x.Playable
+	}
+	return false
+}
+
 type MediaTag struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
@@ -432,7 +632,7 @@ type MediaTag struct {
 
 func (x *MediaTag) Reset() {
 	*x = MediaTag{}
-	mi := &file_server_api_internal_v1_media_proto_msgTypes[8]
+	mi := &file_server_api_internal_v1_media_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -444,7 +644,7 @@ func (x *MediaTag) String() string {
 func (*MediaTag) ProtoMessage() {}
 
 func (x *MediaTag) ProtoReflect() protoreflect.Message {
-	mi := &file_server_api_internal_v1_media_proto_msgTypes[8]
+	mi := &file_server_api_internal_v1_media_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -457,7 +657,7 @@ func (x *MediaTag) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MediaTag.ProtoReflect.Descriptor instead.
 func (*MediaTag) Descriptor() ([]byte, []int) {
-	return file_server_api_internal_v1_media_proto_rawDescGZIP(), []int{8}
+	return file_server_api_internal_v1_media_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *MediaTag) GetId() string {
@@ -491,7 +691,7 @@ type MediaItemTag struct {
 
 func (x *MediaItemTag) Reset() {
 	*x = MediaItemTag{}
-	mi := &file_server_api_internal_v1_media_proto_msgTypes[9]
+	mi := &file_server_api_internal_v1_media_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -503,7 +703,7 @@ func (x *MediaItemTag) String() string {
 func (*MediaItemTag) ProtoMessage() {}
 
 func (x *MediaItemTag) ProtoReflect() protoreflect.Message {
-	mi := &file_server_api_internal_v1_media_proto_msgTypes[9]
+	mi := &file_server_api_internal_v1_media_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -516,7 +716,7 @@ func (x *MediaItemTag) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MediaItemTag.ProtoReflect.Descriptor instead.
 func (*MediaItemTag) Descriptor() ([]byte, []int) {
-	return file_server_api_internal_v1_media_proto_rawDescGZIP(), []int{9}
+	return file_server_api_internal_v1_media_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *MediaItemTag) GetSlug() string {
@@ -551,7 +751,7 @@ type MediaItem struct {
 
 func (x *MediaItem) Reset() {
 	*x = MediaItem{}
-	mi := &file_server_api_internal_v1_media_proto_msgTypes[10]
+	mi := &file_server_api_internal_v1_media_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -563,7 +763,7 @@ func (x *MediaItem) String() string {
 func (*MediaItem) ProtoMessage() {}
 
 func (x *MediaItem) ProtoReflect() protoreflect.Message {
-	mi := &file_server_api_internal_v1_media_proto_msgTypes[10]
+	mi := &file_server_api_internal_v1_media_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -576,7 +776,7 @@ func (x *MediaItem) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MediaItem.ProtoReflect.Descriptor instead.
 func (*MediaItem) Descriptor() ([]byte, []int) {
-	return file_server_api_internal_v1_media_proto_rawDescGZIP(), []int{10}
+	return file_server_api_internal_v1_media_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *MediaItem) GetId() string {
@@ -659,7 +859,7 @@ type PlaybackItem struct {
 
 func (x *PlaybackItem) Reset() {
 	*x = PlaybackItem{}
-	mi := &file_server_api_internal_v1_media_proto_msgTypes[11]
+	mi := &file_server_api_internal_v1_media_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -671,7 +871,7 @@ func (x *PlaybackItem) String() string {
 func (*PlaybackItem) ProtoMessage() {}
 
 func (x *PlaybackItem) ProtoReflect() protoreflect.Message {
-	mi := &file_server_api_internal_v1_media_proto_msgTypes[11]
+	mi := &file_server_api_internal_v1_media_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -684,7 +884,7 @@ func (x *PlaybackItem) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PlaybackItem.ProtoReflect.Descriptor instead.
 func (*PlaybackItem) Descriptor() ([]byte, []int) {
-	return file_server_api_internal_v1_media_proto_rawDescGZIP(), []int{11}
+	return file_server_api_internal_v1_media_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *PlaybackItem) GetId() string {
@@ -701,6 +901,98 @@ func (x *PlaybackItem) GetMediaUrl() string {
 	return ""
 }
 
+type EpisodeDetail struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Title         string                 `protobuf:"bytes,2,opt,name=title,proto3" json:"title,omitempty"`
+	Subtitle      *string                `protobuf:"bytes,3,opt,name=subtitle,proto3,oneof" json:"subtitle,omitempty"`
+	MediaUrl      string                 `protobuf:"bytes,4,opt,name=media_url,json=mediaUrl,proto3" json:"media_url,omitempty"`
+	DurationMs    *int64                 `protobuf:"varint,5,opt,name=duration_ms,json=durationMs,proto3,oneof" json:"duration_ms,omitempty"`
+	SeasonLabel   *string                `protobuf:"bytes,6,opt,name=season_label,json=seasonLabel,proto3,oneof" json:"season_label,omitempty"`
+	EpisodeLabel  *string                `protobuf:"bytes,7,opt,name=episode_label,json=episodeLabel,proto3,oneof" json:"episode_label,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *EpisodeDetail) Reset() {
+	*x = EpisodeDetail{}
+	mi := &file_server_api_internal_v1_media_proto_msgTypes[16]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *EpisodeDetail) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*EpisodeDetail) ProtoMessage() {}
+
+func (x *EpisodeDetail) ProtoReflect() protoreflect.Message {
+	mi := &file_server_api_internal_v1_media_proto_msgTypes[16]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use EpisodeDetail.ProtoReflect.Descriptor instead.
+func (*EpisodeDetail) Descriptor() ([]byte, []int) {
+	return file_server_api_internal_v1_media_proto_rawDescGZIP(), []int{16}
+}
+
+func (x *EpisodeDetail) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *EpisodeDetail) GetTitle() string {
+	if x != nil {
+		return x.Title
+	}
+	return ""
+}
+
+func (x *EpisodeDetail) GetSubtitle() string {
+	if x != nil && x.Subtitle != nil {
+		return *x.Subtitle
+	}
+	return ""
+}
+
+func (x *EpisodeDetail) GetMediaUrl() string {
+	if x != nil {
+		return x.MediaUrl
+	}
+	return ""
+}
+
+func (x *EpisodeDetail) GetDurationMs() int64 {
+	if x != nil && x.DurationMs != nil {
+		return *x.DurationMs
+	}
+	return 0
+}
+
+func (x *EpisodeDetail) GetSeasonLabel() string {
+	if x != nil && x.SeasonLabel != nil {
+		return *x.SeasonLabel
+	}
+	return ""
+}
+
+func (x *EpisodeDetail) GetEpisodeLabel() string {
+	if x != nil && x.EpisodeLabel != nil {
+		return *x.EpisodeLabel
+	}
+	return ""
+}
+
 type MediaSearchParams struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Query         string                 `protobuf:"bytes,1,opt,name=query,proto3" json:"query,omitempty"`
@@ -713,7 +1005,7 @@ type MediaSearchParams struct {
 
 func (x *MediaSearchParams) Reset() {
 	*x = MediaSearchParams{}
-	mi := &file_server_api_internal_v1_media_proto_msgTypes[12]
+	mi := &file_server_api_internal_v1_media_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -725,7 +1017,7 @@ func (x *MediaSearchParams) String() string {
 func (*MediaSearchParams) ProtoMessage() {}
 
 func (x *MediaSearchParams) ProtoReflect() protoreflect.Message {
-	mi := &file_server_api_internal_v1_media_proto_msgTypes[12]
+	mi := &file_server_api_internal_v1_media_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -738,7 +1030,7 @@ func (x *MediaSearchParams) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MediaSearchParams.ProtoReflect.Descriptor instead.
 func (*MediaSearchParams) Descriptor() ([]byte, []int) {
-	return file_server_api_internal_v1_media_proto_rawDescGZIP(), []int{12}
+	return file_server_api_internal_v1_media_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *MediaSearchParams) GetQuery() string {
@@ -800,7 +1092,21 @@ const file_server_api_internal_v1_media_proto_rawDesc = "" +
 	"\x19AuthorizePlaybackResponse\x12\x1e\n" +
 	"\n" +
 	"authorized\x18\x01 \x01(\bR\n" +
-	"authorized\"B\n" +
+	"authorized\"\x81\x01\n" +
+	"\x17GetEpisodeDetailRequest\x12G\n" +
+	"\bmetadata\x18\x01 \x01(\v2+.watch_together.internal.v1.RequestMetadataR\bmetadata\x12\x1d\n" +
+	"\n" +
+	"episode_id\x18\x02 \x01(\tR\tepisodeId\"_\n" +
+	"\x18GetEpisodeDetailResponse\x12C\n" +
+	"\aepisode\x18\x01 \x01(\v2).watch_together.internal.v1.EpisodeDetailR\aepisode\"\x88\x01\n" +
+	"\x1eValidatePlayableEpisodeRequest\x12G\n" +
+	"\bmetadata\x18\x01 \x01(\v2+.watch_together.internal.v1.RequestMetadataR\bmetadata\x12\x1d\n" +
+	"\n" +
+	"episode_id\x18\x02 \x01(\tR\tepisodeId\"\\\n" +
+	"\x1fValidatePlayableEpisodeResponse\x12\x1d\n" +
+	"\n" +
+	"episode_id\x18\x01 \x01(\tR\tepisodeId\x12\x1a\n" +
+	"\bplayable\x18\x02 \x01(\bR\bplayable\"B\n" +
 	"\bMediaTag\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04slug\x18\x02 \x01(\tR\x04slug\x12\x12\n" +
@@ -830,17 +1136,32 @@ const file_server_api_internal_v1_media_proto_rawDesc = "" +
 	"\x0e_episode_label\";\n" +
 	"\fPlaybackItem\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1b\n" +
-	"\tmedia_url\x18\x02 \x01(\tR\bmediaUrl\"i\n" +
+	"\tmedia_url\x18\x02 \x01(\tR\bmediaUrl\"\xab\x02\n" +
+	"\rEpisodeDetail\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\x14\n" +
+	"\x05title\x18\x02 \x01(\tR\x05title\x12\x1f\n" +
+	"\bsubtitle\x18\x03 \x01(\tH\x00R\bsubtitle\x88\x01\x01\x12\x1b\n" +
+	"\tmedia_url\x18\x04 \x01(\tR\bmediaUrl\x12$\n" +
+	"\vduration_ms\x18\x05 \x01(\x03H\x01R\n" +
+	"durationMs\x88\x01\x01\x12&\n" +
+	"\fseason_label\x18\x06 \x01(\tH\x02R\vseasonLabel\x88\x01\x01\x12(\n" +
+	"\repisode_label\x18\a \x01(\tH\x03R\fepisodeLabel\x88\x01\x01B\v\n" +
+	"\t_subtitleB\x0e\n" +
+	"\f_duration_msB\x0f\n" +
+	"\r_season_labelB\x10\n" +
+	"\x0e_episode_label\"i\n" +
 	"\x11MediaSearchParams\x12\x14\n" +
 	"\x05query\x18\x01 \x01(\tR\x05query\x12\x10\n" +
 	"\x03tag\x18\x02 \x01(\tR\x03tag\x12\x14\n" +
 	"\x05limit\x18\x03 \x01(\x05R\x05limit\x12\x16\n" +
-	"\x06offset\x18\x04 \x01(\x05R\x06offset2\xec\x03\n" +
+	"\x06offset\x18\x04 \x01(\x05R\x06offset2\x80\x06\n" +
 	"\x14MediaInternalService\x12e\n" +
 	"\bListTags\x12+.watch_together.internal.v1.ListTagsRequest\x1a,.watch_together.internal.v1.ListTagsResponse\x12n\n" +
 	"\vSearchItems\x12..watch_together.internal.v1.SearchItemsRequest\x1a/.watch_together.internal.v1.SearchItemsResponse\x12z\n" +
 	"\x0fGetPlaybackItem\x122.watch_together.internal.v1.GetPlaybackItemRequest\x1a3.watch_together.internal.v1.GetPlaybackItemResponse\x12\x80\x01\n" +
-	"\x11AuthorizePlayback\x124.watch_together.internal.v1.AuthorizePlaybackRequest\x1a5.watch_together.internal.v1.AuthorizePlaybackResponseB5Z3watch_together/server/internal/rpcgen/v1;internalv1b\x06proto3"
+	"\x11AuthorizePlayback\x124.watch_together.internal.v1.AuthorizePlaybackRequest\x1a5.watch_together.internal.v1.AuthorizePlaybackResponse\x12}\n" +
+	"\x10GetEpisodeDetail\x123.watch_together.internal.v1.GetEpisodeDetailRequest\x1a4.watch_together.internal.v1.GetEpisodeDetailResponse\x12\x92\x01\n" +
+	"\x17ValidatePlayableEpisode\x12:.watch_together.internal.v1.ValidatePlayableEpisodeRequest\x1a;.watch_together.internal.v1.ValidatePlayableEpisodeResponseB5Z3watch_together/server/internal/rpcgen/v1;internalv1b\x06proto3"
 
 var (
 	file_server_api_internal_v1_media_proto_rawDescOnce sync.Once
@@ -854,47 +1175,59 @@ func file_server_api_internal_v1_media_proto_rawDescGZIP() []byte {
 	return file_server_api_internal_v1_media_proto_rawDescData
 }
 
-var file_server_api_internal_v1_media_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
+var file_server_api_internal_v1_media_proto_msgTypes = make([]protoimpl.MessageInfo, 18)
 var file_server_api_internal_v1_media_proto_goTypes = []any{
-	(*ListTagsRequest)(nil),           // 0: watch_together.internal.v1.ListTagsRequest
-	(*ListTagsResponse)(nil),          // 1: watch_together.internal.v1.ListTagsResponse
-	(*SearchItemsRequest)(nil),        // 2: watch_together.internal.v1.SearchItemsRequest
-	(*SearchItemsResponse)(nil),       // 3: watch_together.internal.v1.SearchItemsResponse
-	(*GetPlaybackItemRequest)(nil),    // 4: watch_together.internal.v1.GetPlaybackItemRequest
-	(*GetPlaybackItemResponse)(nil),   // 5: watch_together.internal.v1.GetPlaybackItemResponse
-	(*AuthorizePlaybackRequest)(nil),  // 6: watch_together.internal.v1.AuthorizePlaybackRequest
-	(*AuthorizePlaybackResponse)(nil), // 7: watch_together.internal.v1.AuthorizePlaybackResponse
-	(*MediaTag)(nil),                  // 8: watch_together.internal.v1.MediaTag
-	(*MediaItemTag)(nil),              // 9: watch_together.internal.v1.MediaItemTag
-	(*MediaItem)(nil),                 // 10: watch_together.internal.v1.MediaItem
-	(*PlaybackItem)(nil),              // 11: watch_together.internal.v1.PlaybackItem
-	(*MediaSearchParams)(nil),         // 12: watch_together.internal.v1.MediaSearchParams
-	(*RequestMetadata)(nil),           // 13: watch_together.internal.v1.RequestMetadata
+	(*ListTagsRequest)(nil),                 // 0: watch_together.internal.v1.ListTagsRequest
+	(*ListTagsResponse)(nil),                // 1: watch_together.internal.v1.ListTagsResponse
+	(*SearchItemsRequest)(nil),              // 2: watch_together.internal.v1.SearchItemsRequest
+	(*SearchItemsResponse)(nil),             // 3: watch_together.internal.v1.SearchItemsResponse
+	(*GetPlaybackItemRequest)(nil),          // 4: watch_together.internal.v1.GetPlaybackItemRequest
+	(*GetPlaybackItemResponse)(nil),         // 5: watch_together.internal.v1.GetPlaybackItemResponse
+	(*AuthorizePlaybackRequest)(nil),        // 6: watch_together.internal.v1.AuthorizePlaybackRequest
+	(*AuthorizePlaybackResponse)(nil),       // 7: watch_together.internal.v1.AuthorizePlaybackResponse
+	(*GetEpisodeDetailRequest)(nil),         // 8: watch_together.internal.v1.GetEpisodeDetailRequest
+	(*GetEpisodeDetailResponse)(nil),        // 9: watch_together.internal.v1.GetEpisodeDetailResponse
+	(*ValidatePlayableEpisodeRequest)(nil),  // 10: watch_together.internal.v1.ValidatePlayableEpisodeRequest
+	(*ValidatePlayableEpisodeResponse)(nil), // 11: watch_together.internal.v1.ValidatePlayableEpisodeResponse
+	(*MediaTag)(nil),                        // 12: watch_together.internal.v1.MediaTag
+	(*MediaItemTag)(nil),                    // 13: watch_together.internal.v1.MediaItemTag
+	(*MediaItem)(nil),                       // 14: watch_together.internal.v1.MediaItem
+	(*PlaybackItem)(nil),                    // 15: watch_together.internal.v1.PlaybackItem
+	(*EpisodeDetail)(nil),                   // 16: watch_together.internal.v1.EpisodeDetail
+	(*MediaSearchParams)(nil),               // 17: watch_together.internal.v1.MediaSearchParams
+	(*RequestMetadata)(nil),                 // 18: watch_together.internal.v1.RequestMetadata
 }
 var file_server_api_internal_v1_media_proto_depIdxs = []int32{
-	13, // 0: watch_together.internal.v1.ListTagsRequest.metadata:type_name -> watch_together.internal.v1.RequestMetadata
-	8,  // 1: watch_together.internal.v1.ListTagsResponse.featured_tags:type_name -> watch_together.internal.v1.MediaTag
-	8,  // 2: watch_together.internal.v1.ListTagsResponse.all_tags:type_name -> watch_together.internal.v1.MediaTag
-	13, // 3: watch_together.internal.v1.SearchItemsRequest.metadata:type_name -> watch_together.internal.v1.RequestMetadata
-	12, // 4: watch_together.internal.v1.SearchItemsRequest.params:type_name -> watch_together.internal.v1.MediaSearchParams
-	10, // 5: watch_together.internal.v1.SearchItemsResponse.items:type_name -> watch_together.internal.v1.MediaItem
-	13, // 6: watch_together.internal.v1.GetPlaybackItemRequest.metadata:type_name -> watch_together.internal.v1.RequestMetadata
-	11, // 7: watch_together.internal.v1.GetPlaybackItemResponse.item:type_name -> watch_together.internal.v1.PlaybackItem
-	13, // 8: watch_together.internal.v1.AuthorizePlaybackRequest.metadata:type_name -> watch_together.internal.v1.RequestMetadata
-	9,  // 9: watch_together.internal.v1.MediaItem.tags:type_name -> watch_together.internal.v1.MediaItemTag
-	0,  // 10: watch_together.internal.v1.MediaInternalService.ListTags:input_type -> watch_together.internal.v1.ListTagsRequest
-	2,  // 11: watch_together.internal.v1.MediaInternalService.SearchItems:input_type -> watch_together.internal.v1.SearchItemsRequest
-	4,  // 12: watch_together.internal.v1.MediaInternalService.GetPlaybackItem:input_type -> watch_together.internal.v1.GetPlaybackItemRequest
-	6,  // 13: watch_together.internal.v1.MediaInternalService.AuthorizePlayback:input_type -> watch_together.internal.v1.AuthorizePlaybackRequest
-	1,  // 14: watch_together.internal.v1.MediaInternalService.ListTags:output_type -> watch_together.internal.v1.ListTagsResponse
-	3,  // 15: watch_together.internal.v1.MediaInternalService.SearchItems:output_type -> watch_together.internal.v1.SearchItemsResponse
-	5,  // 16: watch_together.internal.v1.MediaInternalService.GetPlaybackItem:output_type -> watch_together.internal.v1.GetPlaybackItemResponse
-	7,  // 17: watch_together.internal.v1.MediaInternalService.AuthorizePlayback:output_type -> watch_together.internal.v1.AuthorizePlaybackResponse
-	14, // [14:18] is the sub-list for method output_type
-	10, // [10:14] is the sub-list for method input_type
-	10, // [10:10] is the sub-list for extension type_name
-	10, // [10:10] is the sub-list for extension extendee
-	0,  // [0:10] is the sub-list for field type_name
+	18, // 0: watch_together.internal.v1.ListTagsRequest.metadata:type_name -> watch_together.internal.v1.RequestMetadata
+	12, // 1: watch_together.internal.v1.ListTagsResponse.featured_tags:type_name -> watch_together.internal.v1.MediaTag
+	12, // 2: watch_together.internal.v1.ListTagsResponse.all_tags:type_name -> watch_together.internal.v1.MediaTag
+	18, // 3: watch_together.internal.v1.SearchItemsRequest.metadata:type_name -> watch_together.internal.v1.RequestMetadata
+	17, // 4: watch_together.internal.v1.SearchItemsRequest.params:type_name -> watch_together.internal.v1.MediaSearchParams
+	14, // 5: watch_together.internal.v1.SearchItemsResponse.items:type_name -> watch_together.internal.v1.MediaItem
+	18, // 6: watch_together.internal.v1.GetPlaybackItemRequest.metadata:type_name -> watch_together.internal.v1.RequestMetadata
+	15, // 7: watch_together.internal.v1.GetPlaybackItemResponse.item:type_name -> watch_together.internal.v1.PlaybackItem
+	18, // 8: watch_together.internal.v1.AuthorizePlaybackRequest.metadata:type_name -> watch_together.internal.v1.RequestMetadata
+	18, // 9: watch_together.internal.v1.GetEpisodeDetailRequest.metadata:type_name -> watch_together.internal.v1.RequestMetadata
+	16, // 10: watch_together.internal.v1.GetEpisodeDetailResponse.episode:type_name -> watch_together.internal.v1.EpisodeDetail
+	18, // 11: watch_together.internal.v1.ValidatePlayableEpisodeRequest.metadata:type_name -> watch_together.internal.v1.RequestMetadata
+	13, // 12: watch_together.internal.v1.MediaItem.tags:type_name -> watch_together.internal.v1.MediaItemTag
+	0,  // 13: watch_together.internal.v1.MediaInternalService.ListTags:input_type -> watch_together.internal.v1.ListTagsRequest
+	2,  // 14: watch_together.internal.v1.MediaInternalService.SearchItems:input_type -> watch_together.internal.v1.SearchItemsRequest
+	4,  // 15: watch_together.internal.v1.MediaInternalService.GetPlaybackItem:input_type -> watch_together.internal.v1.GetPlaybackItemRequest
+	6,  // 16: watch_together.internal.v1.MediaInternalService.AuthorizePlayback:input_type -> watch_together.internal.v1.AuthorizePlaybackRequest
+	8,  // 17: watch_together.internal.v1.MediaInternalService.GetEpisodeDetail:input_type -> watch_together.internal.v1.GetEpisodeDetailRequest
+	10, // 18: watch_together.internal.v1.MediaInternalService.ValidatePlayableEpisode:input_type -> watch_together.internal.v1.ValidatePlayableEpisodeRequest
+	1,  // 19: watch_together.internal.v1.MediaInternalService.ListTags:output_type -> watch_together.internal.v1.ListTagsResponse
+	3,  // 20: watch_together.internal.v1.MediaInternalService.SearchItems:output_type -> watch_together.internal.v1.SearchItemsResponse
+	5,  // 21: watch_together.internal.v1.MediaInternalService.GetPlaybackItem:output_type -> watch_together.internal.v1.GetPlaybackItemResponse
+	7,  // 22: watch_together.internal.v1.MediaInternalService.AuthorizePlayback:output_type -> watch_together.internal.v1.AuthorizePlaybackResponse
+	9,  // 23: watch_together.internal.v1.MediaInternalService.GetEpisodeDetail:output_type -> watch_together.internal.v1.GetEpisodeDetailResponse
+	11, // 24: watch_together.internal.v1.MediaInternalService.ValidatePlayableEpisode:output_type -> watch_together.internal.v1.ValidatePlayableEpisodeResponse
+	19, // [19:25] is the sub-list for method output_type
+	13, // [13:19] is the sub-list for method input_type
+	13, // [13:13] is the sub-list for extension type_name
+	13, // [13:13] is the sub-list for extension extendee
+	0,  // [0:13] is the sub-list for field type_name
 }
 
 func init() { file_server_api_internal_v1_media_proto_init() }
@@ -903,14 +1236,15 @@ func file_server_api_internal_v1_media_proto_init() {
 		return
 	}
 	file_server_api_internal_v1_common_proto_init()
-	file_server_api_internal_v1_media_proto_msgTypes[10].OneofWrappers = []any{}
+	file_server_api_internal_v1_media_proto_msgTypes[14].OneofWrappers = []any{}
+	file_server_api_internal_v1_media_proto_msgTypes[16].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_server_api_internal_v1_media_proto_rawDesc), len(file_server_api_internal_v1_media_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   13,
+			NumMessages:   18,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

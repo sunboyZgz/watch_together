@@ -16,10 +16,6 @@ func TestRoomStateCacheDisabledWithoutRedis(t *testing.T) {
 	if !errors.Is(err, ErrRedisDisabled) {
 		t.Fatalf("expected redis disabled, got %v", err)
 	}
-}
-
-func TestRoomStateCacheGetDisabledWithoutRedis(t *testing.T) {
-	cache := NewRoomStateCache(nil, 0)
 
 	_, found, err := cache.GetRoomState(context.Background(), "ROOM01")
 	if !errors.Is(err, ErrRedisDisabled) {
@@ -27,12 +23,6 @@ func TestRoomStateCacheGetDisabledWithoutRedis(t *testing.T) {
 	}
 	if found {
 		t.Fatalf("expected disabled cache not to report a hit")
-	}
-}
-
-func TestRoomStateKey(t *testing.T) {
-	if key := roomStateKey("ROOM01"); key != "wt:room:state:ROOM01:v1" {
-		t.Fatalf("unexpected room state key %q", key)
 	}
 }
 

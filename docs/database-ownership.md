@@ -26,12 +26,13 @@ Phase 7 keeps one PostgreSQL database and adds logical ownership boundaries. No 
 
 The canonical registry lives in `server/internal/store/db_ownership.yaml`. Current registered reads are:
 
-| Caller | Accessed owner | Current access | Phase 7 rule |
+| Caller | Accessed owner | Current access | Phase 8 rule |
 | --- | --- | --- | --- |
 | `home-composition` | `identity`, `media`, `progress` | `PostgresHomeStore` composes home summary rows. | Allowed as a read model/composition query; no writes. |
-| `room-session` | `media` | Room create/detail references `media_episodes.id`. | Allowed through room store while single PostgreSQL is retained; future split should call `MediaInternalService` or store a room media snapshot. |
+| `room-session` | `media` | Room create/join/detail uses the media port for episode detail and playable metadata. | `PostgresRoomStore` no longer reads media tables directly; local/RPC media adapters are the boundary. |
 | `room-session` | `identity` | Room create/join/detail validates and displays users. | Allowed while single PostgreSQL is retained; no direct writes to `users`. |
-| `progress` | `identity`, `media` | Progress writes validate user and active episode before upsert. | Allowed while single PostgreSQL is retained; future split should call identity/media ports. |
+| `progress` | `media` | Progress writes validate playable episodes through the media port before upsert. | `PostgresProgressStore` no longer reads media tables directly; local/RPC media adapters are the boundary. |
+| `progress` | `identity` | Progress writes validate user existence before upsert. | Allowed while single PostgreSQL is retained; no direct writes to `users`. |
 | `media` playback delivery | `media` | Playback lookup reads `media_episodes` and variants. | Owned access. |
 | `recovery` | `room-session`, `timeline` | Loads room metadata, Kafka events, and unpublished outbox rows. | Allowed through `RoomDetailStore`, `RoomEventReader`, and `PendingOutboxReader` ports. |
 | `outboxworker` | `timeline` | Claims and updates `room_timeline_outbox`. | Owned access. |
@@ -41,8 +42,8 @@ The canonical registry lives in `server/internal/store/db_ownership.yaml`. Curre
 
 Phase 8 known split blockers:
 
-- `room-session -> media`: `PostgresRoomStore` still reads `media_episodes` and `media_seasons` to populate room bootstrap media fields. Removing this read requires either a media detail RPC method or a durable room media snapshot.
-- `progress -> media`: `PostgresProgressStore` still validates active episodes through `media_episodes` and `media_seasons` before writing `user_media_progress`. Removing this read requires media validation through a port/RPC call before the progress transaction.
+- `room-session -> media` direct SQL is closed in Phase 8. Room create/join/detail now use the media port, backed by local `PostgresMediaStore` or `MediaInternalService` RPC.
+- `progress -> media` direct SQL is closed in Phase 8. Progress writes validate playable episodes through the media port before touching `user_media_progress`.
 - `home-composition -> identity/media/progress`: `PostgresHomeStore` intentionally remains a read model query while PostgreSQL is single-database. A physical split needs a cached home read model or service composition layer.
 - Existing foreign keys from `rooms` and `user_media_progress` to media tables remain in PostgreSQL until a later split removes cross-database FK assumptions.
 

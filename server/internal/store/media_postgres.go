@@ -37,6 +37,73 @@ func (s *PostgresMediaStore) FindPlaybackItem(ctx context.Context, episodeID str
 	return item, nil
 }
 
+// FindEpisodeDetail loads the active episode metadata used by room bootstrap flows.
+func (s *PostgresMediaStore) FindEpisodeDetail(ctx context.Context, episodeID string) (media.EpisodeDetail, error) {
+	const query = `
+		SELECT
+			episode.id::text,
+			season.title,
+			episode.subtitle,
+			episode.media_url,
+			episode.duration_ms,
+			season.season_label,
+			episode.episode_label
+		FROM media_episodes AS episode
+		INNER JOIN media_seasons AS season ON season.id = episode.season_id
+		WHERE episode.id = ?
+			AND episode.status = 'active'
+			AND season.status = 'active'
+		LIMIT 1
+	`
+	var detail media.EpisodeDetail
+	var subtitle sql.NullString
+	var durationMs sql.NullInt64
+	var seasonLabel sql.NullString
+	var episodeLabel sql.NullString
+	if err := s.db.WithContext(ctx).Raw(query, episodeID).Row().Scan(
+		&detail.ID,
+		&detail.Title,
+		&subtitle,
+		&detail.MediaURL,
+		&durationMs,
+		&seasonLabel,
+		&episodeLabel,
+	); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return media.EpisodeDetail{}, media.ErrMediaNotFound
+		}
+		return media.EpisodeDetail{}, fmt.Errorf("find media episode detail: %w", err)
+	}
+	detail.Subtitle = nullableStringPtr(subtitle)
+	if durationMs.Valid {
+		detail.DurationMs = &durationMs.Int64
+	}
+	detail.SeasonLabel = nullableStringPtr(seasonLabel)
+	detail.EpisodeLabel = nullableStringPtr(episodeLabel)
+	return detail, nil
+}
+
+// ValidatePlayableEpisode returns the canonical active episode id for write-side callers.
+func (s *PostgresMediaStore) ValidatePlayableEpisode(ctx context.Context, episodeID string) (media.PlayableEpisode, error) {
+	const query = `
+		SELECT episode.id::text
+		FROM media_episodes AS episode
+		INNER JOIN media_seasons AS season ON season.id = episode.season_id
+		WHERE episode.id = ?
+			AND episode.status = 'active'
+			AND season.status = 'active'
+		LIMIT 1
+	`
+	var canonicalID string
+	if err := s.db.WithContext(ctx).Raw(query, episodeID).Row().Scan(&canonicalID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return media.PlayableEpisode{}, media.ErrMediaNotFound
+		}
+		return media.PlayableEpisode{}, fmt.Errorf("validate playable episode: %w", err)
+	}
+	return media.PlayableEpisode{ID: canonicalID, Playable: true}, nil
+}
+
 // NewPostgresMediaStore creates the PostgreSQL-backed repository for media catalog data.
 func NewPostgresMediaStore(db *gorm.DB) *PostgresMediaStore {
 	return &PostgresMediaStore{db: db}

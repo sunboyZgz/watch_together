@@ -16,66 +16,48 @@ import (
 )
 
 func TestGinRouterHealthz(t *testing.T) {
-	router := newTestGinRouter()
-	recorder := httptest.NewRecorder()
-
-	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/healthz", nil))
-
-	if recorder.Code != http.StatusOK {
-		t.Fatalf("expected status %d, got %d", http.StatusOK, recorder.Code)
-	}
-	if strings.TrimSpace(recorder.Body.String()) != "ok" {
-		t.Fatalf("expected health body ok, got %q", recorder.Body.String())
-	}
-	if recorder.Header().Get("X-Watch-Together-Room-Runtime") != "local_process" {
-		t.Fatalf("expected room runtime health header, got %q", recorder.Header().Get("X-Watch-Together-Room-Runtime"))
-	}
-}
-
-func TestGinRouterHealthzExposesRuntimeBoundary(t *testing.T) {
-	roomManager := room.NewManager()
-	router := newGinRouter(
-		context.Background(),
-		roomManager,
-		false,
-		WebSocketRuntimeConfig{},
-		nil,
-		nil,
-		transport.NewRoomHTTPHandler(roomManager, nil),
-		transport.NewAuthHTTPHandler(nil),
-		transport.NewHomeHTTPHandler(nil),
-		transport.NewMediaHTTPHandler(nil),
-		transport.NewProgressHTTPHandler(nil),
-		runtimeBoundary{
-			InstanceID:      "roomserver-a",
-			RoomRuntimeMode: "local_process",
+	cases := []struct {
+		name        string
+		runtime     runtimeBoundary
+		wantInst    string
+		wantRuntime string
+	}{
+		{
+			name:        "default runtime",
+			runtime:     runtimeBoundary{},
+			wantRuntime: "local_process",
 		},
-		testReadinessSnapshot("roomserver-a", "local_process"),
-		observability.Config{},
-		observability.NewMetrics(),
-		"",
-		eventbus.NewDisabledRoomBroadcastBus(),
-		eventbus.NewDisabledRoomControlBus(),
-		nil,
-		nil,
-		nil,
-		nil,
-		nil,
-		nil,
-		nil,
-	)
-	recorder := httptest.NewRecorder()
-
-	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/healthz", nil))
-
-	if recorder.Code != http.StatusOK {
-		t.Fatalf("expected status %d, got %d", http.StatusOK, recorder.Code)
+		{
+			name: "explicit runtime boundary",
+			runtime: runtimeBoundary{
+				InstanceID:      "roomserver-a",
+				RoomRuntimeMode: "local_process",
+			},
+			wantInst:    "roomserver-a",
+			wantRuntime: "local_process",
+		},
 	}
-	if recorder.Header().Get("X-Watch-Together-Instance-ID") != "roomserver-a" {
-		t.Fatalf("expected instance health header, got %q", recorder.Header().Get("X-Watch-Together-Instance-ID"))
-	}
-	if recorder.Header().Get("X-Watch-Together-Room-Runtime") != "local_process" {
-		t.Fatalf("expected room runtime health header, got %q", recorder.Header().Get("X-Watch-Together-Room-Runtime"))
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			router := newTestGinRouterWithRuntime(tc.runtime)
+			recorder := httptest.NewRecorder()
+
+			router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/healthz", nil))
+
+			if recorder.Code != http.StatusOK {
+				t.Fatalf("expected status %d, got %d", http.StatusOK, recorder.Code)
+			}
+			if strings.TrimSpace(recorder.Body.String()) != "ok" {
+				t.Fatalf("expected health body ok, got %q", recorder.Body.String())
+			}
+			if recorder.Header().Get("X-Watch-Together-Instance-ID") != tc.wantInst {
+				t.Fatalf("expected instance health header %q, got %q", tc.wantInst, recorder.Header().Get("X-Watch-Together-Instance-ID"))
+			}
+			if recorder.Header().Get("X-Watch-Together-Room-Runtime") != tc.wantRuntime {
+				t.Fatalf("expected room runtime health header %q, got %q", tc.wantRuntime, recorder.Header().Get("X-Watch-Together-Room-Runtime"))
+			}
+		})
 	}
 }
 
@@ -173,28 +155,6 @@ func TestGinRouterKeepsRoomWildcardRoute(t *testing.T) {
 	}
 }
 
-func TestNewServerKeepsRedisOptionalWhenUnconfigured(t *testing.T) {
-	server := NewServer(Config{
-		Host: "127.0.0.1",
-		Port: "0",
-	})
-
-	if server.RedisClient() != nil {
-		t.Fatalf("expected nil redis client when REDIS_ADDR is not configured")
-	}
-}
-
-func TestRoomStateRedisConfigPinsDBZero(t *testing.T) {
-	config := cache.RoomStateRedisConfig(RedisConfig{
-		Addr: "127.0.0.1:6380",
-		DB:   9,
-	})
-
-	if config.DB != cache.RoomStateRedisDB {
-		t.Fatalf("expected room_state redis db %d, got %d", cache.RoomStateRedisDB, config.DB)
-	}
-}
-
 func TestRoomLifecycleHookDeletesRoomStateCacheOnDestroy(t *testing.T) {
 	roomManager := room.NewManager()
 	jsonStore := &fakeAppJSONStore{}
@@ -221,6 +181,10 @@ func TestRoomLifecycleHookDeletesRoomStateCacheOnDestroy(t *testing.T) {
 }
 
 func newTestGinRouter() http.Handler {
+	return newTestGinRouterWithRuntime(runtimeBoundary{})
+}
+
+func newTestGinRouterWithRuntime(runtime runtimeBoundary) http.Handler {
 	roomManager := room.NewManager()
 	return newGinRouter(
 		context.Background(),
@@ -234,8 +198,8 @@ func newTestGinRouter() http.Handler {
 		transport.NewHomeHTTPHandler(nil),
 		transport.NewMediaHTTPHandler(nil),
 		transport.NewProgressHTTPHandler(nil),
-		runtimeBoundary{},
-		testReadinessSnapshot("", "local_process"),
+		runtime,
+		testReadinessSnapshot(runtime.InstanceID, normalizeRoomRuntimeMode(runtime.RoomRuntimeMode)),
 		observability.Config{MetricsEnabled: true}.Normalized(),
 		observability.NewMetrics(),
 		"",

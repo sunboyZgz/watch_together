@@ -20,11 +20,11 @@ tables:
   media_seasons:
     owner: media
     writers: [media]
-    readers: [media, home-composition, room-session, progress]
+    readers: [media, home-composition]
   media_episodes:
     owner: media
     writers: [media]
-    readers: [media, home-composition, room-session, progress]
+    readers: [media, home-composition]
   media_episode_variants:
     owner: media
     writers: [media]
@@ -52,7 +52,7 @@ tables:
   media_items:
     owner: media
     writers: [media]
-    readers: [media, room-session, progress]
+    readers: [media]
     status: retired
   media_item_tags:
     owner: media
@@ -85,21 +85,9 @@ cross_context_access:
     access: read
     path: room_postgres.go
     reason: room host/member validation and member details
-  - caller: room-session
-    owner: media
-    tables: [media_episodes, media_seasons]
-    access: read
-    path: room_postgres.go
-    reason: room create/detail media lookup until media port fully owns validation
   - caller: progress
     owner: identity
     tables: [users]
     access: read
     path: progress_postgres.go
     reason: progress write validates user existence while single PostgreSQL is retained
-  - caller: progress
-    owner: media
-    tables: [media_episodes, media_seasons]
-    access: read
-    path: progress_postgres.go
-    reason: progress write validates playable episode until media port fully owns validation

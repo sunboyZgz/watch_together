@@ -32,7 +32,7 @@ Backend mode in `distributed_authority`:
 
 ## Service Evolution Architecture
 
-Phase 7 is not a full microservice split. Phase 8 keeps that constraint but hardens the pilot. The default deployment still runs `roomserver` with local adapters. `MEDIA_SERVICE_MODE=rpc` and `TIMELINE_SERVICE_MODE=rpc` switch selected boundaries to the optional internal services. The `.proto` files under `server/api/internal/v1` are the source contracts; generated Go code lives under `server/internal/rpcgen/v1`.
+Phase 7 is not a full microservice split. Phase 8 keeps that constraint but hardens the pilot. The default deployment still runs `roomserver` with local adapters. `MEDIA_SERVICE_MODE=rpc` and `TIMELINE_SERVICE_MODE=rpc` switch selected boundaries to the optional internal services. The `.proto` files under `server/api/internal/v1` are the source contracts; generated Go code lives under `server/internal/rpcgen/v1`. Media RPC now covers tag/search/playback plus `GetEpisodeDetail` and `ValidatePlayableEpisode`, so room and progress code no longer read media tables directly.
 
 ```mermaid
 flowchart LR
@@ -313,17 +313,19 @@ sequenceDiagram
 Create room:
 
 1. Android calls `POST /rooms`.
-2. HTTP service writes room and host membership to PostgreSQL.
-3. Runtime registers a local room mirror.
-4. In `distributed_authority`, current instance tries to claim Redis authority.
-5. Redis latest room snapshot is written best-effort.
+2. Room service validates the selected episode through the media port, either local `PostgresMediaStore` or `MediaInternalService`.
+3. HTTP service writes room and host membership to PostgreSQL.
+4. Runtime registers a local room mirror with media duration from the media port.
+5. In `distributed_authority`, current instance tries to claim Redis authority.
+6. Redis latest room snapshot is written best-effort.
 
 Join room:
 
 1. Android calls `POST /rooms/{roomCode}/join`.
 2. PostgreSQL membership is created or reactivated.
-3. Runtime registers a local room mirror and tries authority claim.
-4. WebSocket `join_room` follows.
+3. Room service loads media detail through the media port for runtime bootstrap.
+4. Runtime registers a local room mirror and tries authority claim.
+5. WebSocket `join_room` follows.
 
 WebSocket join:
 
@@ -342,7 +344,7 @@ Local authoritative control:
 4. Server writes PostgreSQL outbox before any accepted broadcast.
 5. Server finalizes Redis requestId as accepted and writes Redis latest snapshot.
 6. Server broadcasts the accepted WebSocket envelope locally and through NATS.
-7. If the outbox write fails in `distributed_authority`, the accepted envelope is not broadcast and the client receives an error or current `room_state`.
+7. If the local outbox or timeline RPC write fails in `distributed_authority`, the accepted envelope is not broadcast, accepted requestId idempotency is not written, state is rolled back, and the client receives `room timeline unavailable` or current `room_state`.
 
 Distributed seek rate limiting:
 
@@ -357,8 +359,9 @@ Non-authority control forwarding:
 2. Ingress reads Redis authority and authority epoch.
 3. Ingress forwards the original envelope plus `instanceId`, `deviceId`, `connectionId`, and expected epoch over NATS request/reply.
 4. Authority instance validates authority and active-device lease before apply and again before reply.
-5. Accepted results are written to outbox, finalized in Redis idempotency, and broadcast through NATS to all roomserver instances.
+5. Accepted results are written to outbox or timeline RPC, finalized in Redis idempotency, and broadcast through NATS to all roomserver instances.
 6. Ingress drops stale-epoch replies and returns `room authority unavailable` or the current snapshot instead of accepting late old-authority results.
+7. If the authority timeline recorder fails, ingress receives `room timeline unavailable`; the authority state is rolled back and no accepted broadcast is emitted.
 
 Active-device switch:
 
@@ -386,6 +389,12 @@ Derived topics:
 1. `derivedworker` consumes `wt.room.timeline.v1`.
 2. Control events publish to `wt.room.control_result.v1`.
 3. Membership events publish to `wt.room.membership.v1`.
+
+Progress:
+
+1. Android calls `PUT /me/media-progress/{mediaItemId}`.
+2. Progress service validates the episode through the media port before writing.
+3. `PostgresProgressStore` writes only `user_media_progress` and user existence checks; it does not query media tables directly.
 
 Realtime fan-out:
 
@@ -421,8 +430,10 @@ Authority recovery:
 3. RPC adapters call `cmd/mediaservice` or `cmd/timelineservice` through ConnectRPC.
 4. `servicekit` attaches request id, service name/version, deadline, internal auth, and trace metadata.
 5. OpenTelemetry tracing is opt-in and does not change Android payloads.
+6. `room-session -> media` and `progress -> media` now cross through the media port in both local and RPC mode.
+7. `timeline` recorder failures, including RPC timeout or unavailable errors, are fail-closed for accepted controls.
 
-## Not Phase 7 Goals
+## Not Phase 8 Goals
 
 - Kafka is not the online broadcast final hop.
 - Kafka is not the command ingress log.

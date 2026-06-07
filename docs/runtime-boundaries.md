@@ -1,6 +1,6 @@
 # Runtime Boundaries
 
-This document records the runtime ownership boundaries for the room system. `local_process` remains the default runtime. Phase 4 adds a `distributed_authority` MVP for multi-instance room authority, Phase 5 adds fenced authority recovery from the Kafka canonical timeline, Phase 6 adds distributed seek rate limiting plus observability, and Phase 7 adds service foundation boundaries with optional media/timeline RPC adapters and logical database ownership.
+This document records the runtime ownership boundaries for the room system. `local_process` remains the default runtime. Phase 4 adds a `distributed_authority` MVP for multi-instance room authority, Phase 5 adds fenced authority recovery from the Kafka canonical timeline, Phase 6 adds distributed seek rate limiting plus observability, Phase 7 adds service foundation boundaries with optional media/timeline RPC adapters and logical database ownership, and Phase 8 closes the media database access boundary for room/progress while making the RPC pilot verifiable.
 
 ## Phase 1 Boundary Markers
 
@@ -41,7 +41,7 @@ X-Watch-Together-Room-Runtime: local_process
 | Seek rate limiting | Local memory or Redis control rate registry | `local_process` uses process-local throttling. `distributed_authority` uses Redis `wt:room:control_rate:{roomId}:seek:v1`. |
 | Observability | `internal/observability` | `/healthz`, `/readyz`, `/metrics`, Prometheus metrics, and worker metric hooks. |
 | Service foundation metadata | `internal/servicekit` | Request id, service name/version, deadlines, internal auth, and trace metadata. |
-| Optional internal RPC | ConnectRPC helper layer | `media` and `timeline` can run through local adapters or optional RPC services. |
+| Optional internal RPC | ConnectRPC helper layer | `media` and `timeline` can run through local adapters or optional RPC services using generated typed contracts. |
 | OpenTelemetry tracing | `internal/telemetry` | Optional traces across HTTP, WebSocket control, RPC, Redis, NATS, Kafka, and PostgreSQL. |
 | Logical database ownership | PostgreSQL + docs | Phase 7 assigns table owners but does not physically split the database. |
 | Room metadata and membership | PostgreSQL | Durable business state. |
@@ -174,6 +174,10 @@ OTEL_TRACE_SAMPLE_RATIO=0.1
 ```
 
 `MEDIA_SERVICE_MODE` and `TIMELINE_SERVICE_MODE` accept `local` or `rpc`. `local` keeps current in-process adapters. `rpc` calls optional `cmd/mediaservice` or `cmd/timelineservice` over ConnectRPC. Phase 8 uses generated typed ConnectRPC contracts from `server/api/internal/v1` into `server/internal/rpcgen/v1`; Android HTTP/WebSocket payloads are unchanged. Service discovery is static endpoint configuration in this phase; Consul, etcd, and Kubernetes service discovery integration are not required by the code.
+
+`room-session` now calls the media port for episode detail during create/join/detail bootstrap. `progress` calls the media port for playable episode validation before writing `user_media_progress`. `PostgresRoomStore` and `PostgresProgressStore` no longer read `media_episodes` or `media_seasons` directly; `home-composition` remains the documented SQL read model while PostgreSQL is a single database.
+
+Accepted distributed controls fail closed when the timeline recorder fails. A local outbox error, timeline RPC timeout, or timeline RPC unavailable response rolls back the in-memory authority state, avoids accepted idempotency finalization, and does not broadcast an accepted WebSocket envelope.
 
 OpenTelemetry tracing is opt-in. Trace metadata can cross internal RPC, NATS, and Kafka boundaries, but it is not exposed in Android HTTP/WebSocket payloads.
 

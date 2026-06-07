@@ -5,6 +5,8 @@ import (
 	"crypto/rand"
 	"errors"
 	"strings"
+
+	mediacatalog "watch_together/server/internal/media"
 )
 
 var (
@@ -67,6 +69,10 @@ type Store interface {
 	IsActiveMemberByCode(ctx context.Context, roomCode string, userID string) (bool, error)
 }
 
+type MediaDetailLookup interface {
+	EpisodeDetail(ctx context.Context, episodeID string) (mediacatalog.EpisodeDetail, error)
+}
+
 type CreateRoomParams struct {
 	RoomCode    string
 	HostUserID  string
@@ -84,12 +90,18 @@ type LeaveRoomParams struct {
 }
 
 type Service struct {
-	store Store
+	store       Store
+	mediaLookup MediaDetailLookup
 }
 
 // NewService wires room business APIs to persistent storage.
 func NewService(store Store) *Service {
 	return &Service{store: store}
+}
+
+// NewServiceWithMediaLookup wires room business APIs through the media context boundary.
+func NewServiceWithMediaLookup(store Store, mediaLookup MediaDetailLookup) *Service {
+	return &Service{store: store, mediaLookup: mediaLookup}
 }
 
 // CreateRoom validates input, generates a shareable room code, and persists the room.
@@ -98,6 +110,14 @@ func (s *Service) CreateRoom(ctx context.Context, hostUserID string, mediaItemID
 	mediaItemID = strings.TrimSpace(mediaItemID)
 	if hostUserID == "" || mediaItemID == "" {
 		return CreateRoomResult{}, ErrInvalidInput
+	}
+
+	mediaItem, err := s.lookupMedia(ctx, mediaItemID)
+	if err != nil {
+		return CreateRoomResult{}, err
+	}
+	if mediaItem.ID != "" {
+		mediaItemID = mediaItem.ID
 	}
 
 	for range 10 {
@@ -113,7 +133,10 @@ func (s *Service) CreateRoom(ctx context.Context, hostUserID string, mediaItemID
 		if errors.Is(err, ErrRoomCodeExists) {
 			continue
 		}
-		return result, err
+		if err != nil {
+			return CreateRoomResult{}, err
+		}
+		return s.withMedia(result, mediaItem)
 	}
 
 	return CreateRoomResult{}, ErrUnableToCreate
@@ -126,10 +149,22 @@ func (s *Service) JoinRoomByCode(ctx context.Context, roomCode string, userID st
 	if len(roomCode) != 6 || userID == "" {
 		return JoinRoomResult{}, ErrInvalidInput
 	}
-	return s.store.JoinRoomByCode(ctx, JoinRoomParams{
+	result, err := s.store.JoinRoomByCode(ctx, JoinRoomParams{
 		RoomCode: roomCode,
 		UserID:   userID,
 	})
+	if err != nil {
+		return JoinRoomResult{}, err
+	}
+	mediaItem, err := s.lookupMedia(ctx, result.Room.MediaItemID)
+	if err != nil {
+		return JoinRoomResult{}, err
+	}
+	if mediaItem.ID == "" {
+		mediaItem = result.Media
+	}
+	result.Media = mediaItem
+	return result, nil
 }
 
 // LeaveRoomByCode marks the user's business membership inactive for an intentional leave.
@@ -161,7 +196,52 @@ func (s *Service) DetailByCode(ctx context.Context, roomCode string) (DetailResu
 	if len(roomCode) != 6 {
 		return DetailResult{}, ErrInvalidInput
 	}
-	return s.store.GetRoomDetail(ctx, roomCode)
+	result, err := s.store.GetRoomDetail(ctx, roomCode)
+	if err != nil {
+		return DetailResult{}, err
+	}
+	mediaItem, err := s.lookupMedia(ctx, result.Room.MediaItemID)
+	if err != nil {
+		return DetailResult{}, err
+	}
+	if mediaItem.ID == "" {
+		mediaItem = result.Media
+	}
+	result.Media = mediaItem
+	return result, nil
+}
+
+func (s *Service) lookupMedia(ctx context.Context, episodeID string) (Media, error) {
+	if s == nil || s.mediaLookup == nil {
+		return Media{}, nil
+	}
+	detail, err := s.mediaLookup.EpisodeDetail(ctx, episodeID)
+	if err != nil {
+		if errors.Is(err, mediacatalog.ErrMediaNotFound) {
+			return Media{}, ErrMediaNotFound
+		}
+		return Media{}, err
+	}
+	return Media{
+		ID:           detail.ID,
+		Title:        detail.Title,
+		Subtitle:     detail.Subtitle,
+		MediaURL:     detail.MediaURL,
+		DurationMs:   detail.DurationMs,
+		SeasonLabel:  detail.SeasonLabel,
+		EpisodeLabel: detail.EpisodeLabel,
+	}, nil
+}
+
+func (s *Service) withMedia(result CreateRoomResult, mediaItem Media) (CreateRoomResult, error) {
+	if mediaItem.ID == "" {
+		return result, nil
+	}
+	if result.Room.MediaItemID == "" {
+		result.Room.MediaItemID = mediaItem.ID
+	}
+	result.Media = mediaItem
+	return result, nil
 }
 
 func generateRoomCode(length int) (string, error) {

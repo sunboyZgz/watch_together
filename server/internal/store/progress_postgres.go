@@ -30,13 +30,7 @@ func (s *PostgresProgressStore) UpdateMediaProgress(ctx context.Context, params 
 			return progress.ErrUserNotFound
 		}
 
-		episodeID, err := findProgressEpisodeID(ctx, tx, params.MediaItemID)
-		if err != nil {
-			return err
-		}
-		if episodeID == "" {
-			return progress.ErrMediaNotFound
-		}
+		episodeID := params.MediaItemID
 
 		existingID, err := findExistingProgressID(ctx, tx, params.UserID, episodeID)
 		if err != nil {
@@ -53,26 +47,6 @@ func (s *PostgresProgressStore) UpdateMediaProgress(ctx context.Context, params 
 		return progress.Summary{}, err
 	}
 	return summary, nil
-}
-
-func findProgressEpisodeID(ctx context.Context, tx *gorm.DB, mediaItemID string) (string, error) {
-	const query = `
-		SELECT episode.id::text
-		FROM media_episodes AS episode
-		INNER JOIN media_seasons AS season ON season.id = episode.season_id
-		WHERE episode.id = ?
-			AND episode.status = 'active'
-			AND season.status = 'active'
-		LIMIT 1
-	`
-	var episodeID string
-	if err := tx.WithContext(ctx).Raw(query, mediaItemID).Row().Scan(&episodeID); err != nil {
-		if err == sql.ErrNoRows {
-			return "", nil
-		}
-		return "", fmt.Errorf("find progress media: %w", err)
-	}
-	return episodeID, nil
 }
 
 func findExistingProgressID(ctx context.Context, tx *gorm.DB, userID string, episodeID string) (string, error) {

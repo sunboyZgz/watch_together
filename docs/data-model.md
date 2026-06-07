@@ -102,6 +102,8 @@ Stores room business records:
 
 Current room statuses are handled as `active`, `grace_period`, and `destroyed`.
 
+Phase 8 keeps the PostgreSQL foreign key shape, but room create/join/detail no longer query media tables from `PostgresRoomStore`; media detail is loaded through the media port or `MediaInternalService`.
+
 ### `room_members`
 
 Stores room membership:
@@ -128,6 +130,8 @@ Stores low-frequency progress:
 - `completion_source`
 
 This table supports the Android home page's last-watched and continue-watching data. It does not drive real-time room sync.
+
+Phase 8 keeps the PostgreSQL foreign key shape, but progress writes validate playable episodes through the media port before `PostgresProgressStore` writes this table.
 
 ### `room_timeline_outbox`
 

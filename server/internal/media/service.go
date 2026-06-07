@@ -45,6 +45,21 @@ type PlaybackItem struct {
 	MediaURL string
 }
 
+type EpisodeDetail struct {
+	ID           string
+	Title        string
+	Subtitle     *string
+	MediaURL     string
+	DurationMs   *int64
+	SeasonLabel  *string
+	EpisodeLabel *string
+}
+
+type PlayableEpisode struct {
+	ID       string
+	Playable bool
+}
+
 type TagList struct {
 	FeaturedTags []Tag
 	AllTags      []Tag
@@ -67,6 +82,8 @@ type Store interface {
 	ListTags(ctx context.Context, allLimit int) (TagList, error)
 	SearchItems(ctx context.Context, params StoreSearchParams) ([]Item, error)
 	FindPlaybackItem(ctx context.Context, episodeID string) (PlaybackItem, error)
+	FindEpisodeDetail(ctx context.Context, episodeID string) (EpisodeDetail, error)
+	ValidatePlayableEpisode(ctx context.Context, episodeID string) (PlayableEpisode, error)
 }
 
 type StoreSearchParams struct {
@@ -129,6 +146,29 @@ func (s *Service) PlaybackItem(ctx context.Context, episodeID string) (PlaybackI
 		return PlaybackItem{}, ErrMediaNotFound
 	}
 	return s.store.FindPlaybackItem(ctx, episodeID)
+}
+
+func (s *Service) EpisodeDetail(ctx context.Context, episodeID string) (EpisodeDetail, error) {
+	episodeID = strings.TrimSpace(episodeID)
+	if episodeID == "" {
+		return EpisodeDetail{}, ErrMediaNotFound
+	}
+	return s.store.FindEpisodeDetail(ctx, episodeID)
+}
+
+func (s *Service) ValidatePlayableEpisode(ctx context.Context, episodeID string) (PlayableEpisode, error) {
+	episodeID = strings.TrimSpace(episodeID)
+	if episodeID == "" {
+		return PlayableEpisode{}, ErrMediaNotFound
+	}
+	episode, err := s.store.ValidatePlayableEpisode(ctx, episodeID)
+	if err != nil {
+		return PlayableEpisode{}, err
+	}
+	if !episode.Playable || strings.TrimSpace(episode.ID) == "" {
+		return PlayableEpisode{}, ErrMediaNotFound
+	}
+	return episode, nil
 }
 
 func normalizeLimit(limit int) int {

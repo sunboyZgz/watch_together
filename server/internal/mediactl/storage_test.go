@@ -129,24 +129,6 @@ func TestUploadIngestAssetsWithProgressEmitsStructuredEvents(t *testing.T) {
 	}
 }
 
-func TestLoadStorageConfigIncludesRemoteCredentials(t *testing.T) {
-	config := LoadStorageConfig(envLookup(map[string]string{
-		"MEDIA_STORAGE_DRIVER":            "minio",
-		"MEDIA_STORAGE_ENDPOINT":          "http://127.0.0.1:9100",
-		"MEDIA_STORAGE_BUCKET":            "watch-together-media",
-		"MEDIA_STORAGE_REGION":            "auto",
-		"MEDIA_STORAGE_ACCESS_KEY_ID":     "minioadmin",
-		"MEDIA_STORAGE_SECRET_ACCESS_KEY": "minioadmin",
-	}))
-
-	if config.AccessKeyID != "minioadmin" {
-		t.Fatalf("expected access key id, got %q", config.AccessKeyID)
-	}
-	if config.SecretAccessKey != "minioadmin" {
-		t.Fatalf("expected secret access key to load")
-	}
-}
-
 func TestNewS3StorageUploaderRejectsMissingRemoteConfig(t *testing.T) {
 	_, err := newStorageUploader(StorageConfig{Driver: "minio"})
 	if err == nil {

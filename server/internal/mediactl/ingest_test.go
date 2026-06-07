@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -561,6 +562,27 @@ func writeExistingHLSOutput(t *testing.T, outputDir string, variants []string) {
 
 func writeFFprobeStub(t *testing.T) string {
 	t.Helper()
+	if runtime.GOOS == "windows" {
+		path := filepath.Join(t.TempDir(), "ffprobe-stub.cmd")
+		script := `@echo off
+set "args=%*"
+echo %args% | findstr /C:"stream=width,height" >nul
+if not errorlevel 1 (
+  echo %args% | findstr /C:"1080p" >nul
+  if not errorlevel 1 (
+    echo 1920x1080
+  ) else (
+    echo 1280x720
+  )
+) else (
+  echo 12.0
+)
+`
+		if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+			t.Fatalf("write ffprobe stub: %v", err)
+		}
+		return path
+	}
 	path := filepath.Join(t.TempDir(), "ffprobe-stub.sh")
 	script := `#!/bin/sh
 args="$*"

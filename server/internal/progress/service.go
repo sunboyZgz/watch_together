@@ -5,6 +5,8 @@ import (
 	"errors"
 	"strings"
 	"time"
+
+	mediacatalog "watch_together/server/internal/media"
 )
 
 var (
@@ -34,13 +36,23 @@ type Store interface {
 	UpdateMediaProgress(ctx context.Context, params UpdateParams) (Summary, error)
 }
 
+type MediaValidator interface {
+	ValidatePlayableEpisode(ctx context.Context, episodeID string) (mediacatalog.PlayableEpisode, error)
+}
+
 type Service struct {
-	store Store
+	store          Store
+	mediaValidator MediaValidator
 }
 
 // NewService wires media progress writes to persistent storage.
 func NewService(store Store) *Service {
 	return &Service{store: store}
+}
+
+// NewServiceWithMediaValidator validates media ownership through the media context boundary.
+func NewServiceWithMediaValidator(store Store, mediaValidator MediaValidator) *Service {
+	return &Service{store: store, mediaValidator: mediaValidator}
 }
 
 // Update validates and persists the current user's low-frequency media progress.
@@ -63,6 +75,19 @@ func (s *Service) Update(ctx context.Context, params UpdateParams) (Summary, err
 		} else {
 			params.CompletionSource = &source
 		}
+	}
+	if s != nil && s.mediaValidator != nil {
+		episode, err := s.mediaValidator.ValidatePlayableEpisode(ctx, params.MediaItemID)
+		if err != nil {
+			if errors.Is(err, mediacatalog.ErrMediaNotFound) {
+				return Summary{}, ErrMediaNotFound
+			}
+			return Summary{}, err
+		}
+		if !episode.Playable || strings.TrimSpace(episode.ID) == "" {
+			return Summary{}, ErrMediaNotFound
+		}
+		params.MediaItemID = episode.ID
 	}
 	return s.store.UpdateMediaProgress(ctx, params)
 }

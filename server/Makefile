@@ -1,6 +1,6 @@
 MIGRATIONS_DIR := ./migrations
 
-.PHONY: migration-create migration-up migration-down migration-version proto-lint proto-generate
+.PHONY: migration-create migration-up migration-down migration-version proto-lint proto-generate verify-phase8
 
 migration-create:
 	@test -n "$(name)" || (echo "usage: make migration-create name=create_users_table" && exit 1)
@@ -20,3 +20,6 @@ proto-lint:
 
 proto-generate:
 	@cd .. && buf generate
+
+verify-phase8:
+	@powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/verify_phase8.ps1

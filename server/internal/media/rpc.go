@@ -107,6 +107,65 @@ func (s *RPCStore) FindPlaybackItem(ctx context.Context, episodeID string) (Play
 	return playbackItemFromProto(response.Msg.GetItem()), nil
 }
 
+func (s *RPCStore) FindEpisodeDetail(ctx context.Context, episodeID string) (EpisodeDetail, error) {
+	if s == nil || s.client == nil {
+		return EpisodeDetail{}, errors.New("media rpc client is unavailable")
+	}
+	request := connect.NewRequest(&internalv1.GetEpisodeDetailRequest{
+		EpisodeId: episodeID,
+	})
+	ctx, cancel, requestID, span := internalrpc.PrepareClientRequest(
+		ctx,
+		s.config,
+		internalv1connect.MediaInternalServiceGetEpisodeDetailProcedure,
+		request.Header(),
+	)
+	defer cancel()
+	defer span.End()
+	request.Msg.Metadata = internalrpc.RequestMetadata(ctx, s.config.Service, requestID)
+
+	response, err := s.client.GetEpisodeDetail(ctx, request)
+	if err != nil {
+		var connectErr *connect.Error
+		if errors.As(err, &connectErr) && connectErr.Code() == connect.CodeNotFound {
+			return EpisodeDetail{}, ErrMediaNotFound
+		}
+		return EpisodeDetail{}, err
+	}
+	return episodeDetailFromProto(response.Msg.GetEpisode()), nil
+}
+
+func (s *RPCStore) ValidatePlayableEpisode(ctx context.Context, episodeID string) (PlayableEpisode, error) {
+	if s == nil || s.client == nil {
+		return PlayableEpisode{}, errors.New("media rpc client is unavailable")
+	}
+	request := connect.NewRequest(&internalv1.ValidatePlayableEpisodeRequest{
+		EpisodeId: episodeID,
+	})
+	ctx, cancel, requestID, span := internalrpc.PrepareClientRequest(
+		ctx,
+		s.config,
+		internalv1connect.MediaInternalServiceValidatePlayableEpisodeProcedure,
+		request.Header(),
+	)
+	defer cancel()
+	defer span.End()
+	request.Msg.Metadata = internalrpc.RequestMetadata(ctx, s.config.Service, requestID)
+
+	response, err := s.client.ValidatePlayableEpisode(ctx, request)
+	if err != nil {
+		var connectErr *connect.Error
+		if errors.As(err, &connectErr) && connectErr.Code() == connect.CodeNotFound {
+			return PlayableEpisode{}, ErrMediaNotFound
+		}
+		return PlayableEpisode{}, err
+	}
+	return PlayableEpisode{
+		ID:       response.Msg.GetEpisodeId(),
+		Playable: response.Msg.GetPlayable(),
+	}, nil
+}
+
 func (s *RPCStore) AuthorizePlayback(ctx context.Context, episodeID string, assetPath string) (bool, error) {
 	if s == nil || s.client == nil {
 		return false, errors.New("media rpc client is unavailable")
@@ -216,6 +275,59 @@ func (h *internalRPCHandler) GetPlaybackItem(
 	}
 	return connect.NewResponse(&internalv1.GetPlaybackItemResponse{
 		Item: playbackItemToProto(item),
+	}), nil
+}
+
+func (h *internalRPCHandler) GetEpisodeDetail(
+	ctx context.Context,
+	request *connect.Request[internalv1.GetEpisodeDetailRequest],
+) (*connect.Response[internalv1.GetEpisodeDetailResponse], error) {
+	ctx, span, err := internalrpc.PrepareServerRequest(
+		ctx,
+		request.Header(),
+		h.authToken,
+		internalv1connect.MediaInternalServiceGetEpisodeDetailProcedure,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer span.End()
+	detail, err := h.service.store.FindEpisodeDetail(ctx, request.Msg.GetEpisodeId())
+	if err != nil {
+		if errors.Is(err, ErrMediaNotFound) {
+			return nil, connect.NewError(connect.CodeNotFound, err)
+		}
+		return nil, internalrpc.ToConnectError(err)
+	}
+	return connect.NewResponse(&internalv1.GetEpisodeDetailResponse{
+		Episode: episodeDetailToProto(detail),
+	}), nil
+}
+
+func (h *internalRPCHandler) ValidatePlayableEpisode(
+	ctx context.Context,
+	request *connect.Request[internalv1.ValidatePlayableEpisodeRequest],
+) (*connect.Response[internalv1.ValidatePlayableEpisodeResponse], error) {
+	ctx, span, err := internalrpc.PrepareServerRequest(
+		ctx,
+		request.Header(),
+		h.authToken,
+		internalv1connect.MediaInternalServiceValidatePlayableEpisodeProcedure,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer span.End()
+	episode, err := h.service.store.ValidatePlayableEpisode(ctx, request.Msg.GetEpisodeId())
+	if err != nil {
+		if errors.Is(err, ErrMediaNotFound) {
+			return nil, connect.NewError(connect.CodeNotFound, err)
+		}
+		return nil, internalrpc.ToConnectError(err)
+	}
+	return connect.NewResponse(&internalv1.ValidatePlayableEpisodeResponse{
+		EpisodeId: episode.ID,
+		Playable:  episode.Playable,
 	}), nil
 }
 
@@ -392,6 +504,33 @@ func playbackItemFromProto(item *internalv1.PlaybackItem) PlaybackItem {
 	return PlaybackItem{
 		ID:       item.GetId(),
 		MediaURL: item.GetMediaUrl(),
+	}
+}
+
+func episodeDetailToProto(detail EpisodeDetail) *internalv1.EpisodeDetail {
+	return &internalv1.EpisodeDetail{
+		Id:           detail.ID,
+		Title:        detail.Title,
+		Subtitle:     cloneString(detail.Subtitle),
+		MediaUrl:     detail.MediaURL,
+		DurationMs:   cloneInt64(detail.DurationMs),
+		SeasonLabel:  cloneString(detail.SeasonLabel),
+		EpisodeLabel: cloneString(detail.EpisodeLabel),
+	}
+}
+
+func episodeDetailFromProto(detail *internalv1.EpisodeDetail) EpisodeDetail {
+	if detail == nil {
+		return EpisodeDetail{}
+	}
+	return EpisodeDetail{
+		ID:           detail.GetId(),
+		Title:        detail.GetTitle(),
+		Subtitle:     cloneString(detail.Subtitle),
+		MediaURL:     detail.GetMediaUrl(),
+		DurationMs:   cloneInt64(detail.DurationMs),
+		SeasonLabel:  cloneString(detail.SeasonLabel),
+		EpisodeLabel: cloneString(detail.EpisodeLabel),
 	}
 }
 

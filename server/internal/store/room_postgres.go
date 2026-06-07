@@ -31,11 +31,6 @@ func (s *PostgresRoomStore) CreateRoom(ctx context.Context, params roomapi.Creat
 			return roomapi.ErrUserNotFound
 		}
 
-		mediaItem, err := findRoomMedia(ctx, tx, params.MediaItemID)
-		if err != nil {
-			return err
-		}
-
 		const insertRoom = `
 			INSERT INTO rooms (room_code, host_user_id, media_episode_id, status)
 			VALUES (?, ?, ?, 'active')
@@ -46,7 +41,7 @@ func (s *PostgresRoomStore) CreateRoom(ctx context.Context, params roomapi.Creat
 			insertRoom,
 			params.RoomCode,
 			params.HostUserID,
-			mediaItem.ID,
+			params.MediaItemID,
 		).Row().Scan(
 			&room.ID,
 			&room.RoomCode,
@@ -65,8 +60,7 @@ func (s *PostgresRoomStore) CreateRoom(ctx context.Context, params roomapi.Creat
 		}
 
 		result = roomapi.CreateRoomResult{
-			Room:  room,
-			Media: mediaItem,
+			Room: room,
 		}
 		return nil
 	})
@@ -91,11 +85,6 @@ func (s *PostgresRoomStore) JoinRoomByCode(ctx context.Context, params roomapi.J
 			return err
 		}
 
-		mediaItem, err := findRoomMedia(ctx, tx, room.MediaItemID)
-		if err != nil {
-			return err
-		}
-
 		member, err := findActiveMember(ctx, tx, room.ID, params.UserID)
 		if err != nil {
 			return err
@@ -112,7 +101,6 @@ func (s *PostgresRoomStore) JoinRoomByCode(ctx context.Context, params roomapi.J
 
 		result = roomapi.JoinRoomResult{
 			Room:   room,
-			Media:  mediaItem,
 			Member: member,
 		}
 		return nil
@@ -174,11 +162,6 @@ func (s *PostgresRoomStore) GetRoomDetail(ctx context.Context, roomCode string) 
 			return err
 		}
 
-		mediaItem, err := findRoomMedia(ctx, tx, room.MediaItemID)
-		if err != nil {
-			return err
-		}
-
 		members, err := findActiveMembers(ctx, tx, room.ID)
 		if err != nil {
 			return err
@@ -186,7 +169,6 @@ func (s *PostgresRoomStore) GetRoomDetail(ctx context.Context, roomCode string) 
 
 		result = roomapi.DetailResult{
 			Room:    room,
-			Media:   mediaItem,
 			Members: members,
 		}
 		return nil
@@ -195,51 +177,6 @@ func (s *PostgresRoomStore) GetRoomDetail(ctx context.Context, roomCode string) 
 		return roomapi.DetailResult{}, err
 	}
 	return result, nil
-}
-
-func findRoomMedia(ctx context.Context, tx *gorm.DB, mediaItemID string) (roomapi.Media, error) {
-	const query = `
-		SELECT
-			episode.id::text,
-			season.title,
-			episode.subtitle,
-			episode.media_url,
-			episode.duration_ms,
-			season.season_label,
-			episode.episode_label
-		FROM media_episodes AS episode
-		INNER JOIN media_seasons AS season ON season.id = episode.season_id
-		WHERE episode.id = ?
-			AND episode.status = 'active'
-			AND season.status = 'active'
-		LIMIT 1
-	`
-	var mediaItem roomapi.Media
-	var subtitle sql.NullString
-	var durationMs sql.NullInt64
-	var seasonLabel sql.NullString
-	var episodeLabel sql.NullString
-	if err := tx.WithContext(ctx).Raw(query, mediaItemID).Row().Scan(
-		&mediaItem.ID,
-		&mediaItem.Title,
-		&subtitle,
-		&mediaItem.MediaURL,
-		&durationMs,
-		&seasonLabel,
-		&episodeLabel,
-	); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return roomapi.Media{}, roomapi.ErrMediaNotFound
-		}
-		return roomapi.Media{}, fmt.Errorf("find room media: %w", err)
-	}
-	mediaItem.Subtitle = nullableStringPtr(subtitle)
-	if durationMs.Valid {
-		mediaItem.DurationMs = &durationMs.Int64
-	}
-	mediaItem.SeasonLabel = nullableStringPtr(seasonLabel)
-	mediaItem.EpisodeLabel = nullableStringPtr(episodeLabel)
-	return mediaItem, nil
 }
 
 func findActiveMembers(ctx context.Context, tx *gorm.DB, roomID string) ([]roomapi.Member, error) {

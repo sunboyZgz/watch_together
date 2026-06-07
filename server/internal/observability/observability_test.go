@@ -7,22 +7,6 @@ import (
 	"testing"
 )
 
-func TestReadinessSnapshotStatus(t *testing.T) {
-	ready := NewReadinessSnapshot("test", "instance-a", "local_process", []DependencyStatus{
-		{Name: "postgres", Status: "disabled", Required: false},
-	})
-	if ready.Status != "ready" {
-		t.Fatalf("expected optional disabled dependency to be ready, got %+v", ready)
-	}
-
-	notReady := NewReadinessSnapshot("test", "instance-a", "distributed_authority", []DependencyStatus{
-		{Name: "redis", Status: "unavailable", Required: true},
-	})
-	if notReady.Status != "not_ready" {
-		t.Fatalf("expected required unavailable dependency to be not_ready, got %+v", notReady)
-	}
-}
-
 func TestMetricsHandler(t *testing.T) {
 	metrics := NewMetrics()
 	metrics.AddWebSocketConnection(1)

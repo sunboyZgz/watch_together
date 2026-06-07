@@ -204,6 +204,15 @@ make proto-lint
 make proto-generate
 ```
 
+Run the Phase 8 verification loop on Windows:
+
+```powershell
+cd server
+.\scripts\verify_phase8.ps1
+```
+
+The script runs `buf lint`, `buf generate`, checks generated code for drift, runs focused Go targets, runs `go test ./...`, and finishes with `git diff --check`.
+
 Run the optional RPC pilot stack through compose:
 
 ```bash
@@ -216,6 +225,19 @@ docker compose --profile rpc-pilot up -d --build
 ```
 
 `rpc-pilot` starts `roomserver`, `mediaservice`, `timelineservice`, and an OTLP collector. The default stack remains local-adapter mode unless `MEDIA_SERVICE_MODE=rpc` or `TIMELINE_SERVICE_MODE=rpc` is explicitly set.
+
+RPC pilot smoke checks:
+
+```bash
+curl http://127.0.0.1:8080/readyz
+curl http://127.0.0.1:8090/readyz
+curl http://127.0.0.1:8091/readyz
+curl -H "Authorization: Bearer <token>" "http://127.0.0.1:8080/media/tags"
+curl -H "Authorization: Bearer <token>" -H "Content-Type: application/json" \
+  -d '{"mediaItemId":"<episode-id>"}' http://127.0.0.1:8080/rooms
+```
+
+`mediaservice` and `timelineservice` readiness ping PostgreSQL at request time. `timelineservice` reports Kafka reader state as `ok`, `disabled`, or `unavailable` depending on broker configuration and reader initialization.
 
 Start the server:
 

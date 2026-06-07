@@ -450,6 +450,41 @@ func (s *fakeMediaStore) FindPlaybackItem(_ context.Context, episodeID string) (
 	return media.PlaybackItem{}, media.ErrMediaNotFound
 }
 
+func (s *fakeMediaStore) FindEpisodeDetail(_ context.Context, episodeID string) (media.EpisodeDetail, error) {
+	for _, item := range s.items {
+		if item.ID == episodeID {
+			return media.EpisodeDetail{
+				ID:           item.ID,
+				Title:        item.Title,
+				Subtitle:     item.Subtitle,
+				MediaURL:     item.MediaURL,
+				DurationMs:   item.DurationMs,
+				SeasonLabel:  item.SeasonLabel,
+				EpisodeLabel: item.EpisodeLabel,
+			}, nil
+		}
+	}
+	if s.playbackItem.ID == episodeID {
+		return media.EpisodeDetail{
+			ID:       s.playbackItem.ID,
+			MediaURL: s.playbackItem.MediaURL,
+		}, nil
+	}
+	return media.EpisodeDetail{}, media.ErrMediaNotFound
+}
+
+func (s *fakeMediaStore) ValidatePlayableEpisode(_ context.Context, episodeID string) (media.PlayableEpisode, error) {
+	if s.playbackItem.ID == episodeID {
+		return media.PlayableEpisode{ID: episodeID, Playable: true}, nil
+	}
+	for _, item := range s.items {
+		if item.ID == episodeID {
+			return media.PlayableEpisode{ID: episodeID, Playable: true}, nil
+		}
+	}
+	return media.PlayableEpisode{}, media.ErrMediaNotFound
+}
+
 type fakeObjectStore struct {
 	objects map[string]string
 }

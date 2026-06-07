@@ -3,6 +3,7 @@ package recovery
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 	"time"
 
@@ -113,6 +114,32 @@ func TestServiceRecoversStateFromKafkaAndPendingOutbox(t *testing.T) {
 	}
 }
 
+func TestServiceDoesNotCompleteRecoveryWhenTimelineReaderFails(t *testing.T) {
+	ctx := context.Background()
+	authority := &recordingRecoveryAuthority{}
+	roomManager := room.NewManager()
+	service := NewService(
+		Config{InstanceID: "instance-b", RecoveryTimeout: time.Second},
+		authority,
+		roomManager,
+		&fakeRoomDetailStore{},
+		failingTimelineReader{err: errTimelineReaderUnavailable},
+		nil,
+		nil,
+	)
+
+	_, err := service.TryRecoverRoomAuthority(ctx, "ROOM01", "test")
+	if !errors.Is(err, errTimelineReaderUnavailable) {
+		t.Fatalf("expected timeline reader error, got %v", err)
+	}
+	if authority.completeCalls != 0 {
+		t.Fatalf("expected recovery not to complete when timeline read fails, got %d calls", authority.completeCalls)
+	}
+	if _, ok := roomManager.Get("ROOM01"); ok {
+		t.Fatalf("expected failed recovery not to register recovered room")
+	}
+}
+
 func timelineControlEvent(t *testing.T, id string, eventType string, controlType string, payload any) timeline.Event {
 	t.Helper()
 	rawPayload, err := json.Marshal(payload)
@@ -175,6 +202,33 @@ func (fakeRecoveryAuthority) GetAuthority(context.Context, string) (cache.RoomAu
 	return cache.RoomAuthorityLease{}, false, nil
 }
 
+type recordingRecoveryAuthority struct {
+	completeCalls int
+}
+
+func (a *recordingRecoveryAuthority) BeginRecovery(context.Context, string, string) (cache.RoomAuthorityLease, bool, error) {
+	return cache.RoomAuthorityLease{
+		InstanceID:   "instance-b",
+		Epoch:        2,
+		Status:       cache.RoomAuthorityStatusRecovering,
+		LeaseUntilMs: time.Now().Add(time.Minute).UnixMilli(),
+	}, true, nil
+}
+
+func (a *recordingRecoveryAuthority) CompleteRecovery(context.Context, string, string, int64) (cache.RoomAuthorityLease, bool, error) {
+	a.completeCalls++
+	return cache.RoomAuthorityLease{
+		InstanceID:   "instance-b",
+		Epoch:        2,
+		Status:       cache.RoomAuthorityStatusActive,
+		LeaseUntilMs: time.Now().Add(time.Minute).UnixMilli(),
+	}, true, nil
+}
+
+func (a *recordingRecoveryAuthority) GetAuthority(context.Context, string) (cache.RoomAuthorityLease, bool, error) {
+	return cache.RoomAuthorityLease{}, false, nil
+}
+
 type fakeRoomDetailStore struct {
 	durationMs *int64
 }
@@ -198,6 +252,16 @@ type fakeTimelineReader []timeline.Event
 
 func (r fakeTimelineReader) ReadRoomEvents(context.Context, string) ([]timeline.Event, error) {
 	return append([]timeline.Event(nil), r...), nil
+}
+
+var errTimelineReaderUnavailable = errors.New("timeline reader unavailable")
+
+type failingTimelineReader struct {
+	err error
+}
+
+func (r failingTimelineReader) ReadRoomEvents(context.Context, string) ([]timeline.Event, error) {
+	return nil, r.err
 }
 
 type fakePendingOutboxReader []timeline.Event
