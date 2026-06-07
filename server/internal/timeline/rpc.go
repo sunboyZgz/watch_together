@@ -2,17 +2,20 @@ package timeline
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"net/http"
 
-	"google.golang.org/protobuf/types/known/structpb"
+	"connectrpc.com/connect"
 
 	"watch_together/server/internal/internalrpc"
+	internalv1 "watch_together/server/internal/rpcgen/v1"
+	"watch_together/server/internal/rpcgen/v1/internalv1connect"
 )
 
 type RPCClient struct {
-	recordEvent     *internalrpc.UnaryClient
-	listRoomEvents  *internalrpc.UnaryClient
-	listUnpublished *internalrpc.UnaryClient
+	client internalv1connect.TimelineInternalServiceClient
+	config internalrpc.ClientConfig
 }
 
 func NewRPCClient(baseURL string, config internalrpc.ClientConfig) *RPCClient {
@@ -20,47 +23,82 @@ func NewRPCClient(baseURL string, config internalrpc.ClientConfig) *RPCClient {
 	if baseURL == "" {
 		return nil
 	}
-	prefix := config.PathPrefix
 	return &RPCClient{
-		recordEvent: internalrpc.NewUnaryClient(
+		client: internalv1connect.NewTimelineInternalServiceClient(
 			http.DefaultClient,
-			baseURL,
-			internalrpc.TimelineProcedure(prefix, internalrpc.TimelineRecordEventProcedure),
-			config,
+			internalrpc.ClientBaseURL(baseURL, config.PathPrefix),
 		),
-		listRoomEvents: internalrpc.NewUnaryClient(
-			http.DefaultClient,
-			baseURL,
-			internalrpc.TimelineProcedure(prefix, internalrpc.TimelineListRoomEventsProcedure),
-			config,
-		),
-		listUnpublished: internalrpc.NewUnaryClient(
-			http.DefaultClient,
-			baseURL,
-			internalrpc.TimelineProcedure(prefix, internalrpc.TimelineListUnpublishedEventsProcedure),
-			config,
-		),
+		config: config,
 	}
 }
 
 func (c *RPCClient) RecordTimelineEvent(ctx context.Context, event Event) error {
-	return c.recordEvent.Call(ctx, recordEventRPCRequest{Event: event}, nil)
+	if c == nil || c.client == nil {
+		return errors.New("timeline rpc client is unavailable")
+	}
+	request := connect.NewRequest(&internalv1.RecordTimelineEventRequest{
+		Event: eventToProto(event),
+	})
+	ctx, cancel, requestID, span := internalrpc.PrepareClientRequest(
+		ctx,
+		c.config,
+		internalv1connect.TimelineInternalServiceRecordTimelineEventProcedure,
+		request.Header(),
+	)
+	defer cancel()
+	defer span.End()
+	request.Msg.Metadata = internalrpc.RequestMetadata(ctx, c.config.Service, requestID)
+
+	_, err := c.client.RecordTimelineEvent(ctx, request)
+	return err
 }
 
 func (c *RPCClient) ReadRoomEvents(ctx context.Context, roomID string) ([]Event, error) {
-	var response listEventsRPCResponse
-	if err := c.listRoomEvents.Call(ctx, listEventsRPCRequest{RoomID: roomID}, &response); err != nil {
+	if c == nil || c.client == nil {
+		return nil, errors.New("timeline rpc client is unavailable")
+	}
+	request := connect.NewRequest(&internalv1.ListRoomEventsRequest{
+		RoomId: roomID,
+	})
+	ctx, cancel, requestID, span := internalrpc.PrepareClientRequest(
+		ctx,
+		c.config,
+		internalv1connect.TimelineInternalServiceListRoomEventsProcedure,
+		request.Header(),
+	)
+	defer cancel()
+	defer span.End()
+	request.Msg.Metadata = internalrpc.RequestMetadata(ctx, c.config.Service, requestID)
+
+	response, err := c.client.ListRoomEvents(ctx, request)
+	if err != nil {
 		return nil, err
 	}
-	return response.Events, nil
+	return eventsFromProto(response.Msg.GetEvents()), nil
 }
 
 func (c *RPCClient) ReadRoomUnpublishedTimelineEvents(ctx context.Context, roomID string) ([]Event, error) {
-	var response listEventsRPCResponse
-	if err := c.listUnpublished.Call(ctx, listEventsRPCRequest{RoomID: roomID}, &response); err != nil {
+	if c == nil || c.client == nil {
+		return nil, errors.New("timeline rpc client is unavailable")
+	}
+	request := connect.NewRequest(&internalv1.ListUnpublishedRoomEventsRequest{
+		RoomId: roomID,
+	})
+	ctx, cancel, requestID, span := internalrpc.PrepareClientRequest(
+		ctx,
+		c.config,
+		internalv1connect.TimelineInternalServiceListUnpublishedRoomEventsProcedure,
+		request.Header(),
+	)
+	defer cancel()
+	defer span.End()
+	request.Msg.Metadata = internalrpc.RequestMetadata(ctx, c.config.Service, requestID)
+
+	response, err := c.client.ListUnpublishedRoomEvents(ctx, request)
+	if err != nil {
 		return nil, err
 	}
-	return response.Events, nil
+	return eventsFromProto(response.Msg.GetEvents()), nil
 }
 
 type RecordEventStore interface {
@@ -82,76 +120,159 @@ func RegisterInternalRPC(
 	if mux == nil {
 		return
 	}
-	register := func(path string, handler http.Handler) {
-		mux.Handle(path, handler)
+	path, handler := internalv1connect.NewTimelineInternalServiceHandler(&internalRPCHandler{
+		authToken:         authToken,
+		recorder:          recorder,
+		roomReader:        roomReader,
+		unpublishedReader: unpublishedReader,
+	})
+	mountPath, prefixed := internalrpc.PrefixedHandler(prefix, path, handler)
+	mux.Handle(mountPath, prefixed)
+}
+
+type internalRPCHandler struct {
+	authToken         string
+	recorder          RecordEventStore
+	roomReader        RoomEventReader
+	unpublishedReader UnpublishedReader
+}
+
+func (h *internalRPCHandler) RecordTimelineEvent(
+	ctx context.Context,
+	request *connect.Request[internalv1.RecordTimelineEventRequest],
+) (*connect.Response[internalv1.RecordTimelineEventResponse], error) {
+	ctx, span, err := internalrpc.PrepareServerRequest(
+		ctx,
+		request.Header(),
+		h.authToken,
+		internalv1connect.TimelineInternalServiceRecordTimelineEventProcedure,
+	)
+	if err != nil {
+		return nil, err
 	}
-	register(internalrpc.NewUnaryHandler(
-		internalrpc.TimelineProcedure(prefix, internalrpc.TimelineRecordEventProcedure),
-		authToken,
-		func(ctx context.Context, request *structpb.Struct) (*structpb.Struct, error) {
-			if recorder == nil {
-				return nil, ErrTimelineUnavailable
-			}
-			var decoded recordEventRPCRequest
-			if err := internalrpc.Decode(request, &decoded); err != nil {
-				return nil, err
-			}
-			if err := recorder.RecordTimelineEvent(ctx, decoded.Event); err != nil {
-				return nil, err
-			}
-			return internalrpc.Encode(recordEventRPCResponse{Recorded: true})
-		},
-	))
-	register(internalrpc.NewUnaryHandler(
-		internalrpc.TimelineProcedure(prefix, internalrpc.TimelineListRoomEventsProcedure),
-		authToken,
-		func(ctx context.Context, request *structpb.Struct) (*structpb.Struct, error) {
-			if roomReader == nil {
-				return nil, ErrTimelineUnavailable
-			}
-			var decoded listEventsRPCRequest
-			if err := internalrpc.Decode(request, &decoded); err != nil {
-				return nil, err
-			}
-			events, err := roomReader.ReadRoomEvents(ctx, decoded.RoomID)
-			if err != nil {
-				return nil, err
-			}
-			return internalrpc.Encode(listEventsRPCResponse{Events: events})
-		},
-	))
-	register(internalrpc.NewUnaryHandler(
-		internalrpc.TimelineProcedure(prefix, internalrpc.TimelineListUnpublishedEventsProcedure),
-		authToken,
-		func(ctx context.Context, request *structpb.Struct) (*structpb.Struct, error) {
-			if unpublishedReader == nil {
-				return nil, ErrTimelineUnavailable
-			}
-			var decoded listEventsRPCRequest
-			if err := internalrpc.Decode(request, &decoded); err != nil {
-				return nil, err
-			}
-			events, err := unpublishedReader.ReadRoomUnpublishedTimelineEvents(ctx, decoded.RoomID)
-			if err != nil {
-				return nil, err
-			}
-			return internalrpc.Encode(listEventsRPCResponse{Events: events})
-		},
-	))
+	defer span.End()
+	if h.recorder == nil {
+		return nil, connect.NewError(connect.CodeUnavailable, ErrTimelineUnavailable)
+	}
+	if err := h.recorder.RecordTimelineEvent(ctx, eventFromProto(request.Msg.GetEvent())); err != nil {
+		return nil, internalrpc.ToConnectError(err)
+	}
+	return connect.NewResponse(&internalv1.RecordTimelineEventResponse{Recorded: true}), nil
 }
 
-type recordEventRPCRequest struct {
-	Event Event `json:"event"`
+func (h *internalRPCHandler) ListRoomEvents(
+	ctx context.Context,
+	request *connect.Request[internalv1.ListRoomEventsRequest],
+) (*connect.Response[internalv1.ListRoomEventsResponse], error) {
+	ctx, span, err := internalrpc.PrepareServerRequest(
+		ctx,
+		request.Header(),
+		h.authToken,
+		internalv1connect.TimelineInternalServiceListRoomEventsProcedure,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer span.End()
+	if h.roomReader == nil {
+		return nil, connect.NewError(connect.CodeUnavailable, ErrTimelineUnavailable)
+	}
+	events, err := h.roomReader.ReadRoomEvents(ctx, request.Msg.GetRoomId())
+	if err != nil {
+		return nil, internalrpc.ToConnectError(err)
+	}
+	return connect.NewResponse(&internalv1.ListRoomEventsResponse{
+		Events: eventsToProto(events),
+	}), nil
 }
 
-type recordEventRPCResponse struct {
-	Recorded bool `json:"recorded"`
+func (h *internalRPCHandler) ListUnpublishedRoomEvents(
+	ctx context.Context,
+	request *connect.Request[internalv1.ListUnpublishedRoomEventsRequest],
+) (*connect.Response[internalv1.ListUnpublishedRoomEventsResponse], error) {
+	ctx, span, err := internalrpc.PrepareServerRequest(
+		ctx,
+		request.Header(),
+		h.authToken,
+		internalv1connect.TimelineInternalServiceListUnpublishedRoomEventsProcedure,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer span.End()
+	if h.unpublishedReader == nil {
+		return nil, connect.NewError(connect.CodeUnavailable, ErrTimelineUnavailable)
+	}
+	events, err := h.unpublishedReader.ReadRoomUnpublishedTimelineEvents(ctx, request.Msg.GetRoomId())
+	if err != nil {
+		return nil, internalrpc.ToConnectError(err)
+	}
+	return connect.NewResponse(&internalv1.ListUnpublishedRoomEventsResponse{
+		Events: eventsToProto(events),
+	}), nil
 }
 
-type listEventsRPCRequest struct {
-	RoomID string `json:"roomId"`
+func eventsToProto(events []Event) []*internalv1.TimelineEvent {
+	out := make([]*internalv1.TimelineEvent, 0, len(events))
+	for _, event := range events {
+		out = append(out, eventToProto(event))
+	}
+	return out
 }
 
-type listEventsRPCResponse struct {
-	Events []Event `json:"events"`
+func eventsFromProto(events []*internalv1.TimelineEvent) []Event {
+	out := make([]Event, 0, len(events))
+	for _, event := range events {
+		if event == nil {
+			continue
+		}
+		out = append(out, eventFromProto(event))
+	}
+	return out
+}
+
+func eventToProto(event Event) *internalv1.TimelineEvent {
+	return &internalv1.TimelineEvent{
+		EventId:      event.EventID,
+		EventVersion: int32(event.EventVersion),
+		EventType:    event.EventType,
+		RoomId:       event.RoomID,
+		UserId:       event.UserID,
+		DeviceId:     event.DeviceID,
+		ConnectionId: event.ConnectionID,
+		InstanceId:   event.InstanceID,
+		ControlType:  event.ControlType,
+		Seq:          event.Seq,
+		OccurredAtMs: event.OccurredAtMs,
+		Payload:      cloneBytes(event.Payload),
+	}
+}
+
+func eventFromProto(event *internalv1.TimelineEvent) Event {
+	if event == nil {
+		return Event{}
+	}
+	return Event{
+		EventID:      event.GetEventId(),
+		EventVersion: int(event.GetEventVersion()),
+		EventType:    event.GetEventType(),
+		RoomID:       event.GetRoomId(),
+		UserID:       event.GetUserId(),
+		DeviceID:     event.GetDeviceId(),
+		ConnectionID: event.GetConnectionId(),
+		InstanceID:   event.GetInstanceId(),
+		ControlType:  event.GetControlType(),
+		Seq:          event.GetSeq(),
+		OccurredAtMs: event.GetOccurredAtMs(),
+		Payload:      json.RawMessage(cloneBytes(event.GetPayload())),
+	}
+}
+
+func cloneBytes(value []byte) []byte {
+	if len(value) == 0 {
+		return nil
+	}
+	cloned := make([]byte, len(value))
+	copy(cloned, value)
+	return cloned
 }

@@ -1,0 +1,10 @@
+version: v2
+plugins:
+  - local: protoc-gen-go
+    out: server
+    opt:
+      - module=watch_together/server
+  - local: protoc-gen-connect-go
+    out: server
+    opt:
+      - module=watch_together/server

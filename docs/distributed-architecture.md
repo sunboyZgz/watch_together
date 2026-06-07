@@ -1,6 +1,6 @@
 # Distributed Architecture
 
-Phase 4 introduced the distributed room infrastructure MVP while keeping the public HTTP API and playback control payloads small. `local_process` remains supported. `distributed_authority` adds Redis authority leases, Redis active-device ownership, NATS Core internal routing, PostgreSQL outbox, and Kafka timeline topics. Phase 5 adds authority recovery and hardening: expired authority leases can be fenced, recovered from Kafka canonical timeline events, completed as a new active authority epoch, resumed without moving WebSocket connections, protected by Redis `requestId` idempotency, and exposed through user-level Redis presence. Phase 6 adds distributed seek rate limiting and observability: seek throttling moves to Redis in `distributed_authority`, `/readyz` reports dependency readiness, and `/metrics` exposes Prometheus metrics. Phase 7 adds the service foundation: servicekit, internal ConnectRPC contracts, optional media/timeline service skeletons, OpenTelemetry tracing, static service discovery, and logical database ownership design.
+Phase 4 introduced the distributed room infrastructure MVP while keeping the public HTTP API and playback control payloads small. `local_process` remains supported. `distributed_authority` adds Redis authority leases, Redis active-device ownership, NATS Core internal routing, PostgreSQL outbox, and Kafka timeline topics. Phase 5 adds authority recovery and hardening: expired authority leases can be fenced, recovered from Kafka canonical timeline events, completed as a new active authority epoch, resumed without moving WebSocket connections, protected by Redis `requestId` idempotency, and exposed through user-level Redis presence. Phase 6 adds distributed seek rate limiting and observability: seek throttling moves to Redis in `distributed_authority`, `/readyz` reports dependency readiness, and `/metrics` exposes Prometheus metrics. Phase 7 adds the service foundation: servicekit, internal ConnectRPC contracts, optional media/timeline service skeletons, OpenTelemetry tracing, static service discovery, and logical database ownership design. Phase 8 makes the service pilot verifiable: generated typed ConnectRPC contracts replace dynamic `Struct` RPC payloads for media/timeline, the optional RPC services can be run through a compose `rpc-pilot` profile, and database ownership is enforced by a machine-readable registry plus architecture tests.
 
 ## Architecture Mode
 
@@ -28,10 +28,11 @@ Backend mode in `distributed_authority`:
 - `internalrpc` owns ConnectRPC server/client helpers for local/RPC dual-mode adapters.
 - `telemetry` owns OpenTelemetry tracing setup and propagation.
 - `cmd/mediaservice` and `cmd/timelineservice` are optional service skeletons for the first serviceization candidates.
+- `internal/rpcgen/v1` contains generated typed internal RPC messages and ConnectRPC client/handler code.
 
 ## Service Evolution Architecture
 
-Phase 7 is not a full microservice split. The default deployment still runs `roomserver` with local adapters. `MEDIA_SERVICE_MODE=rpc` and `TIMELINE_SERVICE_MODE=rpc` switch selected boundaries to the optional internal services.
+Phase 7 is not a full microservice split. Phase 8 keeps that constraint but hardens the pilot. The default deployment still runs `roomserver` with local adapters. `MEDIA_SERVICE_MODE=rpc` and `TIMELINE_SERVICE_MODE=rpc` switch selected boundaries to the optional internal services. The `.proto` files under `server/api/internal/v1` are the source contracts; generated Go code lives under `server/internal/rpcgen/v1`.
 
 ```mermaid
 flowchart LR
@@ -70,7 +71,7 @@ flowchart LR
 
 ## Database Ownership
 
-Phase 7 keeps one PostgreSQL database and introduces logical ownership boundaries. Table owners and cross-context access rules live in [Database Ownership](./database-ownership.md).
+Phase 7 keeps one PostgreSQL database and introduces logical ownership boundaries. Phase 8 makes those boundaries testable. Table owners and cross-context access rules live in [Database Ownership](./database-ownership.md), with the CI source of truth in `server/internal/store/db_ownership.yaml`.
 
 ```mermaid
 flowchart TD

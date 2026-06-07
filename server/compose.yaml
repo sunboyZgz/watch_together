@@ -43,6 +43,17 @@ services:
       - "9092:9092"
     volumes:
       - kafka_data:/bitnami/kafka
+  otel-collector:
+    profiles: ["observability", "rpc-pilot"]
+    image: otel/opentelemetry-collector-contrib:0.126.0
+    container_name: anime-watch-otel-collector
+    restart: unless-stopped
+    command: ["--config=/etc/otelcol-contrib/config.yaml"]
+    volumes:
+      - ./deploy/otel-collector.yaml:/etc/otelcol-contrib/config.yaml:ro
+    ports:
+      - "4318:4318"
+      - "4317:4317"
   minio:
     image: quay.io/minio/minio:latest
     container_name: anime-watch-minio
@@ -72,7 +83,7 @@ services:
       "
 
   roomserver:
-    profiles: ["app"]
+    profiles: ["app", "rpc-pilot"]
     build:
       context: .
       dockerfile: Dockerfile
@@ -198,7 +209,7 @@ services:
     command: ["/app/derivedworker"]
 
   mediaservice:
-    profiles: ["services"]
+    profiles: ["services", "rpc-pilot"]
     image: watch-together-roomserver:dev
     container_name: anime-watch-mediaservice
     restart: unless-stopped
@@ -227,7 +238,7 @@ services:
     command: ["/app/mediaservice"]
 
   timelineservice:
-    profiles: ["services"]
+    profiles: ["services", "rpc-pilot"]
     image: watch-together-roomserver:dev
     container_name: anime-watch-timelineservice
     restart: unless-stopped

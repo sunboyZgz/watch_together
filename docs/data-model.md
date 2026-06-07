@@ -1,6 +1,6 @@
 # Data Model
 
-The durable schema is SQL-first and lives under `server/migrations/`. GORM models in `server/internal/model/models.go` mirror the active tables. Phase 7 keeps one PostgreSQL database and adds logical ownership boundaries; see [Database Ownership](./database-ownership.md) for the owner map and future split checklist.
+The durable schema is SQL-first and lives under `server/migrations/`. GORM models in `server/internal/model/models.go` mirror the active tables. Phase 8 still keeps one PostgreSQL database, but table ownership is now enforced by `server/internal/store/db_ownership.yaml` plus architecture tests; see [Database Ownership](./database-ownership.md) for the owner map and future split checklist.
 
 ## Primary Tables
 

@@ -150,7 +150,7 @@ READINESS_PATH=/readyz
 
 `GET /healthz` remains lightweight liveness. `GET /readyz` reports JSON dependency readiness for PostgreSQL, Redis, NATS, Kafka, outbox, and recovery. `GET /metrics` exposes Prometheus metrics when enabled. `roomserver` exposes metrics on the main HTTP server; worker processes expose metrics only when `METRICS_ADDR` is set. The observability module only records and exposes runtime state; it does not participate in room authority, playback decisions, or recovery decisions.
 
-## Phase 7 Service Foundation Boundary
+## Phase 7/8 Service Foundation Boundary
 
 Phase 7 adds:
 
@@ -173,11 +173,11 @@ OTEL_EXPORTER_OTLP_ENDPOINT=
 OTEL_TRACE_SAMPLE_RATIO=0.1
 ```
 
-`MEDIA_SERVICE_MODE` and `TIMELINE_SERVICE_MODE` accept `local` or `rpc`. `local` keeps current in-process adapters. `rpc` calls optional `cmd/mediaservice` or `cmd/timelineservice` over ConnectRPC. Service discovery is static endpoint configuration in this phase; Consul, etcd, and Kubernetes service discovery integration are not required by the code.
+`MEDIA_SERVICE_MODE` and `TIMELINE_SERVICE_MODE` accept `local` or `rpc`. `local` keeps current in-process adapters. `rpc` calls optional `cmd/mediaservice` or `cmd/timelineservice` over ConnectRPC. Phase 8 uses generated typed ConnectRPC contracts from `server/api/internal/v1` into `server/internal/rpcgen/v1`; Android HTTP/WebSocket payloads are unchanged. Service discovery is static endpoint configuration in this phase; Consul, etcd, and Kubernetes service discovery integration are not required by the code.
 
 OpenTelemetry tracing is opt-in. Trace metadata can cross internal RPC, NATS, and Kafka boundaries, but it is not exposed in Android HTTP/WebSocket payloads.
 
-Database ownership is logical only. PostgreSQL remains a single database, but table owners and cross-context access rules are documented in [Database Ownership](./database-ownership.md). Future physical database splitting must replace cross-context writes and reads with service calls, events, or read models first.
+Database ownership is logical only. PostgreSQL remains a single database, but table owners and cross-context access rules are documented in [Database Ownership](./database-ownership.md) and enforced from `server/internal/store/db_ownership.yaml`. Future physical database splitting must replace cross-context writes and reads with service calls, events, or read models first.
 
 ## Multi-Instance Readiness After Phase 1
 

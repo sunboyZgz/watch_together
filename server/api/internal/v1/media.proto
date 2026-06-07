@@ -2,10 +2,9 @@ syntax = "proto3";
 
 package watch_together.internal.v1;
 
-import "google/protobuf/struct.proto";
 import "server/api/internal/v1/common.proto";
 
-option go_package = "watch_together/server/api/internal/v1;internalv1";
+option go_package = "watch_together/server/internal/rpcgen/v1;internalv1";
 
 service MediaInternalService {
   rpc ListTags(ListTagsRequest) returns (ListTagsResponse);
@@ -20,16 +19,17 @@ message ListTagsRequest {
 }
 
 message ListTagsResponse {
-  google.protobuf.Struct tags = 1;
+  repeated MediaTag featured_tags = 1;
+  repeated MediaTag all_tags = 2;
 }
 
 message SearchItemsRequest {
   RequestMetadata metadata = 1;
-  google.protobuf.Struct params = 2;
+  MediaSearchParams params = 2;
 }
 
 message SearchItemsResponse {
-  repeated google.protobuf.Struct items = 1;
+  repeated MediaItem items = 1;
 }
 
 message GetPlaybackItemRequest {
@@ -38,7 +38,7 @@ message GetPlaybackItemRequest {
 }
 
 message GetPlaybackItemResponse {
-  google.protobuf.Struct item = 1;
+  PlaybackItem item = 1;
 }
 
 message AuthorizePlaybackRequest {
@@ -49,4 +49,40 @@ message AuthorizePlaybackRequest {
 
 message AuthorizePlaybackResponse {
   bool authorized = 1;
+}
+
+message MediaTag {
+  string id = 1;
+  string slug = 2;
+  string name = 3;
+}
+
+message MediaItemTag {
+  string slug = 1;
+  string name = 2;
+}
+
+message MediaItem {
+  string id = 1;
+  string title = 2;
+  optional string subtitle = 3;
+  optional string description = 4;
+  optional string cover_url = 5;
+  string media_url = 6;
+  optional int64 duration_ms = 7;
+  optional string season_label = 8;
+  optional string episode_label = 9;
+  repeated MediaItemTag tags = 10;
+}
+
+message PlaybackItem {
+  string id = 1;
+  string media_url = 2;
+}
+
+message MediaSearchParams {
+  string query = 1;
+  string tag = 2;
+  int32 limit = 3;
+  int32 offset = 4;
 }

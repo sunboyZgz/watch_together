@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package watch_together.internal.v1;
 
-option go_package = "watch_together/server/api/internal/v1;internalv1";
+option go_package = "watch_together/server/internal/rpcgen/v1;internalv1";
 
 message RequestMetadata {
   string request_id = 1;

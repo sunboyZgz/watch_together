@@ -2,10 +2,13 @@ package timeline
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	"connectrpc.com/connect"
 
 	"watch_together/server/internal/internalrpc"
 )
@@ -43,6 +46,20 @@ func TestRPCClientMatchesTimelineInterfaces(t *testing.T) {
 	}
 	if len(unpublished) != 1 || unpublished[0].EventID != "evt-2" {
 		t.Fatalf("unexpected unpublished events: %+v", unpublished)
+	}
+}
+
+func TestRPCClientMapsUnavailableReader(t *testing.T) {
+	mux := http.NewServeMux()
+	RegisterInternalRPC(mux, "", "", nil, nil, nil)
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	client := NewRPCClient(server.URL, internalrpc.ClientConfig{Timeout: time.Second})
+	_, err := client.ReadRoomEvents(context.Background(), "ROOM01")
+	var connectErr *connect.Error
+	if !errors.As(err, &connectErr) || connectErr.Code() != connect.CodeUnavailable {
+		t.Fatalf("expected unavailable connect error, got %v", err)
 	}
 }
 

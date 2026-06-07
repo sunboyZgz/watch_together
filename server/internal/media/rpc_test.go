@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"connectrpc.com/connect"
+
 	"watch_together/server/internal/internalrpc"
 )
 
@@ -51,6 +53,13 @@ func TestRPCStoreMatchesLocalMediaStore(t *testing.T) {
 	if playback.ID != "episode-1" {
 		t.Fatalf("unexpected playback: %+v", playback)
 	}
+	authorized, err := rpcStore.AuthorizePlayback(context.Background(), "episode-1", "master.m3u8")
+	if err != nil {
+		t.Fatalf("authorize playback through rpc: %v", err)
+	}
+	if !authorized {
+		t.Fatalf("expected playback authorization")
+	}
 }
 
 func TestRPCStoreMapsPlaybackNotFound(t *testing.T) {
@@ -63,6 +72,23 @@ func TestRPCStoreMapsPlaybackNotFound(t *testing.T) {
 	_, err := rpcStore.FindPlaybackItem(context.Background(), "missing")
 	if !errors.Is(err, ErrMediaNotFound) {
 		t.Fatalf("expected ErrMediaNotFound, got %v", err)
+	}
+}
+
+func TestRPCStoreRejectsInvalidAuthToken(t *testing.T) {
+	mux := http.NewServeMux()
+	RegisterInternalRPC(mux, "", "secret", NewService(fakeRPCMediaStore{}))
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	rpcStore := NewRPCStore(server.URL, internalrpc.ClientConfig{
+		Timeout:   time.Second,
+		AuthToken: "wrong",
+	})
+	_, err := rpcStore.ListTags(context.Background(), 20)
+	var connectErr *connect.Error
+	if !errors.As(err, &connectErr) || connectErr.Code() != connect.CodeUnauthenticated {
+		t.Fatalf("expected unauthenticated connect error, got %v", err)
 	}
 }
 

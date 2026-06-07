@@ -6,6 +6,8 @@
 
 - `cmd/roomserver/main.go`: loads runtime config and starts the HTTP/WebSocket server.
 - `cmd/mediactl/main.go`: loads media tool config and runs media maintenance commands.
+- `cmd/mediaservice/main.go`: optional internal media RPC service for the serviceization pilot.
+- `cmd/timelineservice/main.go`: optional internal timeline RPC service for the serviceization pilot.
 
 ## Main Internal Packages
 
@@ -19,6 +21,7 @@
 - `internal/transport`: HTTP handlers, WebSocket handler, API envelopes, media delivery.
 - `internal/store`: PostgreSQL stores.
 - `internal/cache`: Redis room-state cache.
+- `internal/rpcgen/v1`: generated typed ConnectRPC contracts.
 - `internal/mediactl`: HLS generation, storage upload, and metadata upsert logic.
 
 ## Local Commands
@@ -53,6 +56,13 @@ Run tests:
 
 ```bash
 go test ./...
+```
+
+Regenerate internal RPC contracts:
+
+```bash
+make proto-lint
+make proto-generate
 ```
 
 Run mediactl:

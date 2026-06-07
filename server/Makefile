@@ -1,6 +1,6 @@
 MIGRATIONS_DIR := ./migrations
 
-.PHONY: migration-create migration-up migration-down migration-version
+.PHONY: migration-create migration-up migration-down migration-version proto-lint proto-generate
 
 migration-create:
 	@test -n "$(name)" || (echo "usage: make migration-create name=create_users_table" && exit 1)
@@ -14,3 +14,9 @@ migration-down:
 
 migration-version:
 	@./scripts/migrate.sh version
+
+proto-lint:
+	@cd .. && buf lint
+
+proto-generate:
+	@cd .. && buf generate

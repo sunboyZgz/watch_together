@@ -49,6 +49,7 @@ Main backend boundaries:
 - `internal/observability`: readiness snapshots and Prometheus metrics.
 - `internal/servicekit`: service identity, request metadata, deadline, and internal auth conventions.
 - `internal/internalrpc`: ConnectRPC helper layer for optional internal service adapters.
+- `internal/rpcgen/v1`: generated typed internal RPC contracts for media and timeline.
 - `internal/telemetry`: OpenTelemetry tracing setup.
 - `internal/mediactl`: media ingestion CLI implementation.
 
@@ -58,7 +59,7 @@ PostgreSQL is the durable store for users, media metadata, rooms, room members, 
 
 On startup, the server marks previously active persisted rooms as `grace_period`, starts an in-memory cleanup loop, and, when PostgreSQL is available, starts persistent room cleanup for expired rooms.
 
-The default room runtime mode is still `local_process`. `distributed_authority` enables Redis authority leases, NATS forwarding, Kafka timeline logging, authority recovery, distributed seek rate limiting, and Prometheus/readiness observability. Phase 7 adds optional internal service skeletons for media and timeline, local/RPC adapters, OpenTelemetry tracing, and logical database ownership design while keeping one PostgreSQL database. See [Runtime Boundaries](./runtime-boundaries.md), [Distributed Architecture](./distributed-architecture.md), and [Database Ownership](./database-ownership.md) for the current architecture.
+The default room runtime mode is still `local_process`. `distributed_authority` enables Redis authority leases, NATS forwarding, Kafka timeline logging, authority recovery, distributed seek rate limiting, and Prometheus/readiness observability. Phase 8 keeps one PostgreSQL database but adds generated typed internal RPC contracts, verifiable media/timeline RPC pilots, OpenTelemetry collector support, and CI-tested logical database ownership rules. See [Runtime Boundaries](./runtime-boundaries.md), [Distributed Architecture](./distributed-architecture.md), and [Database Ownership](./database-ownership.md) for the current architecture.
 
 ## Media Model
 

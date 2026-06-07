@@ -1,6 +1,6 @@
 # Database Ownership
 
-Phase 7 keeps one PostgreSQL database and adds logical ownership boundaries. No physical database split happens in Phase 7.
+Phase 7 keeps one PostgreSQL database and adds logical ownership boundaries. No physical database split happens in Phase 7. Phase 8 makes the boundary enforceable with the machine-readable registry at `server/internal/store/db_ownership.yaml` and architecture tests that scan store SQL and migrations.
 
 ## Ownership Rules
 
@@ -9,6 +9,7 @@ Phase 7 keeps one PostgreSQL database and adds logical ownership boundaries. No 
 - Cross-context reads must go through a port/interface, RPC adapter, or a documented read model.
 - New tables must declare an owner before their first migration is merged.
 - Existing foreign keys remain in place until a later physical database split plan replaces them with service contracts or read models.
+- The registry, not this prose table, is the CI source of truth. Documentation should explain owner intent; tests enforce the registry.
 
 ## Table Owners
 
@@ -23,16 +24,27 @@ Phase 7 keeps one PostgreSQL database and adds logical ownership boundaries. No 
 
 ## Cross-Context Access Registry
 
+The canonical registry lives in `server/internal/store/db_ownership.yaml`. Current registered reads are:
+
 | Caller | Accessed owner | Current access | Phase 7 rule |
 | --- | --- | --- | --- |
 | `home-composition` | `identity`, `media`, `progress` | `PostgresHomeStore` composes home summary rows. | Allowed as a read model/composition query; no writes. |
 | `room-session` | `media` | Room create/detail references `media_episodes.id`. | Allowed through room store while single PostgreSQL is retained; future split should call `MediaInternalService` or store a room media snapshot. |
+| `room-session` | `identity` | Room create/join/detail validates and displays users. | Allowed while single PostgreSQL is retained; no direct writes to `users`. |
+| `progress` | `identity`, `media` | Progress writes validate user and active episode before upsert. | Allowed while single PostgreSQL is retained; future split should call identity/media ports. |
 | `media` playback delivery | `media` | Playback lookup reads `media_episodes` and variants. | Owned access. |
 | `recovery` | `room-session`, `timeline` | Loads room metadata, Kafka events, and unpublished outbox rows. | Allowed through `RoomDetailStore`, `RoomEventReader`, and `PendingOutboxReader` ports. |
 | `outboxworker` | `timeline` | Claims and updates `room_timeline_outbox`. | Owned access. |
 | `derivedworker` | `timeline` | Consumes Kafka canonical topic and publishes derived topics. | Owned event-processing access. |
 
 ## Future Physical Split Checklist
+
+Phase 8 known split blockers:
+
+- `room-session -> media`: `PostgresRoomStore` still reads `media_episodes` and `media_seasons` to populate room bootstrap media fields. Removing this read requires either a media detail RPC method or a durable room media snapshot.
+- `progress -> media`: `PostgresProgressStore` still validates active episodes through `media_episodes` and `media_seasons` before writing `user_media_progress`. Removing this read requires media validation through a port/RPC call before the progress transaction.
+- `home-composition -> identity/media/progress`: `PostgresHomeStore` intentionally remains a read model query while PostgreSQL is single-database. A physical split needs a cached home read model or service composition layer.
+- Existing foreign keys from `rooms` and `user_media_progress` to media tables remain in PostgreSQL until a later split removes cross-database FK assumptions.
 
 Before moving a context to its own database:
 

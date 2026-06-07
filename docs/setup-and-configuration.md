@@ -179,10 +179,10 @@ Service foundation settings:
 
 - `SERVICE_NAME` and `SERVICE_VERSION` identify the current process in logs, internal RPC metadata, and traces.
 - `INTERNAL_RPC_*` configures optional ConnectRPC service endpoints. `INTERNAL_RPC_AUTH_TOKEN` protects internal calls when configured and is required for production internal RPC.
-- `SERVICE_DISCOVERY_MODE=static` is the only supported discovery mode in Phase 7.
+- `SERVICE_DISCOVERY_MODE=static` is the only supported discovery mode in Phase 7 and Phase 8.
 - `MEDIA_SERVICE_MODE` and `TIMELINE_SERVICE_MODE` accept `local` or `rpc`. `local` keeps current in-process adapters. `rpc` calls `MEDIA_SERVICE_ADDR` or `TIMELINE_SERVICE_ADDR`.
 - `OTEL_TRACING_ENABLED` turns on OpenTelemetry tracing. `OTEL_EXPORTER_OTLP_ENDPOINT` points at the internal OTLP collector, and `OTEL_TRACE_SAMPLE_RATIO` must be between `0` and `1`.
-- Phase 7 keeps one PostgreSQL database. Table owners and future split rules are documented in [Database Ownership](./database-ownership.md).
+- Phase 8 keeps one PostgreSQL database. Table owners and future split rules are documented in [Database Ownership](./database-ownership.md) and enforced from `server/internal/store/db_ownership.yaml`.
 
 See [distributed-architecture.md](./distributed-architecture.md) for the current module map, business flows, and monitoring data flow.
 
@@ -195,6 +195,27 @@ APP_ENV=local go run ./cmd/derivedworker
 APP_ENV=local INTERNAL_RPC_ADDR=:8090 go run ./cmd/mediaservice
 APP_ENV=local INTERNAL_RPC_ADDR=:8091 go run ./cmd/timelineservice
 ```
+
+Generate and lint internal RPC contracts:
+
+```bash
+cd server
+make proto-lint
+make proto-generate
+```
+
+Run the optional RPC pilot stack through compose:
+
+```bash
+cd server
+MEDIA_SERVICE_MODE=rpc \
+TIMELINE_SERVICE_MODE=rpc \
+OTEL_TRACING_ENABLED=true \
+OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4318 \
+docker compose --profile rpc-pilot up -d --build
+```
+
+`rpc-pilot` starts `roomserver`, `mediaservice`, `timelineservice`, and an OTLP collector. The default stack remains local-adapter mode unless `MEDIA_SERVICE_MODE=rpc` or `TIMELINE_SERVICE_MODE=rpc` is explicitly set.
 
 Start the server:
 

@@ -1,0 +1,105 @@
+version: 1
+
+store_files:
+  postgres.go: identity
+  media_postgres.go: media
+  room_postgres.go: room-session
+  progress_postgres.go: progress
+  room_timeline_outbox.go: timeline
+  home_postgres.go: home-composition
+
+tables:
+  users:
+    owner: identity
+    writers: [identity]
+    readers: [identity, home-composition, room-session, progress]
+  media_tags:
+    owner: media
+    writers: [media]
+    readers: [media]
+  media_seasons:
+    owner: media
+    writers: [media]
+    readers: [media, home-composition, room-session, progress]
+  media_episodes:
+    owner: media
+    writers: [media]
+    readers: [media, home-composition, room-session, progress]
+  media_episode_variants:
+    owner: media
+    writers: [media]
+    readers: [media]
+  media_season_tags:
+    owner: media
+    writers: [media]
+    readers: [media]
+  rooms:
+    owner: room-session
+    writers: [room-session]
+    readers: [room-session]
+  room_members:
+    owner: room-session
+    writers: [room-session]
+    readers: [room-session]
+  user_media_progress:
+    owner: progress
+    writers: [progress]
+    readers: [progress, home-composition]
+  room_timeline_outbox:
+    owner: timeline
+    writers: [timeline]
+    readers: [timeline]
+  media_items:
+    owner: media
+    writers: [media]
+    readers: [media, room-session, progress]
+    status: retired
+  media_item_tags:
+    owner: media
+    writers: [media]
+    readers: [media]
+    status: retired
+
+cross_context_access:
+  - caller: home-composition
+    owner: identity
+    tables: [users]
+    access: read
+    path: home_postgres.go
+    reason: home profile summary read model
+  - caller: home-composition
+    owner: media
+    tables: [media_episodes, media_seasons]
+    access: read
+    path: home_postgres.go
+    reason: continue-watching media labels read model
+  - caller: home-composition
+    owner: progress
+    tables: [user_media_progress]
+    access: read
+    path: home_postgres.go
+    reason: continue-watching progress read model
+  - caller: room-session
+    owner: identity
+    tables: [users]
+    access: read
+    path: room_postgres.go
+    reason: room host/member validation and member details
+  - caller: room-session
+    owner: media
+    tables: [media_episodes, media_seasons]
+    access: read
+    path: room_postgres.go
+    reason: room create/detail media lookup until media port fully owns validation
+  - caller: progress
+    owner: identity
+    tables: [users]
+    access: read
+    path: progress_postgres.go
+    reason: progress write validates user existence while single PostgreSQL is retained
+  - caller: progress
+    owner: media
+    tables: [media_episodes, media_seasons]
+    access: read
+    path: progress_postgres.go
+    reason: progress write validates playable episode until media port fully owns validation
