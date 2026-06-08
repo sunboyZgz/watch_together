@@ -183,6 +183,7 @@ func TestReadinessSnapshotReportsMediaPostgresBoundary(t *testing.T) {
 				nil,
 				tc.mediaDB,
 				nil,
+				nil,
 				eventbus.NewDisabledRoomBroadcastBus(),
 				eventbus.NewDisabledRoomControlBus(),
 				nil,
@@ -202,6 +203,106 @@ func TestReadinessSnapshotReportsMediaPostgresBoundary(t *testing.T) {
 				)
 			}
 		})
+	}
+}
+
+func TestReadinessSnapshotReportsTimelinePostgresBoundary(t *testing.T) {
+	cases := []struct {
+		name       string
+		config     Config
+		timelineDB *gorm.DB
+		wantStatus string
+		wantReq    bool
+	}{
+		{
+			name: "local timeline database missing",
+			config: Config{
+				AppEnv:              "test",
+				RoomRuntimeMode:     roomRuntimeModeDistributedAuthority,
+				TimelineDatabaseURL: "postgres://timeline-db",
+				ServiceClients:      ServiceClientsConfig{TimelineMode: "local"},
+			},
+			wantStatus: "unavailable",
+			wantReq:    true,
+		},
+		{
+			name: "local timeline database connected",
+			config: Config{
+				AppEnv:              "test",
+				RoomRuntimeMode:     roomRuntimeModeDistributedAuthority,
+				TimelineDatabaseURL: "postgres://timeline-db",
+				ServiceClients:      ServiceClientsConfig{TimelineMode: "local"},
+			},
+			timelineDB: &gorm.DB{},
+			wantStatus: "ok",
+			wantReq:    true,
+		},
+		{
+			name: "rpc timeline mode does not require roomserver timeline database",
+			config: Config{
+				AppEnv:              "test",
+				RoomRuntimeMode:     roomRuntimeModeDistributedAuthority,
+				TimelineDatabaseURL: "postgres://timeline-db",
+				ServiceClients: ServiceClientsConfig{
+					TimelineMode: "rpc",
+					TimelineAddr: "http://timelineservice:8090",
+				},
+			},
+			wantStatus: "disabled",
+			wantReq:    false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			snapshot := readinessSnapshotFromConfig(
+				tc.config,
+				nil,
+				nil,
+				tc.timelineDB,
+				nil,
+				eventbus.NewDisabledRoomBroadcastBus(),
+				eventbus.NewDisabledRoomControlBus(),
+				nil,
+				nil,
+			)
+
+			dependency, ok := dependencyByName(snapshot.Dependencies, "timeline_postgres")
+			if !ok {
+				t.Fatalf("expected timeline_postgres dependency in readiness snapshot")
+			}
+			if dependency.Status != tc.wantStatus || dependency.Required != tc.wantReq {
+				t.Fatalf("timeline_postgres = status %q required %t, want status %q required %t",
+					dependency.Status,
+					dependency.Required,
+					tc.wantStatus,
+					tc.wantReq,
+				)
+			}
+		})
+	}
+}
+
+func TestNewTimelineOutboxStoreDoesNotFallbackWhenConfiguredTimelineDatabaseIsUnavailable(t *testing.T) {
+	mainDB := &gorm.DB{}
+	store := newTimelineOutboxStore(
+		mainDB,
+		nil,
+		Config{
+			TimelineDatabaseURL: "postgres://timeline-db",
+			ServiceClients:      ServiceClientsConfig{TimelineMode: "local"},
+		},
+	)
+	if store != nil {
+		t.Fatalf("expected nil timeline outbox store when TIMELINE_DATABASE_URL is configured but timeline database is unavailable")
+	}
+
+	store = newTimelineOutboxStore(
+		mainDB,
+		nil,
+		Config{ServiceClients: ServiceClientsConfig{TimelineMode: "local"}},
+	)
+	if store == nil {
+		t.Fatalf("expected main database fallback when TIMELINE_DATABASE_URL is empty")
 	}
 }
 

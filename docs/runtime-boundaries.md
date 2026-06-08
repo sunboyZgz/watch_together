@@ -1,6 +1,6 @@
 # Runtime Boundaries
 
-This document records the runtime ownership boundaries for the room system. `local_process` remains the default runtime. Phase 4 adds a `distributed_authority` MVP for multi-instance room authority, Phase 5 adds fenced authority recovery from the Kafka canonical timeline, Phase 6 adds distributed seek rate limiting plus observability, Phase 7 adds service foundation boundaries with optional media/timeline RPC adapters and logical database ownership, Phase 8 closes the media table access boundary for room/progress while making the RPC pilot verifiable, and Phase 9 adds an optional independent media database boundary through `MEDIA_DATABASE_URL`.
+This document records the runtime ownership boundaries for the room system. `local_process` remains the default runtime. Phase 4 adds a `distributed_authority` MVP for multi-instance room authority, Phase 5 adds fenced authority recovery from the Kafka canonical timeline, Phase 6 adds distributed seek rate limiting plus observability, Phase 7 adds service foundation boundaries with optional media/timeline RPC adapters and logical database ownership, Phase 8 closes the media table access boundary for room/progress while making the RPC pilot verifiable, Phase 9 adds an optional independent media database boundary through `MEDIA_DATABASE_URL`, and Phase 10 adds an optional independent timeline database boundary through `TIMELINE_DATABASE_URL`.
 
 ## Phase 1 Boundary Markers
 
@@ -35,17 +35,18 @@ X-Watch-Together-Room-Runtime: local_process
 | Room authority routing | Redis lease + NATS request/reply | Only in `distributed_authority`; non-authority instances forward controls to the authority instance and include the current authority epoch. |
 | Active-device ownership | Redis lease | Only in `distributed_authority`; guards `deviceId + connectionId` ownership per room user. |
 | User-level presence | Redis presence registry | Only in `distributed_authority`; stores internal device/connection details but exposes user-level `room_presence` snapshots. |
-| Durable room timeline | PostgreSQL outbox + Kafka | Only in `distributed_authority`; Kafka is a result log and recovery source, not a command ingress or online fan-out path. |
-| Authority recovery | Recovery service + Redis + Kafka + PostgreSQL outbox | Begins a recovering lease after expiry, replays Kafka, merges unpublished outbox rows, and completes a new active epoch. |
+| Durable room timeline | Timeline PostgreSQL outbox + Kafka | Only in `distributed_authority`; Kafka is a result log and recovery source, not a command ingress or online fan-out path. |
+| Authority recovery | Recovery service + Redis + Kafka + timeline outbox | Begins a recovering lease after expiry, replays Kafka, merges unpublished outbox rows, and completes a new active epoch. |
 | Control idempotency | Local memory or Redis request registry | `local_process` uses process-local deduplication. `distributed_authority` uses Redis `requestId` records and backfills recovered accepted requests after Kafka replay. |
 | Seek rate limiting | Local memory or Redis control rate registry | `local_process` uses process-local throttling. `distributed_authority` uses Redis `wt:room:control_rate:{roomId}:seek:v1`. |
 | Observability | `internal/observability` | `/healthz`, `/readyz`, `/metrics`, Prometheus metrics, and worker metric hooks. |
 | Service foundation metadata | `internal/servicekit` | Request id, service name/version, deadlines, internal auth, and trace metadata. |
 | Optional internal RPC | ConnectRPC helper layer | `media` and `timeline` can run through local adapters or optional RPC services using generated typed contracts. |
 | OpenTelemetry tracing | `internal/telemetry` | Optional traces across HTTP, WebSocket control, RPC, Redis, NATS, Kafka, and PostgreSQL. |
-| Database ownership | Main PostgreSQL database plus optional media PostgreSQL database | Phase 9 can place media-owned tables in a separate database inside the same PostgreSQL server/container. |
+| Database ownership | Main PostgreSQL database plus optional media and timeline PostgreSQL databases | Phase 9 can place media-owned tables in a separate database; Phase 10 can place timeline-owned outbox rows in a separate database. Both are databases inside the same PostgreSQL server/container by default. |
 | Room metadata and membership | PostgreSQL | Durable business state. |
 | Media metadata | Media PostgreSQL database or fallback main PostgreSQL database | Durable catalog state selected by `MEDIA_DATABASE_URL`. |
+| Timeline outbox | Timeline PostgreSQL database or fallback main PostgreSQL database | Durable outbox state selected by `TIMELINE_DATABASE_URL`. |
 | HLS files | Local/object storage via mediactl | Served through signed playback paths and Nginx/object storage depending on delivery mode. |
 
 ## Phase 2 Snapshot Boundary
@@ -111,7 +112,7 @@ The control rate registry stores the current seek throttle reservation for a roo
 
 The presence registry stores one online entry per room user. Internal values may include `deviceId`, `connectionId`, and `instanceId`, but WebSocket `room_presence` exposes only user-level fields: `userId`, `role`, `isHost`, and per-recipient `isSelf`.
 
-PostgreSQL `room_timeline_outbox` stores canonical timeline result events. `cmd/outboxworker` publishes them to Kafka, and `cmd/derivedworker` derives control-result and membership topics. Online WebSocket fan-out remains NATS + local connection tables.
+PostgreSQL `room_timeline_outbox` stores canonical timeline result events. In Phase 10 it may live in the independent timeline database selected by `TIMELINE_DATABASE_URL`; otherwise it remains in the main database fallback. `cmd/outboxworker` publishes it to Kafka, and `cmd/derivedworker` derives control-result and membership topics. Online WebSocket fan-out remains NATS + local connection tables.
 
 ## Phase 5 Authority Recovery Boundary
 
@@ -127,13 +128,13 @@ PRESENCE_LEASE_TTL_MS=45000
 PRESENCE_REFRESH_INTERVAL_MS=15000
 ```
 
-Healthy authority instances renew active leases without changing `epoch`. After a lease is missing or expired, one instance can enter `status=recovering`, increment `epoch`, rebuild the room from the Kafka canonical timeline, merge same-room `pending` and `publishing` PostgreSQL outbox rows, register recovered state in `room.Manager`, write the latest Redis snapshot, and complete the lease as `status=active`.
+Healthy authority instances renew active leases without changing `epoch`. After a lease is missing or expired, one instance can enter `status=recovering`, increment `epoch`, rebuild the room from the Kafka canonical timeline, merge same-room `pending` and `publishing` timeline outbox rows, register recovered state in `room.Manager`, write the latest Redis snapshot, and complete the lease as `status=active`.
 
 Recovery uses Kafka as the result log. It replays `room.control.accepted` events to rebuild playback state. Rejected control events and membership events remain audit/dedup context and do not change playback state. PostgreSQL outbox rows only close the gap for decisions that were already written but not yet published to Kafka.
 
 Old authority results are fenced by epoch. Local apply, NATS control replies, and NATS broadcasts are accepted only when the observed Redis authority lease is still active for the expected instance and epoch. A recovering room returns `room authority recovering` or a current snapshot; WebSocket connections are never moved between instances.
 
-Phase 5 hardening requires accepted controls in `distributed_authority` to write `room_timeline_outbox` before Redis snapshot writes or WebSocket/NATS broadcast. If the outbox write fails, the accepted envelope is not broadcast and the client receives an error or current `room_state`. Rejected controls remain best-effort outbox writes.
+Phase 5 hardening requires accepted controls in `distributed_authority` to write `room_timeline_outbox` before Redis snapshot writes or WebSocket/NATS broadcast. If the outbox write fails, the accepted envelope is not broadcast and the client receives an error or current `room_state`. Rejected controls remain best-effort outbox writes. Phase 10 keeps the same fail-closed behavior when `TIMELINE_DATABASE_URL` is configured but unavailable.
 
 Heartbeat acks refresh Redis presence leases at `PRESENCE_REFRESH_INTERVAL_MS`. Join, leave, disconnect, active-device lease loss, and device switch publish a fresh user-level `room_presence` snapshot. Presence is runtime state only; it is not PostgreSQL membership and is not written to Kafka.
 
@@ -198,6 +199,23 @@ Media schema migrations live in `server/media_migrations`. Main-database migrati
 `home-composition` no longer directly reads media tables. `PostgresHomeStore` reads user and progress episode ids from the main database, and the home service fills titles and covers through `BatchGetEpisodeSummaries` on the media port/RPC. Missing media summaries are skipped to preserve the previous inner-join behavior.
 
 `cmd/mediadbsync` copies media-owned tables from the main database shadow tables to the media database and can run `--verify-only` row count and content hash checks.
+
+## Phase 10 Timeline Database Boundary
+
+Phase 10 adds:
+
+```text
+TIMELINE_DATABASE_URL=
+TIMELINE_POSTGRES_DB=anime_watch_timeline_dev
+```
+
+When `TIMELINE_DATABASE_URL` is empty, timeline storage continues to use the main `DATABASE_URL`. When it is set, local timeline mode opens a separate `timeline_postgres` connection, `cmd/timelineservice` prefers that database over the main database, and `cmd/outboxworker` claims/publishes rows from that database. In `TIMELINE_SERVICE_MODE=rpc`, `roomserver` calls `cmd/timelineservice` and does not connect to the timeline database directly.
+
+Timeline schema migrations live in `server/timeline_migrations`. Main-database migrations live in `server/migrations`; the old main-database `room_timeline_outbox` table is retained as fallback/shadow data. Development-stage Phase 10 does not migrate old timeline outbox history.
+
+Timeline availability is fail-closed. If `TIMELINE_DATABASE_URL` is configured but the timeline database cannot be opened, accepted distributed controls do not fall back to the main database, do not finalize accepted request idempotency, and do not broadcast accepted WebSocket envelopes. Recovery also must not complete an authority epoch from an unavailable unpublished-outbox reader.
+
+`pending` and `publishing` outbox rows are recovery-gap data and must not be removed by cleanup tasks. Published-row retention can be designed later, but no automatic retention job is introduced in Phase 10.
 
 ## Multi-Instance Readiness After Phase 1
 

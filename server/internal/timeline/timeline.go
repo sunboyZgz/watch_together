@@ -50,6 +50,16 @@ func (NoopRecorder) RecordTimelineEvent(context.Context, Event) error {
 	return nil
 }
 
+type UnavailableStore struct{}
+
+func (UnavailableStore) RecordTimelineEvent(context.Context, Event) error {
+	return ErrTimelineUnavailable
+}
+
+func (UnavailableStore) ReadRoomUnpublishedTimelineEvents(context.Context, string) ([]Event, error) {
+	return nil, ErrTimelineUnavailable
+}
+
 func NewEvent(eventType string, roomID string, now time.Time) Event {
 	return Event{
 		EventID:      NewEventID(),

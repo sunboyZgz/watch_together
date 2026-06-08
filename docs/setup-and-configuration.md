@@ -40,6 +40,16 @@ MEDIA_DATABASE_URL=postgres://app:app@127.0.0.1:5432/anime_watch_media_dev?sslmo
 
 `media-postgres-init` creates `anime_watch_media_dev` inside the same local PostgreSQL container. It does not start a second PostgreSQL server.
 
+Phase 10 can run timeline-owned outbox rows in an independent timeline database. The default local fallback leaves `TIMELINE_DATABASE_URL` empty and keeps `room_timeline_outbox` in `DATABASE_URL`. To use the timeline database pilot in the local compose stack:
+
+```bash
+cd server
+docker compose --profile services up -d postgres timeline-postgres-init
+TIMELINE_DATABASE_URL=postgres://app:app@127.0.0.1:5432/anime_watch_timeline_dev?sslmode=disable make timeline-migration-up
+```
+
+`timeline-postgres-init` creates `anime_watch_timeline_dev` inside the same local PostgreSQL container. It does not start a second PostgreSQL server. Phase 10 starts the independent timeline database empty; old `room_timeline_outbox` rows are not migrated.
+
 ## Server Configuration Loading
 
 Both `roomserver` and `mediactl` load configuration from `server/` in this order:
@@ -73,6 +83,8 @@ SERVER_INSTANCE_ID=
 ROOM_RUNTIME_MODE=local_process
 DATABASE_URL=postgres://app:app@127.0.0.1:5432/anime_watch_dev?sslmode=disable
 MEDIA_DATABASE_URL=
+TIMELINE_POSTGRES_DB=anime_watch_timeline_dev
+TIMELINE_DATABASE_URL=
 DEBUG_SYNC=true
 AUTH_JWT_SECRET=<secret>
 AUTH_ACCESS_TOKEN_TTL_HOURS=24
@@ -146,7 +158,11 @@ MEDIA_STORAGE_FORCE_PATH_STYLE=true
 
 `ROOM_RUNTIME_MODE` supports `local_process` and `distributed_authority`. `local_process` keeps active room playback authority, WebSocket connection tables, control deduplication, and seek rate limiting in one Go process. `distributed_authority` requires `SERVER_INSTANCE_ID`, PostgreSQL, Redis, NATS, Kafka broker config, and `WS_CROSS_INSTANCE_BROADCAST_ENABLED=true`.
 
-If `DATABASE_URL` is empty or PostgreSQL cannot be opened, database-backed HTTP endpoints return `503`. If `MEDIA_DATABASE_URL` is set, local media mode and `cmd/mediaservice` use it for media-owned tables and `/readyz` reports that dependency as `media_postgres`; if it is empty, media uses the main `DATABASE_URL`. In `MEDIA_SERVICE_MODE=rpc`, `roomserver` does not connect to the media database directly. If `REDIS_ADDR` is empty, the Redis-backed room state cache is disabled.
+If `DATABASE_URL` is empty or PostgreSQL cannot be opened, database-backed HTTP endpoints return `503`. If `MEDIA_DATABASE_URL` is set, local media mode and `cmd/mediaservice` use it for media-owned tables and `/readyz` reports that dependency as `media_postgres`; if it is empty, media uses the main `DATABASE_URL`. In `MEDIA_SERVICE_MODE=rpc`, `roomserver` does not connect to the media database directly.
+
+If `TIMELINE_DATABASE_URL` is set, local timeline mode, `cmd/timelineservice`, and `cmd/outboxworker` use it for `room_timeline_outbox` and `/readyz` reports that dependency as `timeline_postgres`; if it is empty, timeline uses the main `DATABASE_URL`. In `TIMELINE_SERVICE_MODE=rpc`, `roomserver` does not connect to the timeline database directly. Timeline is fail-closed: if `TIMELINE_DATABASE_URL` is configured but cannot be opened, accepted distributed controls must not fall back to the main database or broadcast an accepted result.
+
+If `REDIS_ADDR` is empty, the Redis-backed room state cache is disabled.
 
 `WS_CROSS_INSTANCE_BROADCAST_ENABLED` controls Phase 3 cross-instance WebSocket fan-out. It defaults to `false`. When set to `true`, `WS_EVENT_BUS` currently accepts only `nats_core`, and `roomserver` publishes local WebSocket broadcast envelopes to `NATS_SUBJECT_ROOM_BROADCAST`.
 
@@ -191,10 +207,10 @@ Service foundation settings:
 
 - `SERVICE_NAME` and `SERVICE_VERSION` identify the current process in logs, internal RPC metadata, and traces.
 - `INTERNAL_RPC_*` configures optional ConnectRPC service endpoints. `INTERNAL_RPC_AUTH_TOKEN` protects internal calls when configured and is required for production internal RPC.
-- `SERVICE_DISCOVERY_MODE=static` is the only supported discovery mode in Phase 7 through Phase 9.
+- `SERVICE_DISCOVERY_MODE=static` is the only supported discovery mode in Phase 7 through Phase 10.
 - `MEDIA_SERVICE_MODE` and `TIMELINE_SERVICE_MODE` accept `local` or `rpc`. `local` keeps current in-process adapters. `rpc` calls `MEDIA_SERVICE_ADDR` or `TIMELINE_SERVICE_ADDR`.
 - `OTEL_TRACING_ENABLED` turns on OpenTelemetry tracing. `OTEL_EXPORTER_OTLP_ENDPOINT` points at the internal OTLP collector, and `OTEL_TRACE_SAMPLE_RATIO` must be between `0` and `1`.
-- Phase 9 keeps the old single-database fallback but can put media-owned tables in an independent PostgreSQL database through `MEDIA_DATABASE_URL`. Table owners and future split rules are documented in [Database Ownership](./database-ownership.md) and enforced from `server/internal/store/db_ownership.yaml`.
+- Phase 9 keeps the old single-database fallback but can put media-owned tables in an independent PostgreSQL database through `MEDIA_DATABASE_URL`. Phase 10 does the same for timeline-owned outbox rows through `TIMELINE_DATABASE_URL`. Table owners and future split rules are documented in [Database Ownership](./database-ownership.md) and enforced from `server/internal/store/db_ownership.yaml`.
 
 See [distributed-architecture.md](./distributed-architecture.md) for the current module map, business flows, and monitoring data flow.
 
@@ -232,6 +248,13 @@ cd server
 .\scripts\verify_phase9.ps1
 ```
 
+Run the Phase 10 verification loop on Windows:
+
+```powershell
+cd server
+.\scripts\verify_phase10.ps1
+```
+
 Media database sync:
 
 ```bash
@@ -242,6 +265,16 @@ go run ./cmd/mediadbsync --batch-size 200
 ```
 
 The command reads from `DATABASE_URL` by default and writes/verifies `MEDIA_DATABASE_URL`. It syncs `media_tags`, `media_seasons`, `media_episodes`, `media_season_tags`, and `media_episode_variants` in dependency order using upsert.
+
+Timeline database migrations:
+
+```bash
+cd server
+TIMELINE_DATABASE_URL=postgres://app:app@127.0.0.1:5432/anime_watch_timeline_dev?sslmode=disable make timeline-migration-up
+TIMELINE_DATABASE_URL=postgres://app:app@127.0.0.1:5432/anime_watch_timeline_dev?sslmode=disable make timeline-migration-version
+```
+
+There is no timeline history sync command in Phase 10. The independent timeline database starts from an empty `room_timeline_outbox` table, and the old main-database outbox remains fallback/shadow data.
 
 Run the optional RPC pilot stack through compose:
 
@@ -254,7 +287,7 @@ OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4318 \
 docker compose --profile rpc-pilot up -d --build
 ```
 
-`rpc-pilot` starts `roomserver`, `mediaservice`, `timelineservice`, an OTLP collector, and the media database init job. `mediaservice` uses `MEDIA_DATABASE_URL=postgres://app:app@postgres:5432/anime_watch_media_dev?sslmode=disable` in compose. The default stack remains local-adapter mode unless `MEDIA_SERVICE_MODE=rpc` or `TIMELINE_SERVICE_MODE=rpc` is explicitly set.
+`rpc-pilot` starts `roomserver`, `mediaservice`, `timelineservice`, an OTLP collector, and the media/timeline database init jobs. `mediaservice` uses `MEDIA_DATABASE_URL=postgres://app:app@postgres:5432/anime_watch_media_dev?sslmode=disable` in compose. `timelineservice` and `outboxworker` use `TIMELINE_DATABASE_URL=postgres://app:app@postgres:5432/anime_watch_timeline_dev?sslmode=disable`. The default stack remains local-adapter mode unless `MEDIA_SERVICE_MODE=rpc` or `TIMELINE_SERVICE_MODE=rpc` is explicitly set.
 
 RPC pilot smoke checks:
 

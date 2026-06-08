@@ -14,28 +14,29 @@ const (
 const eventBusNATSCore = "nats_core"
 
 type ServerRuntimeConfig struct {
-	AppEnv            string
-	Host              string
-	Port              string
-	LogLevel          string
-	InstanceID        string
-	RoomRuntimeMode   string
-	DatabaseURL       string
-	MediaDatabaseURL  string
-	DebugSync         bool
-	Auth              AuthConfig
-	Redis             RedisConfig
-	WebSocket         WebSocketConfig
-	NATS              NATSConfig
-	Kafka             KafkaConfig
-	OutboxWorker      OutboxWorkerConfig
-	AuthorityRecovery AuthorityRecoveryConfig
-	Observability     ObservabilityConfig
-	Service           ServiceConfig
-	InternalRPC       InternalRPCConfig
-	ServiceClients    ServiceClientsConfig
-	Telemetry         TelemetryConfig
-	Media             MediaPlaybackConfig
+	AppEnv              string
+	Host                string
+	Port                string
+	LogLevel            string
+	InstanceID          string
+	RoomRuntimeMode     string
+	DatabaseURL         string
+	MediaDatabaseURL    string
+	TimelineDatabaseURL string
+	DebugSync           bool
+	Auth                AuthConfig
+	Redis               RedisConfig
+	WebSocket           WebSocketConfig
+	NATS                NATSConfig
+	Kafka               KafkaConfig
+	OutboxWorker        OutboxWorkerConfig
+	AuthorityRecovery   AuthorityRecoveryConfig
+	Observability       ObservabilityConfig
+	Service             ServiceConfig
+	InternalRPC         InternalRPCConfig
+	ServiceClients      ServiceClientsConfig
+	Telemetry           TelemetryConfig
+	Media               MediaPlaybackConfig
 }
 
 type AuthConfig struct {
@@ -218,6 +219,7 @@ func LoadServerRuntimeConfig(configDir string) (ServerRuntimeConfig, error) {
 		"ROOM_RUNTIME_MODE",
 		"DATABASE_URL",
 		"MEDIA_DATABASE_URL",
+		"TIMELINE_DATABASE_URL",
 		"DEBUG_SYNC",
 		"AUTH_JWT_SECRET",
 		"AUTH_ACCESS_TOKEN_TTL_HOURS",
@@ -303,15 +305,16 @@ func LoadServerRuntimeConfig(configDir string) (ServerRuntimeConfig, error) {
 	}
 
 	config := ServerRuntimeConfig{
-		AppEnv:           trimmedString(loader, "APP_ENV"),
-		Host:             trimmedString(loader, "SERVER_HOST"),
-		Port:             trimmedString(loader, "SERVER_PORT"),
-		LogLevel:         trimmedString(loader, "LOG_LEVEL"),
-		InstanceID:       trimmedString(loader, "SERVER_INSTANCE_ID"),
-		RoomRuntimeMode:  roomRuntimeMode,
-		DatabaseURL:      trimmedString(loader, "DATABASE_URL"),
-		MediaDatabaseURL: trimmedString(loader, "MEDIA_DATABASE_URL"),
-		DebugSync:        strings.EqualFold(strings.TrimSpace(loader.GetString("DEBUG_SYNC")), "true"),
+		AppEnv:              trimmedString(loader, "APP_ENV"),
+		Host:                trimmedString(loader, "SERVER_HOST"),
+		Port:                trimmedString(loader, "SERVER_PORT"),
+		LogLevel:            trimmedString(loader, "LOG_LEVEL"),
+		InstanceID:          trimmedString(loader, "SERVER_INSTANCE_ID"),
+		RoomRuntimeMode:     roomRuntimeMode,
+		DatabaseURL:         trimmedString(loader, "DATABASE_URL"),
+		MediaDatabaseURL:    trimmedString(loader, "MEDIA_DATABASE_URL"),
+		TimelineDatabaseURL: trimmedString(loader, "TIMELINE_DATABASE_URL"),
+		DebugSync:           strings.EqualFold(strings.TrimSpace(loader.GetString("DEBUG_SYNC")), "true"),
 		Auth: AuthConfig{
 			JWTSecret:           trimmedString(loader, "AUTH_JWT_SECRET"),
 			AccessTokenTTLHours: intFromConfig(loader, "AUTH_ACCESS_TOKEN_TTL_HOURS"),

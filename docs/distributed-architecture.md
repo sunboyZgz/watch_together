@@ -1,6 +1,6 @@
 # Distributed Architecture
 
-Phase 4 introduced the distributed room infrastructure MVP while keeping the public HTTP API and playback control payloads small. `local_process` remains supported. `distributed_authority` adds Redis authority leases, Redis active-device ownership, NATS Core internal routing, PostgreSQL outbox, and Kafka timeline topics. Phase 5 adds authority recovery and hardening: expired authority leases can be fenced, recovered from Kafka canonical timeline events, completed as a new active authority epoch, resumed without moving WebSocket connections, protected by Redis `requestId` idempotency, and exposed through user-level Redis presence. Phase 6 adds distributed seek rate limiting and observability: seek throttling moves to Redis in `distributed_authority`, `/readyz` reports dependency readiness, and `/metrics` exposes Prometheus metrics. Phase 7 adds the service foundation: servicekit, internal ConnectRPC contracts, optional media/timeline service skeletons, OpenTelemetry tracing, static service discovery, and logical database ownership design. Phase 8 makes the service pilot verifiable: generated typed ConnectRPC contracts replace dynamic `Struct` RPC payloads for media/timeline, the optional RPC services can be run through a compose `rpc-pilot` profile, and database ownership is enforced by a machine-readable registry plus architecture tests. Phase 9 turns `media` into the first database-boundary pilot: `MEDIA_DATABASE_URL` can point media code at an independent media database in the same PostgreSQL server/container, while empty config keeps the single-database fallback.
+Phase 4 introduced the distributed room infrastructure MVP while keeping the public HTTP API and playback control payloads small. `local_process` remains supported. `distributed_authority` adds Redis authority leases, Redis active-device ownership, NATS Core internal routing, PostgreSQL outbox, and Kafka timeline topics. Phase 5 adds authority recovery and hardening: expired authority leases can be fenced, recovered from Kafka canonical timeline events, completed as a new active authority epoch, resumed without moving WebSocket connections, protected by Redis `requestId` idempotency, and exposed through user-level Redis presence. Phase 6 adds distributed seek rate limiting and observability: seek throttling moves to Redis in `distributed_authority`, `/readyz` reports dependency readiness, and `/metrics` exposes Prometheus metrics. Phase 7 adds the service foundation: servicekit, internal ConnectRPC contracts, optional media/timeline service skeletons, OpenTelemetry tracing, static service discovery, and logical database ownership design. Phase 8 makes the service pilot verifiable: generated typed ConnectRPC contracts replace dynamic `Struct` RPC payloads for media/timeline, the optional RPC services can be run through a compose `rpc-pilot` profile, and database ownership is enforced by a machine-readable registry plus architecture tests. Phase 9 turns `media` into the first database-boundary pilot: `MEDIA_DATABASE_URL` can point media code at an independent media database in the same PostgreSQL server/container, while empty config keeps the single-database fallback. Phase 10 adds the timeline database boundary: `TIMELINE_DATABASE_URL` can move `room_timeline_outbox` to an independent timeline database, while empty config keeps the single-database fallback.
 
 ## Architecture Mode
 
@@ -32,7 +32,7 @@ Backend mode in `distributed_authority`:
 
 ## Service Evolution Architecture
 
-Phase 7 is not a full microservice split. Phase 8 keeps that constraint but hardens the pilot. Phase 9 adds a database-boundary pilot for media without changing Android HTTP/WebSocket payloads and without extracting `room authority`. The default deployment still runs `roomserver` with local adapters and a single database. `MEDIA_DATABASE_URL` enables a separate media database, and `MEDIA_SERVICE_MODE=rpc` lets `roomserver` call `cmd/mediaservice` without directly connecting to the media database. `MEDIA_SERVICE_MODE=local` still works and uses `MEDIA_DATABASE_URL` when it is configured. The `.proto` files under `server/api/internal/v1` are the source contracts; generated Go code lives under `server/internal/rpcgen/v1`.
+Phase 7 is not a full microservice split. Phase 8 keeps that constraint but hardens the pilot. Phase 9 adds a database-boundary pilot for media, and Phase 10 adds the same kind of database-boundary pilot for timeline outbox storage, without changing Android HTTP/WebSocket payloads and without extracting `room authority`. The default deployment still runs `roomserver` with local adapters and a single database. `MEDIA_DATABASE_URL` enables a separate media database; `TIMELINE_DATABASE_URL` enables a separate timeline database. `MEDIA_SERVICE_MODE=rpc` and `TIMELINE_SERVICE_MODE=rpc` let `roomserver` call `cmd/mediaservice` and `cmd/timelineservice` without directly connecting to those databases. Local mode still works and uses the owner database URL when configured. The `.proto` files under `server/api/internal/v1` are the source contracts; generated Go code lives under `server/internal/rpcgen/v1`.
 
 ```mermaid
 flowchart LR
@@ -48,6 +48,7 @@ flowchart LR
   TimelineService[cmd/timelineservice]
   MainPG[(main PostgreSQL database)]
   MediaPG[(media PostgreSQL database)]
+  TimelinePG[(timeline PostgreSQL database)]
   Kafka[(Kafka)]
   Redis[(Redis)]
   NATS[(NATS)]
@@ -62,9 +63,9 @@ flowchart LR
   MediaRPC --> MediaService
   TimelineRPC --> TimelineService
   MediaLocal -->|MEDIA_DATABASE_URL or DATABASE_URL| MediaPG
-  TimelineLocal --> MainPG
+  TimelineLocal -->|TIMELINE_DATABASE_URL or DATABASE_URL| TimelinePG
   MediaService -->|MEDIA_DATABASE_URL fallback DATABASE_URL| MediaPG
-  TimelineService --> MainPG
+  TimelineService -->|TIMELINE_DATABASE_URL fallback DATABASE_URL| TimelinePG
   TimelineService --> Kafka
   Roomserver --> Redis
   Roomserver --> NATS
@@ -72,12 +73,13 @@ flowchart LR
 
 ## Database Ownership
 
-Phase 7 keeps one PostgreSQL database and introduces logical ownership boundaries. Phase 8 makes those boundaries testable. Phase 9 gives `media` its own PostgreSQL database boundary when `MEDIA_DATABASE_URL` is configured. Table owners and cross-context access rules live in [Database Ownership](./database-ownership.md), with the CI source of truth in `server/internal/store/db_ownership.yaml`.
+Phase 7 keeps one PostgreSQL database and introduces logical ownership boundaries. Phase 8 makes those boundaries testable. Phase 9 gives `media` its own PostgreSQL database boundary when `MEDIA_DATABASE_URL` is configured. Phase 10 gives `timeline` its own PostgreSQL database boundary when `TIMELINE_DATABASE_URL` is configured. Table owners and cross-context access rules live in [Database Ownership](./database-ownership.md), with the CI source of truth in `server/internal/store/db_ownership.yaml`.
 
 ```mermaid
 flowchart TD
   MainPG[(Main PostgreSQL database)]
   MediaPG[(Media PostgreSQL database)]
+  TimelinePG[(Timeline PostgreSQL database)]
   Identity[identity owns users]
   Media[media owns media tables]
   RoomSession[room-session owns rooms and room_members]
@@ -89,7 +91,7 @@ flowchart TD
   MediaPG --> Media
   MainPG --> RoomSession
   MainPG --> Progress
-  MainPG --> Timeline
+  TimelinePG --> Timeline
   Home -->|read model/composition only| Identity
   Home -->|media port/RPC summaries| Media
   Home -->|read model/composition only| Progress
@@ -139,6 +141,7 @@ flowchart LR
   Redis[(Redis)]
   PG[(Main PostgreSQL)]
   MediaPG[(Media PostgreSQL)]
+  TimelinePG[(Timeline PostgreSQL)]
   NATS[(NATS Core)]
   Outbox[room_timeline_outbox]
   OutboxWorker[cmd/outboxworker]
@@ -167,8 +170,8 @@ flowchart LR
   WS -->|control request/reply| NATS
   WS -->|broadcast accepted envelopes| NATS
   WS -->|timeline result event| Outbox
-  Outbox --> PG
-  OutboxWorker -->|claim pending rows| PG
+  Outbox --> TimelinePG
+  OutboxWorker -->|claim pending rows| TimelinePG
   OutboxWorker -->|canonical JSON v1| Kafka
   Derived -->|consume canonical| Kafka
   Derived -->|publish derived topics| Kafka
@@ -188,7 +191,7 @@ flowchart LR
   Servicekit -->|optional ConnectRPC| MediaSvc
   Servicekit -->|optional ConnectRPC| TimelineSvc
   MediaSvc --> MediaPG
-  TimelineSvc --> PG
+  TimelineSvc --> TimelinePG
   TimelineSvc --> Kafka
   OTel -->|traces| App
   OTel -->|traces| MediaSvc
@@ -206,17 +209,18 @@ flowchart LR
 | Control request idempotency | Redis `wt:room:control_request:{roomId}:{requestId}:v1` | Stores pending, accepted, and rejected request outcomes across instances. |
 | Distributed seek rate limit | Redis `wt:room:control_rate:{roomId}:seek:v1` | Enforces seek min interval across authority takeovers and forwarded controls. |
 | User-level presence | Redis `wt:room:presence:{roomId}:v1` | Runtime online occupancy by user; does not expose device, connection, or instance IDs. |
-| Durable main business state | PostgreSQL | Users, rooms, members, progress, and timeline outbox. |
+| Durable main business state | PostgreSQL | Users, rooms, members, and progress. |
 | Media database boundary | `MEDIA_DATABASE_URL` PostgreSQL database | Optional Phase 9 database for media-owned tables; empty config falls back to the main database. |
-| Reliable Kafka compensation | PostgreSQL outbox | Pending canonical timeline events. |
+| Timeline database boundary | `TIMELINE_DATABASE_URL` PostgreSQL database | Optional Phase 10 database for `room_timeline_outbox`; empty config falls back to the main database. |
+| Reliable Kafka compensation | Timeline PostgreSQL outbox | Pending canonical timeline events. |
 | Durable timeline | Kafka `wt.room.timeline.v1` | Accepted/rejected control and membership result log. |
 | Derived topics | Kafka | `wt.room.control_result.v1`, `wt.room.membership.v1`. |
 | Realtime internal routing | NATS Core | Broadcast fan-out and non-authority control request/reply. |
-| Recovery replay | Kafka + PostgreSQL outbox | Rebuilds authority state after an expired authority lease. |
+| Recovery replay | Kafka + timeline outbox | Rebuilds authority state after an expired authority lease. |
 | Monitoring | `observability` + Prometheus | `/healthz`, `/readyz`, `/metrics`, and worker metric hooks. |
 | Service metadata | `servicekit` | Request id, service name/version, deadline, internal auth, and trace metadata conventions. |
 | Internal RPC | ConnectRPC over HTTP | Optional media/timeline RPC adapters; Android protocol remains unchanged. |
-| Database ownership | PostgreSQL databases + docs | Main and optional media databases keep owner rules and cross-context access checks. |
+| Database ownership | PostgreSQL databases + docs | Main, optional media, and optional timeline databases keep owner rules and cross-context access checks. |
 | Tracing | OpenTelemetry | Optional trace spans across HTTP, WebSocket control, Redis, NATS, Kafka, RPC, and PostgreSQL. |
 
 ## Control Flow
@@ -228,7 +232,7 @@ sequenceDiagram
   participant R as Redis
   participant N as NATS Core
   participant A as roomserver A authority
-  participant P as PostgreSQL
+  participant P as Timeline PostgreSQL
   participant K as Kafka
 
   C->>B: join_room(roomId,userId,deviceId)
@@ -298,7 +302,7 @@ flowchart LR
 sequenceDiagram
   participant B as roomserver B
   participant R as Redis
-  participant P as PostgreSQL
+  participant P as Timeline PostgreSQL
   participant K as Kafka
   participant M as room.Manager
 
@@ -346,7 +350,7 @@ Local authoritative control:
 1. Server validates identity, active-device lease, authority lease, requestId idempotency, seq, dedup, and rate limit.
 2. `room.Manager` applies the state transition.
 3. Server performs a final Redis authority epoch check.
-4. Server writes PostgreSQL outbox before any accepted broadcast.
+4. Server writes timeline outbox before any accepted broadcast. In Phase 10 this uses `TIMELINE_DATABASE_URL` when configured.
 5. Server finalizes Redis requestId as accepted and writes Redis latest snapshot.
 6. Server broadcasts the accepted WebSocket envelope locally and through NATS.
 7. If the local outbox or timeline RPC write fails in `distributed_authority`, the accepted envelope is not broadcast, accepted requestId idempotency is not written, state is rolled back, and the client receives `room timeline unavailable` or current `room_state`.
@@ -385,9 +389,10 @@ User-level presence:
 Kafka outbox delivery:
 
 1. Authority writes `room_timeline_outbox` after accepted/rejected controls and membership changes.
-2. `outboxworker` claims pending rows with `FOR UPDATE SKIP LOCKED`.
-3. Successful Kafka publish marks rows `published`.
-4. Failure increments attempts, stores `last_error`, and schedules `next_attempt_at`.
+2. In Phase 10, this table is in the timeline database when `TIMELINE_DATABASE_URL` is configured; otherwise it uses the main database fallback.
+3. `outboxworker` claims pending rows with `FOR UPDATE SKIP LOCKED`.
+4. Successful Kafka publish marks rows `published`.
+5. Failure increments attempts, stores `last_error`, and schedules `next_attempt_at`.
 
 Derived topics:
 
@@ -418,7 +423,7 @@ Realtime fan-out:
 Observability:
 
 1. `/healthz` stays a lightweight liveness endpoint and keeps runtime headers.
-2. `/readyz` reports configured dependency readiness for PostgreSQL, Redis, NATS, Kafka, outbox, and recovery.
+2. `/readyz` reports configured dependency readiness for PostgreSQL, media PostgreSQL, timeline PostgreSQL, Redis, NATS, Kafka, outbox, and recovery.
 3. `/metrics` exposes Prometheus metrics when `METRICS_ENABLED=true`.
 4. `roomserver` serves metrics on the main HTTP server; `outboxworker` and `derivedworker` serve metrics when `METRICS_ADDR` is set.
 5. Metrics include WebSocket connections, control accepted/rejected counts, seek rate-limit decisions, NATS room events, authority recovery attempts, presence online gauge, and worker publish results.
@@ -429,7 +434,7 @@ Authority recovery:
 2. One instance enters Redis `status=recovering` and increments the authority `epoch`.
 3. The instance loads room metadata from PostgreSQL.
 4. The instance replays `room.control.accepted` events from `wt.room.timeline.v1`.
-5. The instance merges same-room `pending` and `publishing` outbox events by event id.
+5. The instance merges same-room `pending` and `publishing` timeline outbox events by event id.
 6. The instance registers recovered playback state in local `room.Manager`.
 7. The instance backfills recent accepted Redis requestId records from recovered events.
 8. Redis authority is completed as `status=active` for the new epoch.
@@ -443,7 +448,7 @@ Authority recovery:
 4. `servicekit` attaches request id, service name/version, deadline, internal auth, and trace metadata.
 5. OpenTelemetry tracing is opt-in and does not change Android payloads.
 6. `room-session -> media` and `progress -> media` now cross through the media port in both local and RPC mode.
-7. `timeline` recorder failures, including RPC timeout or unavailable errors, are fail-closed for accepted controls.
+7. `timeline` recorder failures, including timeline database failure, RPC timeout, or unavailable errors, are fail-closed for accepted controls.
 
 ## Phase 9 Media Database Flow
 
@@ -473,7 +478,38 @@ flowchart LR
 
 `cmd/mediadbsync` copies `media_tags`, `media_seasons`, `media_episodes`, `media_season_tags`, and `media_episode_variants` with stable ids and timestamps. `--verify-only` checks row counts and deterministic content hashes.
 
-## Not Phase 9 Goals
+## Phase 10 Timeline Database Flow
+
+```mermaid
+flowchart LR
+  MainPG[(watch_together_main)]
+  TimelinePG[(watch_together_timeline)]
+  TimelineMigrations[server/timeline_migrations]
+  MainMigrations[server/migrations]
+  Roomserver[roomserver]
+  TimelinePort[timeline port]
+  TimelineService[timelineservice]
+  OutboxWorker[outboxworker]
+  Kafka[(Kafka wt.room.timeline.v1)]
+  Recovery[recovery]
+
+  MainMigrations --> MainPG
+  TimelineMigrations --> TimelinePG
+  Roomserver --> TimelinePort
+  TimelinePort -->|local mode| TimelinePG
+  TimelinePort -->|rpc mode| TimelineService
+  TimelineService --> TimelinePG
+  OutboxWorker -->|claim pending/publishing| TimelinePG
+  OutboxWorker --> Kafka
+  Recovery -->|Kafka replay| Kafka
+  Recovery -->|unpublished gap| TimelinePort
+```
+
+Phase 10 does not migrate old `room_timeline_outbox` rows. The old main-database table remains fallback/shadow data. When `TIMELINE_DATABASE_URL` is configured but unavailable, timeline writes fail closed: accepted controls are not broadcast, accepted request idempotency is not finalized, and recovery must not complete a new authority epoch from an unavailable unpublished-outbox reader.
+
+`pending` and `publishing` rows are recovery-gap state and must not be deleted by cleanup jobs. Published-row retention is a later operations decision.
+
+## Not Phase 10 Goals
 
 - Kafka is not the online broadcast final hop.
 - Kafka is not the command ingress log.

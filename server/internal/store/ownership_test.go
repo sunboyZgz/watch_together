@@ -176,6 +176,32 @@ func TestMediaMigrationCreatedTablesDeclareMediaOwner(t *testing.T) {
 	}
 }
 
+func TestTimelineMigrationCreatedTablesDeclareTimelineOwner(t *testing.T) {
+	registry := loadOwnershipRegistry(t)
+	files, err := filepath.Glob("../../timeline_migrations/*.up.sql")
+	if err != nil {
+		t.Fatalf("glob timeline migrations: %v", err)
+	}
+	if len(files) == 0 {
+		t.Fatalf("expected timeline migrations to exist")
+	}
+	for _, file := range files {
+		contentBytes, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatalf("read timeline migration %s: %v", file, err)
+		}
+		for _, table := range createdTables(string(contentBytes)) {
+			ownership, ok := registry.Tables[table]
+			if !ok {
+				t.Fatalf("timeline migration %s creates table %s without ownership registry entry", filepath.Base(file), table)
+			}
+			if ownership.Owner != "timeline" {
+				t.Fatalf("timeline migration %s creates table %s owned by %q, want timeline", filepath.Base(file), table, ownership.Owner)
+			}
+		}
+	}
+}
+
 func loadOwnershipRegistry(t *testing.T) ownershipRegistry {
 	t.Helper()
 	content, err := os.ReadFile("db_ownership.yaml")

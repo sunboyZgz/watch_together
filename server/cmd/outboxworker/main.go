@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -24,8 +25,9 @@ func main() {
 		fmt.Fprintf(os.Stderr, "load server config: %v\n", err)
 		os.Exit(1)
 	}
-	if runtimeConfig.DatabaseURL == "" {
-		fmt.Fprintln(os.Stderr, "DATABASE_URL is required for outboxworker")
+	databaseURL := timelineDatabaseURL(runtimeConfig)
+	if databaseURL == "" {
+		fmt.Fprintln(os.Stderr, "TIMELINE_DATABASE_URL or DATABASE_URL is required for outboxworker")
 		os.Exit(1)
 	}
 
@@ -51,7 +53,7 @@ func main() {
 		_ = telemetry.Shutdown(shutdownCtx, shutdownTelemetry)
 	}()
 
-	db, err := store.OpenPostgres(ctx, runtimeConfig.DatabaseURL)
+	db, err := store.OpenPostgres(ctx, databaseURL)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "connect postgres: %v\n", err)
 		os.Exit(1)
@@ -93,4 +95,11 @@ func serviceName(configured string, fallback string) string {
 		return configured
 	}
 	return fallback
+}
+
+func timelineDatabaseURL(config wtconfig.ServerRuntimeConfig) string {
+	if strings.TrimSpace(config.TimelineDatabaseURL) != "" {
+		return strings.TrimSpace(config.TimelineDatabaseURL)
+	}
+	return strings.TrimSpace(config.DatabaseURL)
 }

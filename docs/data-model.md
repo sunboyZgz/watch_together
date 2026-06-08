@@ -1,8 +1,10 @@
 # Data Model
 
-The durable schema is SQL-first. Main database migrations live under `server/migrations/`; Phase 9 media database migrations live under `server/media_migrations/`. GORM models in `server/internal/model/models.go` mirror the active tables. Table ownership is enforced by `server/internal/store/db_ownership.yaml` plus architecture tests; see [Database Ownership](./database-ownership.md) for the owner map and split checklist.
+The durable schema is SQL-first. Main database migrations live under `server/migrations/`; Phase 9 media database migrations live under `server/media_migrations/`; Phase 10 timeline database migrations live under `server/timeline_migrations/`. GORM models in `server/internal/model/models.go` mirror the active tables. Table ownership is enforced by `server/internal/store/db_ownership.yaml` plus architecture tests; see [Database Ownership](./database-ownership.md) for the owner map and split checklist.
 
 When `MEDIA_DATABASE_URL` is empty, media tables continue to live in the main database for local fallback. When `MEDIA_DATABASE_URL` is set, media-owned tables are migrated and read from the independent media database. The old main-database media tables are kept as shadow/rollback data during the Phase 9 pilot.
+
+When `TIMELINE_DATABASE_URL` is empty, `room_timeline_outbox` continues to live in the main database for local fallback. When `TIMELINE_DATABASE_URL` is set, timeline-owned outbox rows are migrated and written in the independent timeline database. The old main-database outbox table is kept as fallback/shadow data during the Phase 10 pilot; old history is not migrated.
 
 ## Primary Tables
 
@@ -153,6 +155,10 @@ Stores reliable delivery work for Kafka room timeline result events:
 
 Rows are written by the authority `roomserver` after accepted/rejected control decisions and membership events. `cmd/outboxworker` claims pending rows with `FOR UPDATE SKIP LOCKED`, publishes to Kafka, then marks rows as `published` or schedules retry. During Phase 5 authority recovery, same-room `pending` and `publishing` rows are merged after Kafka replay so already-decided events are not lost while asynchronous publishing catches up.
 
+In Phase 10, this table can live in the independent timeline database selected by `TIMELINE_DATABASE_URL`. `cmd/timelineservice`, `cmd/outboxworker`, and `roomserver` local timeline mode prefer that database when configured. If `TIMELINE_DATABASE_URL` is set but unavailable, timeline writes fail closed and accepted distributed controls are not broadcast.
+
+`pending` and `publishing` rows are part of the recovery gap and must not be deleted by cleanup jobs. Published row retention can be added later, but Phase 10 does not auto-delete outbox history.
+
 ## Runtime State
 
 The in-process `room.Manager` owns active WebSocket room state:
@@ -209,6 +215,8 @@ The canonical topic is the durable room timeline result log and Phase 5 authorit
 On server startup:
 
 - PostgreSQL is opened if `DATABASE_URL` is configured.
+- The media database is opened when `MEDIA_DATABASE_URL` is configured and the process needs a local media store.
+- The timeline database is opened when `TIMELINE_DATABASE_URL` is configured and the process needs a local timeline recorder or outbox worker.
 - Redis is opened if `REDIS_ADDR` is configured.
 - Existing active persistent rooms are marked `grace_period`.
 - In-memory cleanup starts.

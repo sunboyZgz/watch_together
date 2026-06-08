@@ -32,27 +32,28 @@ import (
 )
 
 type Config struct {
-	AppEnv            string
-	Host              string
-	Port              string
-	LogLevel          string
-	InstanceID        string
-	RoomRuntimeMode   string
-	DatabaseURL       string
-	MediaDatabaseURL  string
-	DebugSync         bool
-	Auth              auth.TokenConfig
-	Redis             cache.RedisConfig
-	WebSocket         transport.WebSocketRuntimeConfig
-	NATS              eventbus.NATSConfig
-	Kafka             KafkaConfig
-	AuthorityRecovery AuthorityRecoveryConfig
-	Observability     observability.Config
-	Service           servicekit.Config
-	InternalRPC       InternalRPCConfig
-	ServiceClients    ServiceClientsConfig
-	Telemetry         telemetry.Config
-	Media             transport.MediaPlaybackConfig
+	AppEnv              string
+	Host                string
+	Port                string
+	LogLevel            string
+	InstanceID          string
+	RoomRuntimeMode     string
+	DatabaseURL         string
+	MediaDatabaseURL    string
+	TimelineDatabaseURL string
+	DebugSync           bool
+	Auth                auth.TokenConfig
+	Redis               cache.RedisConfig
+	WebSocket           transport.WebSocketRuntimeConfig
+	NATS                eventbus.NATSConfig
+	Kafka               KafkaConfig
+	AuthorityRecovery   AuthorityRecoveryConfig
+	Observability       observability.Config
+	Service             servicekit.Config
+	InternalRPC         InternalRPCConfig
+	ServiceClients      ServiceClientsConfig
+	Telemetry           telemetry.Config
+	Media               transport.MediaPlaybackConfig
 }
 
 type RedisConfig = cache.RedisConfig
@@ -103,6 +104,7 @@ type Server struct {
 	redis             *cache.RedisClient
 	db                *gorm.DB
 	mediaDB           *gorm.DB
+	timelineDB        *gorm.DB
 	cancel            context.CancelFunc
 	eventBus          eventbus.RoomBroadcastBus
 	controlBus        eventbus.RoomControlBus
@@ -165,16 +167,26 @@ func NewServer(config Config) *Server {
 	if !isRPCMode(config.ServiceClients.MediaMode) && strings.TrimSpace(config.MediaDatabaseURL) != "" {
 		mediaDB = newPostgresDB("media_postgres", config.MediaDatabaseURL)
 	}
+	var timelineDB *gorm.DB
+	if !isRPCMode(config.ServiceClients.TimelineMode) && strings.TrimSpace(config.TimelineDatabaseURL) != "" {
+		timelineDB = newPostgresDB("timeline_postgres", config.TimelineDatabaseURL)
+	}
 	mediaService := newMediaService(db, mediaDB, config, serviceConfig)
 	roomService, roomStore := newRoomService(db, mediaService)
 	var timelineRecorder timeline.Recorder = timeline.NoopRecorder{}
 	var timelineReader timeline.RoomEventReader
 	var pendingOutboxReader recovery.PendingOutboxReader
 	var timelineOutboxStore *store.PostgresTimelineOutboxStore
-	if distributedAuthority && db != nil {
-		timelineOutboxStore = store.NewPostgresTimelineOutboxStore(db, config.Kafka.TopicRoomTimeline)
+	if distributedAuthority && !isRPCMode(config.ServiceClients.TimelineMode) {
+		timelineOutboxStore = newTimelineOutboxStore(db, timelineDB, config)
+	}
+	if distributedAuthority && timelineOutboxStore != nil {
 		timelineRecorder = timelineOutboxStore
 		pendingOutboxReader = timelineOutboxStore
+	} else if distributedAuthority && !isRPCMode(config.ServiceClients.TimelineMode) && strings.TrimSpace(config.TimelineDatabaseURL) != "" {
+		unavailableTimeline := timeline.UnavailableStore{}
+		timelineRecorder = unavailableTimeline
+		pendingOutboxReader = unavailableTimeline
 	}
 	if isRPCMode(config.ServiceClients.TimelineMode) {
 		timelineClient := timeline.NewRPCClient(config.ServiceClients.TimelineAddr, internalRPCClientConfig(config, serviceConfig))
@@ -267,7 +279,7 @@ func NewServer(config Config) *Server {
 		mediaHTTPHandler,
 		progressHTTPHandler,
 		runtimeBoundaryFromConfig(config),
-		readinessSnapshotFromConfig(config, db, mediaDB, redisClient, roomBroadcastBus, roomControlBus, timelineOutboxStore, authorityRecovery),
+		readinessSnapshotFromConfig(config, db, mediaDB, timelineDB, redisClient, roomBroadcastBus, roomControlBus, timelineOutboxStore, authorityRecovery),
 		observabilityConfig,
 		metrics,
 		broadcastInstanceID,
@@ -294,6 +306,7 @@ func NewServer(config Config) *Server {
 		redis:             redisClient,
 		db:                db,
 		mediaDB:           mediaDB,
+		timelineDB:        timelineDB,
 		cancel:            cancel,
 		eventBus:          roomBroadcastBus,
 		controlBus:        roomControlBus,
@@ -333,6 +346,7 @@ func readinessSnapshotFromConfig(
 	config Config,
 	db *gorm.DB,
 	mediaDB *gorm.DB,
+	timelineDB *gorm.DB,
 	redisClient *cache.RedisClient,
 	roomBroadcastBus eventbus.RoomBroadcastBus,
 	roomControlBus eventbus.RoomControlBus,
@@ -347,6 +361,7 @@ func readinessSnapshotFromConfig(
 		[]observability.DependencyStatus{
 			dependencyStatus("postgres", db != nil, distributedAuthority || strings.TrimSpace(config.DatabaseURL) != ""),
 			dependencyStatus("media_postgres", mediaDB != nil, !isRPCMode(config.ServiceClients.MediaMode) && strings.TrimSpace(config.MediaDatabaseURL) != ""),
+			dependencyStatus("timeline_postgres", timelineDB != nil, !isRPCMode(config.ServiceClients.TimelineMode) && strings.TrimSpace(config.TimelineDatabaseURL) != ""),
 			dependencyStatus("redis", redisClient != nil, distributedAuthority || config.Redis.Enabled()),
 			dependencyStatus("nats_broadcast", !isDisabledRoomBroadcastBus(roomBroadcastBus), distributedAuthority || config.WebSocket.CrossInstanceBroadcast),
 			dependencyStatus("nats_control", !isDisabledRoomControlBus(roomControlBus), distributedAuthority),
@@ -616,6 +631,19 @@ func newMediaService(db *gorm.DB, mediaDB *gorm.DB, config Config, service servi
 	return media.NewService(store.NewPostgresMediaStore(storeDB))
 }
 
+func newTimelineOutboxStore(db *gorm.DB, timelineDB *gorm.DB, config Config) *store.PostgresTimelineOutboxStore {
+	var storeDB *gorm.DB
+	if strings.TrimSpace(config.TimelineDatabaseURL) != "" {
+		storeDB = timelineDB
+	} else {
+		storeDB = db
+	}
+	if storeDB == nil {
+		return nil
+	}
+	return store.NewPostgresTimelineOutboxStore(storeDB, config.Kafka.TopicRoomTimeline)
+}
+
 // newRoomService connects room business APIs to the shared PostgreSQL handle when available.
 func newRoomService(db *gorm.DB, mediaService *media.Service) (*roomapi.Service, *store.PostgresRoomStore) {
 	if db == nil {
@@ -811,6 +839,16 @@ func (s *Server) Close() error {
 	}
 	if s.mediaDB != nil && s.mediaDB != s.db {
 		sqlDB, err := s.mediaDB.DB()
+		if err != nil {
+			if closeErr == nil {
+				closeErr = err
+			}
+		} else if err := sqlDB.Close(); err != nil && closeErr == nil {
+			closeErr = err
+		}
+	}
+	if s.timelineDB != nil && s.timelineDB != s.db && s.timelineDB != s.mediaDB {
+		sqlDB, err := s.timelineDB.DB()
 		if err != nil {
 			if closeErr == nil {
 				closeErr = err

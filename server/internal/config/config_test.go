@@ -64,6 +64,20 @@ func TestLoadServerRuntimeConfigLoadsMediaDatabaseURL(t *testing.T) {
 	}
 }
 
+func TestLoadServerRuntimeConfigLoadsTimelineDatabaseURL(t *testing.T) {
+	configDir := t.TempDir()
+	mustWriteConfigFile(t, filepath.Join(configDir, ".env"), "TIMELINE_DATABASE_URL=postgres://timeline-db\n")
+
+	cfg, err := LoadServerRuntimeConfig(configDir)
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+
+	if cfg.TimelineDatabaseURL != "postgres://timeline-db" {
+		t.Fatalf("expected timeline database url, got %q", cfg.TimelineDatabaseURL)
+	}
+}
+
 func TestLoadServerRuntimeConfigDistributedAuthorityRequiresDependencies(t *testing.T) {
 	cases := []struct {
 		name    string

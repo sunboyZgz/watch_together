@@ -28,8 +28,9 @@ func main() {
 		fmt.Fprintf(os.Stderr, "load server config: %v\n", err)
 		os.Exit(1)
 	}
-	if strings.TrimSpace(runtimeConfig.DatabaseURL) == "" {
-		fmt.Fprintln(os.Stderr, "DATABASE_URL is required for timelineservice")
+	databaseURL := timelineDatabaseURL(runtimeConfig)
+	if strings.TrimSpace(databaseURL) == "" {
+		fmt.Fprintln(os.Stderr, "TIMELINE_DATABASE_URL or DATABASE_URL is required for timelineservice")
 		os.Exit(1)
 	}
 	if strings.EqualFold(strings.TrimSpace(runtimeConfig.AppEnv), "prod") &&
@@ -61,7 +62,7 @@ func main() {
 		_ = telemetry.Shutdown(shutdownCtx, shutdownTelemetry)
 	}()
 
-	db, err := store.OpenPostgres(ctx, runtimeConfig.DatabaseURL)
+	db, err := store.OpenPostgres(ctx, databaseURL)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "connect postgres: %v\n", err)
 		os.Exit(1)
@@ -191,7 +192,7 @@ func postgresDependency(ctx context.Context, sqlDB *sql.DB) observability.Depend
 			status = "ok"
 		}
 	}
-	return observability.DependencyStatus{Name: "postgres", Status: status, Required: true}
+	return observability.DependencyStatus{Name: "timeline_postgres", Status: status, Required: true}
 }
 
 func kafkaDependency(config wtconfig.ServerRuntimeConfig, readerAvailable bool) observability.DependencyStatus {
@@ -219,4 +220,11 @@ func serviceName(configured string, fallback string) string {
 		return configured
 	}
 	return fallback
+}
+
+func timelineDatabaseURL(config wtconfig.ServerRuntimeConfig) string {
+	if strings.TrimSpace(config.TimelineDatabaseURL) != "" {
+		return strings.TrimSpace(config.TimelineDatabaseURL)
+	}
+	return strings.TrimSpace(config.DatabaseURL)
 }
