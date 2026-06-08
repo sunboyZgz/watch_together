@@ -23,7 +23,10 @@ const (
 	DefaultMembershipTopic    = "wt.room.membership.v1"
 )
 
-var ErrTimelineUnavailable = errors.New("timeline service is unavailable")
+var (
+	ErrTimelineUnavailable = errors.New("timeline service is unavailable")
+	ErrInvalidInput        = errors.New("invalid timeline input")
+)
 
 type Event struct {
 	EventID      string          `json:"eventId"`
@@ -44,16 +47,71 @@ type Recorder interface {
 	RecordTimelineEvent(ctx context.Context, event Event) error
 }
 
+type ResultRecorder interface {
+	RecordControlResult(ctx context.Context, result ControlResult) (Event, error)
+	RecordMembershipResult(ctx context.Context, result MembershipResult) (Event, error)
+}
+
+type RecoveryReader interface {
+	ReadRoomRecoveryEvents(ctx context.Context, roomID string) ([]Event, error)
+}
+
+type ControlResult struct {
+	RoomID       string
+	UserID       string
+	DeviceID     string
+	ConnectionID string
+	InstanceID   string
+	ControlType  string
+	Seq          int64
+	Accepted     bool
+	Payload      any
+}
+
+type MembershipResult struct {
+	RoomID         string
+	UserID         string
+	DeviceID       string
+	ConnectionID   string
+	InstanceID     string
+	MembershipType string
+	Payload        any
+}
+
 type NoopRecorder struct{}
 
 func (NoopRecorder) RecordTimelineEvent(context.Context, Event) error {
 	return nil
 }
 
+func (NoopRecorder) RecordControlResult(context.Context, ControlResult) (Event, error) {
+	return Event{}, nil
+}
+
+func (NoopRecorder) RecordMembershipResult(context.Context, MembershipResult) (Event, error) {
+	return Event{}, nil
+}
+
+func (NoopRecorder) ReadRoomRecoveryEvents(context.Context, string) ([]Event, error) {
+	return nil, nil
+}
+
 type UnavailableStore struct{}
 
 func (UnavailableStore) RecordTimelineEvent(context.Context, Event) error {
 	return ErrTimelineUnavailable
+}
+
+func (UnavailableStore) RecordControlResult(context.Context, ControlResult) (Event, error) {
+	return Event{}, ErrTimelineUnavailable
+}
+
+func (UnavailableStore) RecordMembershipResult(context.Context, MembershipResult) (Event, error) {
+	return Event{}, ErrTimelineUnavailable
+}
+
+func (UnavailableStore) ReadRoomRecoveryEvents(context.Context, string) ([]Event, error) {
+	return nil, ErrTimelineUnavailable
 }
 
 func (UnavailableStore) ReadRoomUnpublishedTimelineEvents(context.Context, string) ([]Event, error) {

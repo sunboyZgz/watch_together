@@ -153,9 +153,9 @@ Stores reliable delivery work for Kafka room timeline result events:
 - `published_at`
 - timestamps
 
-Rows are written by the authority `roomserver` after accepted/rejected control decisions and membership events. `cmd/outboxworker` claims pending rows with `FOR UPDATE SKIP LOCKED`, publishes to Kafka, then marks rows as `published` or schedules retry. During Phase 5 authority recovery, same-room `pending` and `publishing` rows are merged after Kafka replay so already-decided events are not lost while asynchronous publishing catches up.
+Rows are written after accepted/rejected control decisions and membership events. In Phase 12 default paths, `roomserver` sends typed result fields and `cmd/timelineservice` generates the canonical event id, event version, server occurrence time, payload JSON, and outbox row. Explicit local rollback can still use the same timeline-owned builder in process. `cmd/outboxworker` claims pending rows with `FOR UPDATE SKIP LOCKED`, publishes to Kafka, then marks rows as `published` or schedules retry. During authority recovery, `cmd/timelineservice` exposes one recovery feed that merges Kafka canonical events with same-room `pending` and `publishing` rows so already-decided events are not lost while asynchronous publishing catches up.
 
-In Phase 10, this table can live in the independent timeline database selected by `TIMELINE_DATABASE_URL`. `cmd/timelineservice`, `cmd/outboxworker`, and `roomserver` local timeline mode prefer that database when configured. If `TIMELINE_DATABASE_URL` is set but unavailable, timeline writes fail closed and accepted distributed controls are not broadcast.
+In Phase 10, this table can live in the independent timeline database selected by `TIMELINE_DATABASE_URL`. In Phase 12, compose defaults route roomserver access through typed result RPCs on `cmd/timelineservice`, while `cmd/outboxworker` and `cmd/derivedworker` remain timeline-owned workers. Kafka remains a result log, not command ingress. If timeline RPC or explicit local timeline storage is unavailable, timeline writes fail closed and accepted distributed controls are not broadcast.
 
 `pending` and `publishing` rows are part of the recovery gap and must not be deleted by cleanup jobs. Published row retention can be added later, but Phase 10 does not auto-delete outbox history.
 
@@ -180,7 +180,7 @@ wt:room:state:{roomCode}:v1
 
 The cached value is the WebSocket `room_state` payload: room code, media ID, optional media duration, host user ID, paused/ended flags, position, velocity, server time, reason, playback rate, and `seq`. The default TTL is currently 10 minutes.
 
-The cache is written after HTTP room runtime bootstrap, WebSocket state transitions, and completed authority recovery. It can serve quick read-only snapshots, but it is not the recovery source of truth; Phase 5 rebuilds writable authority from Kafka timeline events plus unpublished PostgreSQL outbox rows. It does not store WebSocket connection objects, send queues, heartbeat state, seek rate limits, online presence, or active-device ownership.
+The cache is written after HTTP room runtime bootstrap, WebSocket state transitions, and completed authority recovery. It can serve quick read-only snapshots, but it is not the recovery source of truth; Phase 12 rebuilds writable authority from the timeline-owned recovery feed, which combines Kafka timeline events plus unpublished PostgreSQL outbox rows. It does not store WebSocket connection objects, send queues, heartbeat state, seek rate limits, online presence, or active-device ownership.
 
 In `distributed_authority`, Redis also stores:
 
@@ -216,7 +216,7 @@ On server startup:
 
 - PostgreSQL is opened if `DATABASE_URL` is configured.
 - The media database is opened when `MEDIA_DATABASE_URL` is configured and the process needs a local media store.
-- The timeline database is opened when `TIMELINE_DATABASE_URL` is configured and the process needs a local timeline recorder or outbox worker.
+- The timeline database is opened when `TIMELINE_DATABASE_URL` is configured and the process is `cmd/timelineservice`, `cmd/outboxworker`, or an explicit local timeline rollback path.
 - Redis is opened if `REDIS_ADDR` is configured.
 - Existing active persistent rooms are marked `grace_period`.
 - In-memory cleanup starts.

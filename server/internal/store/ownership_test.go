@@ -1,6 +1,7 @@
 package store
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -31,6 +32,16 @@ type crossContextAccess struct {
 	Access string   `yaml:"access"`
 	Path   string   `yaml:"path"`
 	Reason string   `yaml:"reason"`
+}
+
+type composeDocument struct {
+	Services map[string]composeService `yaml:"services"`
+}
+
+type composeService struct {
+	Profiles    []string       `yaml:"profiles"`
+	DependsOn   any            `yaml:"depends_on"`
+	Environment map[string]any `yaml:"environment"`
 }
 
 func TestDatabaseOwnershipRegistryCoversCoreTables(t *testing.T) {
@@ -76,6 +87,55 @@ func TestDatabaseOwnershipDocumentReferencesRegistryAndMediaDatabaseBoundary(t *
 		if !strings.Contains(text, expected) {
 			t.Fatalf("expected database ownership document to mention %q", expected)
 		}
+	}
+}
+
+func TestComposeDefaultsUseTimelineRPCBoundary(t *testing.T) {
+	tests := []struct {
+		name                       string
+		path                       string
+		wantTimelineServiceProfile string
+		wantTimelineServiceDefault bool
+	}{
+		{
+			name:                       "local app compose",
+			path:                       "../../compose.yaml",
+			wantTimelineServiceProfile: "app",
+		},
+		{
+			name:                       "prod compose",
+			path:                       "../../compose.prod.yaml",
+			wantTimelineServiceDefault: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			compose := readCompose(t, tc.path)
+			roomserver := requireComposeService(t, compose, "roomserver")
+			timelineService := requireComposeService(t, compose, "timelineservice")
+
+			if !dependsOnService(roomserver.DependsOn, "timelineservice") {
+				t.Fatalf("roomserver must depend on timelineservice in %s", filepath.Base(tc.path))
+			}
+			timelineMode := envString(roomserver.Environment, "TIMELINE_SERVICE_MODE")
+			if !strings.Contains(timelineMode, "rpc") {
+				t.Fatalf("roomserver TIMELINE_SERVICE_MODE = %q, want RPC default", timelineMode)
+			}
+			timelineDatabaseURL := envString(roomserver.Environment, "TIMELINE_DATABASE_URL")
+			if strings.Contains(timelineDatabaseURL, "${TIMELINE_DATABASE_URL") {
+				t.Fatalf("roomserver must not receive the timeline-owned TIMELINE_DATABASE_URL directly, got %q", timelineDatabaseURL)
+			}
+			if timelineDatabaseURL != "" && !strings.Contains(timelineDatabaseURL, "ROOMSERVER_TIMELINE_DATABASE_URL") {
+				t.Fatalf("roomserver timeline DB override must be explicit, got %q", timelineDatabaseURL)
+			}
+			if tc.wantTimelineServiceProfile != "" && !containsContext(timelineService.Profiles, tc.wantTimelineServiceProfile) {
+				t.Fatalf("timelineservice profiles = %v, want profile %q", timelineService.Profiles, tc.wantTimelineServiceProfile)
+			}
+			if tc.wantTimelineServiceDefault && len(timelineService.Profiles) != 0 {
+				t.Fatalf("timelineservice should be a default prod service, got profiles %v", timelineService.Profiles)
+			}
+		})
 	}
 }
 
@@ -221,6 +281,31 @@ func loadOwnershipRegistry(t *testing.T) ownershipRegistry {
 	return registry
 }
 
+func readCompose(t *testing.T, path string) composeDocument {
+	t.Helper()
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read compose file %s: %v", path, err)
+	}
+	var document composeDocument
+	if err := yaml.Unmarshal(content, &document); err != nil {
+		t.Fatalf("parse compose file %s: %v", path, err)
+	}
+	if len(document.Services) == 0 {
+		t.Fatalf("expected compose file %s to contain services", path)
+	}
+	return document
+}
+
+func requireComposeService(t *testing.T, document composeDocument, name string) composeService {
+	t.Helper()
+	service, ok := document.Services[name]
+	if !ok {
+		t.Fatalf("expected compose service %q", name)
+	}
+	return service
+}
+
 func readStoreFile(t *testing.T, fileName string) string {
 	t.Helper()
 	content, err := os.ReadFile(fileName)
@@ -243,6 +328,39 @@ func readTables(content string) []string {
 
 func createdTables(content string) []string {
 	return uniqueMatches(content, regexp.MustCompile(`(?i)\bCREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?([a-z_][a-z0-9_]*)`))
+}
+
+func envString(environment map[string]any, name string) string {
+	if environment == nil {
+		return ""
+	}
+	value, ok := environment[name]
+	if !ok || value == nil {
+		return ""
+	}
+	return strings.TrimSpace(toString(value))
+}
+
+func dependsOnService(dependsOn any, service string) bool {
+	switch value := dependsOn.(type) {
+	case []any:
+		for _, item := range value {
+			if toString(item) == service {
+				return true
+			}
+		}
+	case map[string]any:
+		_, ok := value[service]
+		return ok
+	}
+	return false
+}
+
+func toString(value any) string {
+	if text, ok := value.(string); ok {
+		return text
+	}
+	return fmt.Sprint(value)
 }
 
 func uniqueMatches(content string, expression *regexp.Regexp) []string {

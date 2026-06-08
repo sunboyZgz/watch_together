@@ -3,6 +3,7 @@ package timeline
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 )
@@ -30,6 +31,79 @@ func TestDerivePublicationsRoutesControlAndMembershipEvents(t *testing.T) {
 	}
 	if len(membershipPublications) != 1 || membershipPublications[0].Topic != "membership.topic" {
 		t.Fatalf("unexpected membership publications: %+v", membershipPublications)
+	}
+}
+
+func TestServiceBuildsTypedTimelineResults(t *testing.T) {
+	writer := &recordingEventWriter{}
+	service := NewService(writer, nil, nil)
+	service.now = func() time.Time { return time.UnixMilli(1234) }
+
+	control, err := service.RecordControlResult(context.Background(), ControlResult{
+		RoomID:       "ROOM01",
+		UserID:       "user-a",
+		DeviceID:     "device-a",
+		ConnectionID: "conn-a",
+		InstanceID:   "instance-a",
+		ControlType:  "play",
+		Seq:          7,
+		Accepted:     true,
+		Payload:      map[string]any{"type": "play"},
+	})
+	if err != nil {
+		t.Fatalf("record control result: %v", err)
+	}
+	if control.EventID == "" ||
+		control.EventVersion != EventVersion ||
+		control.EventType != EventTypeControlAccepted ||
+		control.OccurredAtMs != 1234 ||
+		control.ControlType != "play" ||
+		control.Seq != 7 ||
+		string(control.Payload) != `{"type":"play"}` {
+		t.Fatalf("unexpected control event: %+v payload=%s", control, control.Payload)
+	}
+
+	membership, err := service.RecordMembershipResult(context.Background(), MembershipResult{
+		RoomID:         "ROOM01",
+		UserID:         "user-a",
+		DeviceID:       "device-a",
+		InstanceID:     "instance-a",
+		MembershipType: MembershipResultLeft,
+		Payload:        json.RawMessage(`{"reason":"leave"}`),
+	})
+	if err != nil {
+		t.Fatalf("record membership result: %v", err)
+	}
+	if membership.EventType != EventTypeMemberLeft || string(membership.Payload) != `{"reason":"leave"}` {
+		t.Fatalf("unexpected membership event: %+v payload=%s", membership, membership.Payload)
+	}
+	if len(writer.events) != 2 || writer.events[0].EventID != control.EventID || writer.events[1].EventID != membership.EventID {
+		t.Fatalf("expected service to write generated events, got %+v", writer.events)
+	}
+}
+
+func TestServiceReadsMergedRecoveryEvents(t *testing.T) {
+	service := NewService(nil,
+		recordingRoomReader([]Event{
+			{EventID: "evt-2", RoomID: "ROOM01", Seq: 2, OccurredAtMs: 2000},
+			{EventID: "evt-1", RoomID: "ROOM01", Seq: 1, OccurredAtMs: 1000},
+		}),
+		recordingUnpublishedReader([]Event{
+			{EventID: "evt-2", RoomID: "ROOM01", Seq: 2, OccurredAtMs: 2000},
+			{EventID: "evt-3", RoomID: "ROOM01", Seq: 3, OccurredAtMs: 1500},
+		}),
+	)
+
+	events, err := service.ReadRoomRecoveryEvents(context.Background(), "ROOM01")
+	if err != nil {
+		t.Fatalf("read recovery events: %v", err)
+	}
+	ids := []string{}
+	for _, event := range events {
+		ids = append(ids, event.EventID)
+	}
+	if got := strings.Join(ids, ","); got != "evt-1,evt-3,evt-2" {
+		t.Fatalf("unexpected recovery event order: %s", got)
 	}
 }
 
@@ -82,6 +156,27 @@ func TestOutboxDispatcherRecordsWorkerEvents(t *testing.T) {
 
 type recordingPublisher struct {
 	publications []recordedPublication
+}
+
+type recordingEventWriter struct {
+	events []Event
+}
+
+func (w *recordingEventWriter) RecordTimelineEvent(ctx context.Context, event Event) error {
+	w.events = append(w.events, event)
+	return nil
+}
+
+type recordingRoomReader []Event
+
+func (r recordingRoomReader) ReadRoomEvents(ctx context.Context, roomID string) ([]Event, error) {
+	return append([]Event(nil), r...), nil
+}
+
+type recordingUnpublishedReader []Event
+
+func (r recordingUnpublishedReader) ReadRoomUnpublishedTimelineEvents(ctx context.Context, roomID string) ([]Event, error) {
+	return append([]Event(nil), r...), nil
 }
 
 type recordedPublication struct {

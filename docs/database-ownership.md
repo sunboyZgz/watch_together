@@ -2,7 +2,7 @@
 
 Phase 7 keeps one PostgreSQL database and adds logical ownership boundaries. Phase 8 makes the boundary enforceable with the machine-readable registry at `server/internal/store/db_ownership.yaml` and architecture tests that scan store SQL and migrations.
 
-Phase 9 adds the first independent media database boundary. Phase 10 adds the timeline database boundary for `room_timeline_outbox`. In both cases, "split database" means a separate PostgreSQL database such as `anime_watch_media_dev` or `anime_watch_timeline_dev`, usually inside the same PostgreSQL server/container as the main database. It is not a requirement to deploy a second PostgreSQL software system.
+Phase 9 adds the first independent media database boundary. Phase 10 adds the timeline database boundary for `room_timeline_outbox`. Phase 11 makes timeline a default service-family boundary in compose: `roomserver` calls `cmd/timelineservice` over RPC, while `cmd/outboxworker` and `cmd/derivedworker` remain separate timeline-owned workers. In these database phases, "split database" means a separate PostgreSQL database such as `anime_watch_media_dev` or `anime_watch_timeline_dev`, usually inside the same PostgreSQL server/container as the main database. It is not a requirement to deploy a second PostgreSQL software system.
 
 When `MEDIA_DATABASE_URL` or `TIMELINE_DATABASE_URL` is empty, the matching owner keeps the previous single-database fallback. When either URL is configured, that owner uses the configured database. Timeline is fail-closed: if `TIMELINE_DATABASE_URL` is set but cannot be opened, timeline writes/readers must be unavailable rather than silently falling back to the main database.
 
@@ -23,7 +23,7 @@ When `MEDIA_DATABASE_URL` or `TIMELINE_DATABASE_URL` is empty, the matching owne
 | `media` | `media_tags`, `media_seasons`, `media_episodes`, `media_episode_variants`, `media_season_tags` | Owns catalog, playback lookup metadata, tag relationships, and storage-facing media metadata. |
 | `room-session` | `rooms`, `room_members` | Owns durable room business records, membership, room status, grace period, and host/member roles. Runtime authority still lives in `room.Manager` plus Redis leases. |
 | `progress` | `user_media_progress` | Owns low-frequency personal watching progress. It does not drive realtime room sync. |
-| `timeline` | `room_timeline_outbox` | Owns reliable Kafka delivery work, timeline event ids, publish status, retry state, and unpublished recovery gap closure. In Phase 10 this table can live in the independent timeline database. |
+| `timeline` | `room_timeline_outbox` | Owns reliable Kafka delivery work, timeline event ids, publish status, retry state, and unpublished recovery gap closure. In Phase 11, compose defaults route roomserver timeline access through `TimelineInternalService`. |
 | `home-composition` | none | Reads identity/progress from the main database and fills media labels through the media port or RPC. It must not own writes to core tables. |
 
 ## Cross-Context Access Registry
@@ -39,9 +39,9 @@ The canonical registry lives in `server/internal/store/db_ownership.yaml`. Curre
 | `progress` | `media` | Progress writes validate playable episodes through the media port before upsert. | `PostgresProgressStore` no longer reads media tables directly; local/RPC media adapters are the boundary. |
 | `progress` | `identity` | Progress writes validate user existence before upsert. | Allowed while single PostgreSQL is retained; no direct writes to `users`. |
 | `media` playback delivery | `media` | Playback lookup reads `media_episodes` and variants. | Owned access. |
-| `recovery` | `room-session`, `timeline` | Loads room metadata, Kafka events, and unpublished outbox rows. | Allowed through `RoomDetailStore`, `RoomEventReader`, and `PendingOutboxReader` ports. |
-| `outboxworker` | `timeline` | Claims and updates `room_timeline_outbox`. | Owned access. |
-| `derivedworker` | `timeline` | Consumes Kafka canonical topic and publishes derived topics. | Owned event-processing access. |
+| `recovery` | `room-session`, `timeline` | Loads room metadata and asks timeline for recovery-ready events. | Allowed through `RoomDetailStore` and timeline `RecoveryReader` ports. |
+| `outboxworker` | `timeline` | Claims and updates `room_timeline_outbox` from the timeline database. | Timeline-owned worker access. |
+| `derivedworker` | `timeline` | Consumes Kafka canonical topic and publishes derived topics. | Timeline-owned projection worker access. |
 
 ## Phase 9 Media Database Boundary
 
@@ -66,10 +66,29 @@ Phase 10 moves the timeline owner from a purely logical table boundary to an opt
 - `cmd/timelineservice` prefers `TIMELINE_DATABASE_URL` and falls back to `DATABASE_URL` only when the timeline URL is empty.
 - `cmd/outboxworker` prefers `TIMELINE_DATABASE_URL` and falls back to `DATABASE_URL` only when the timeline URL is empty.
 - `roomserver` local timeline mode opens `TIMELINE_DATABASE_URL` when configured; if that connection fails, the timeline recorder is unavailable and accepted distributed controls fail closed.
-- `TIMELINE_SERVICE_MODE=rpc` keeps `roomserver` away from the timeline database; it calls `cmd/timelineservice` instead.
+- `TIMELINE_SERVICE_MODE=rpc` keeps `roomserver` away from the timeline database; it calls `cmd/timelineservice` instead. Phase 11 makes this the compose default.
 - `/readyz` reports the main database as `postgres` and the optional timeline database as `timeline_postgres`.
 
 The old main-database `room_timeline_outbox` table is intentionally kept as fallback/shadow data. Development-stage Phase 10 does not migrate old outbox history into the timeline database; new timeline databases start empty after running `server/timeline_migrations`.
+
+## Phase 11 Timeline Service-Family Boundary
+
+Phase 11 keeps timeline as a service family rather than a single process:
+
+- `cmd/timelineservice` is the internal RPC API for recording timeline results and reading recovery-ready room events.
+- `cmd/outboxworker` remains a separate timeline-owned worker for Kafka publish retry and mark-published state.
+- `cmd/derivedworker` remains a separate timeline-owned projection worker for derived topics.
+- Compose app/prod paths default `roomserver` to `TIMELINE_SERVICE_MODE=rpc` and do not pass the timeline-owned database URL to roomserver.
+- `TIMELINE_SERVICE_MODE=local` is still supported as an explicit rollback path, using `ROOMSERVER_TIMELINE_DATABASE_URL` in compose when direct timeline DB access is required.
+
+## Phase 12 Timeline Result Ownership
+
+Phase 12 moves canonical result event semantics into the timeline owner:
+
+- `roomserver` sends typed control and membership results; it no longer constructs complete `TimelineEvent` values on the default path.
+- `cmd/timelineservice` generates event ids, event version, occurrence time, payload JSON, and outbox rows.
+- Recovery uses one timeline-owned feed that merges Kafka canonical events with same-room unpublished outbox gaps.
+- Kafka remains a result log, not a command ingress log, and `room authority` remains in `roomserver`.
 
 Operational rules:
 
@@ -79,13 +98,13 @@ Operational rules:
 
 ## Future Split Checklist
 
-Remaining blockers after the Phase 10 media and timeline database pilots:
+Remaining blockers after the Phase 11 media and timeline service-family pilots:
 
 - `room-session -> media` direct SQL is closed in Phase 8. Room create/join/detail now use the media port, backed by local `PostgresMediaStore` or `MediaInternalService` RPC.
 - `progress -> media` direct SQL is closed in Phase 8. Progress writes validate playable episodes through the media port before touching `user_media_progress`.
 - `home-composition -> media` direct SQL is closed in Phase 9. Home summary now reads progress ids from the main database and requests media summaries through the media port.
 - The main database still retains old media tables for rollback/shadow validation. A later cleanup can remove them after sync confidence is high.
-- Timeline owns its independent outbox schema in Phase 10, but the next microservice step still needs stricter service defaults around `TIMELINE_SERVICE_MODE=rpc`, recovery reader ownership, outbox dispatcher ownership, and derived projection management.
+- Timeline owns its independent outbox schema and compose-default RPC path. Later phases can add richer timeline service APIs or projection management, but `roomserver` should not regain default direct timeline DB ownership.
 - Remaining identity, progress, and room-session contexts still share the main database. Splitting them still needs separate read-model and transaction-boundary work.
 
 Before moving a context to its own database:
@@ -100,6 +119,6 @@ Before moving a context to its own database:
 Suggested order:
 
 1. Split `media` first because it is catalog/storage oriented and mostly independent from room authority.
-2. Split `timeline` next. Phase 10 establishes the database boundary; the next stage should move timeline behavior toward service-owned RPC defaults and worker responsibility boundaries.
+2. Keep hardening `timeline` as a service family before extracting more contexts. Phase 11 establishes service-owned RPC defaults and worker responsibility boundaries.
 3. Split `identity` and `progress` after home composition has a read model or service composition path.
 4. Split `room-session` last; it is closest to realtime authority, recovery, and membership correctness.

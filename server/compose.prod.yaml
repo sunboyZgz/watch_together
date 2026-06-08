@@ -129,6 +129,8 @@ services:
         condition: service_started
       kafka:
         condition: service_started
+      timelineservice:
+        condition: service_started
       minio-init:
         condition: service_completed_successfully
     env_file:
@@ -168,14 +170,14 @@ services:
       SERVICE_VERSION: ${SERVICE_VERSION:-prod}
       INTERNAL_RPC_PATH_PREFIX: ${INTERNAL_RPC_PATH_PREFIX:-/internal.rpc}
       INTERNAL_RPC_TIMEOUT_MS: ${INTERNAL_RPC_TIMEOUT_MS:-1000}
-      INTERNAL_RPC_AUTH_TOKEN: ${INTERNAL_RPC_AUTH_TOKEN:-}
+      INTERNAL_RPC_AUTH_TOKEN: ${INTERNAL_RPC_AUTH_TOKEN:-change_me_internal_rpc_token}
       SERVICE_DISCOVERY_MODE: ${SERVICE_DISCOVERY_MODE:-static}
       MEDIA_SERVICE_MODE: ${MEDIA_SERVICE_MODE:-local}
       MEDIA_SERVICE_ADDR: ${MEDIA_SERVICE_ADDR:-http://mediaservice:8090}
       MEDIA_DATABASE_URL: ${MEDIA_DATABASE_URL:-}
-      TIMELINE_SERVICE_MODE: ${TIMELINE_SERVICE_MODE:-local}
+      TIMELINE_SERVICE_MODE: ${TIMELINE_SERVICE_MODE:-rpc}
       TIMELINE_SERVICE_ADDR: ${TIMELINE_SERVICE_ADDR:-http://timelineservice:8090}
-      TIMELINE_DATABASE_URL: ${TIMELINE_DATABASE_URL:-}
+      TIMELINE_DATABASE_URL: ${ROOMSERVER_TIMELINE_DATABASE_URL:-}
       OTEL_TRACING_ENABLED: ${OTEL_TRACING_ENABLED:-false}
       OTEL_SERVICE_NAME: ${OTEL_SERVICE_NAME:-watch-together-roomserver}
       OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
@@ -265,7 +267,7 @@ services:
       SERVICE_VERSION: ${SERVICE_VERSION:-prod}
       INTERNAL_RPC_ADDR: :8090
       INTERNAL_RPC_PATH_PREFIX: ${INTERNAL_RPC_PATH_PREFIX:-/internal.rpc}
-      INTERNAL_RPC_AUTH_TOKEN: ${INTERNAL_RPC_AUTH_TOKEN:-}
+      INTERNAL_RPC_AUTH_TOKEN: ${INTERNAL_RPC_AUTH_TOKEN:-change_me_internal_rpc_token}
       METRICS_ENABLED: ${METRICS_ENABLED:-true}
       METRICS_PATH: ${METRICS_PATH:-/metrics}
       READINESS_PATH: ${READINESS_PATH:-/readyz}
@@ -280,7 +282,6 @@ services:
     command: ["/app/mediaservice"]
 
   timelineservice:
-    profiles: ["services"]
     image: watch-together-roomserver:${WATCH_TOGETHER_IMAGE_TAG:-prod}
     restart: unless-stopped
     depends_on:
@@ -298,7 +299,7 @@ services:
       SERVICE_VERSION: ${SERVICE_VERSION:-prod}
       INTERNAL_RPC_ADDR: :8090
       INTERNAL_RPC_PATH_PREFIX: ${INTERNAL_RPC_PATH_PREFIX:-/internal.rpc}
-      INTERNAL_RPC_AUTH_TOKEN: ${INTERNAL_RPC_AUTH_TOKEN:-}
+      INTERNAL_RPC_AUTH_TOKEN: ${INTERNAL_RPC_AUTH_TOKEN:-change_me_internal_rpc_token}
       METRICS_ENABLED: ${METRICS_ENABLED:-true}
       METRICS_PATH: ${METRICS_PATH:-/metrics}
       READINESS_PATH: ${READINESS_PATH:-/readyz}

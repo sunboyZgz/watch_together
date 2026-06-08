@@ -8,8 +8,11 @@ option go_package = "watch_together/server/internal/rpcgen/v1;internalv1";
 
 service TimelineInternalService {
   rpc RecordTimelineEvent(RecordTimelineEventRequest) returns (RecordTimelineEventResponse);
+  rpc RecordControlResult(RecordControlResultRequest) returns (RecordControlResultResponse);
+  rpc RecordMembershipResult(RecordMembershipResultRequest) returns (RecordMembershipResultResponse);
   rpc ListRoomEvents(ListRoomEventsRequest) returns (ListRoomEventsResponse);
   rpc ListUnpublishedRoomEvents(ListUnpublishedRoomEventsRequest) returns (ListUnpublishedRoomEventsResponse);
+  rpc ListRoomRecoveryEvents(ListRoomRecoveryEventsRequest) returns (ListRoomRecoveryEventsResponse);
 }
 
 message RecordTimelineEventRequest {
@@ -19,6 +22,38 @@ message RecordTimelineEventRequest {
 
 message RecordTimelineEventResponse {
   bool recorded = 1;
+}
+
+message RecordControlResultRequest {
+  RequestMetadata metadata = 1;
+  string room_id = 2;
+  string user_id = 3;
+  string device_id = 4;
+  string connection_id = 5;
+  string instance_id = 6;
+  string control_type = 7;
+  int64 seq = 8;
+  bool accepted = 9;
+  bytes payload = 10;
+}
+
+message RecordControlResultResponse {
+  TimelineEvent event = 1;
+}
+
+message RecordMembershipResultRequest {
+  RequestMetadata metadata = 1;
+  string room_id = 2;
+  string user_id = 3;
+  string device_id = 4;
+  string connection_id = 5;
+  string instance_id = 6;
+  string membership_type = 7;
+  bytes payload = 8;
+}
+
+message RecordMembershipResultResponse {
+  TimelineEvent event = 1;
 }
 
 message ListRoomEventsRequest {
@@ -36,6 +71,15 @@ message ListUnpublishedRoomEventsRequest {
 }
 
 message ListUnpublishedRoomEventsResponse {
+  repeated TimelineEvent events = 1;
+}
+
+message ListRoomRecoveryEventsRequest {
+  RequestMetadata metadata = 1;
+  string room_id = 2;
+}
+
+message ListRoomRecoveryEventsResponse {
   repeated TimelineEvent events = 1;
 }
 

@@ -173,27 +173,24 @@ func NewServer(config Config) *Server {
 	}
 	mediaService := newMediaService(db, mediaDB, config, serviceConfig)
 	roomService, roomStore := newRoomService(db, mediaService)
-	var timelineRecorder timeline.Recorder = timeline.NoopRecorder{}
-	var timelineReader timeline.RoomEventReader
-	var pendingOutboxReader recovery.PendingOutboxReader
+	var timelineRecorder timeline.ResultRecorder = timeline.NoopRecorder{}
+	var timelineRecoveryReader timeline.RecoveryReader
 	var timelineOutboxStore *store.PostgresTimelineOutboxStore
 	if distributedAuthority && !isRPCMode(config.ServiceClients.TimelineMode) {
 		timelineOutboxStore = newTimelineOutboxStore(db, timelineDB, config)
 	}
 	if distributedAuthority && timelineOutboxStore != nil {
-		timelineRecorder = timelineOutboxStore
-		pendingOutboxReader = timelineOutboxStore
+		timelineRecorder = timeline.NewService(timelineOutboxStore, nil, nil)
 	} else if distributedAuthority && !isRPCMode(config.ServiceClients.TimelineMode) && strings.TrimSpace(config.TimelineDatabaseURL) != "" {
 		unavailableTimeline := timeline.UnavailableStore{}
 		timelineRecorder = unavailableTimeline
-		pendingOutboxReader = unavailableTimeline
+		timelineRecoveryReader = unavailableTimeline
 	}
 	if isRPCMode(config.ServiceClients.TimelineMode) {
 		timelineClient := timeline.NewRPCClient(config.ServiceClients.TimelineAddr, internalRPCClientConfig(config, serviceConfig))
 		if timelineClient != nil {
 			timelineRecorder = timelineClient
-			timelineReader = timelineClient
-			pendingOutboxReader = timelineClient
+			timelineRecoveryReader = timelineClient
 		}
 	}
 	installRoomLifecycleHooks(roomManager, roomStore, roomStateCache)
@@ -227,7 +224,7 @@ func NewServer(config Config) *Server {
 	}
 	var authorityRecovery *recovery.Service
 	if distributedAuthority {
-		if timelineReader == nil {
+		if timelineRecoveryReader == nil {
 			kafkaReader, err := timeline.NewKafkaRoomEventReader(
 				config.Kafka.Brokers,
 				config.Kafka.TopicRoomTimeline,
@@ -236,7 +233,11 @@ func NewServer(config Config) *Server {
 			if err != nil {
 				log.Fatalf("failed to open kafka room timeline reader: %v", err)
 			}
-			timelineReader = kafkaReader
+			if timelineOutboxStore != nil {
+				timelineRecoveryReader = timeline.NewService(timelineOutboxStore, kafkaReader, timelineOutboxStore)
+			} else {
+				timelineRecoveryReader = timeline.NewService(nil, kafkaReader, nil)
+			}
 		}
 		authorityRecovery = recovery.NewService(
 			recovery.Config{
@@ -246,8 +247,7 @@ func NewServer(config Config) *Server {
 			authorityRegistry,
 			roomManager,
 			roomStore,
-			timelineReader,
-			pendingOutboxReader,
+			timelineRecoveryReader,
 			roomStateCache,
 		)
 		roomHTTPHandler.SetRoomAuthorityRecovery(authorityRecovery)
@@ -516,7 +516,7 @@ func newGinRouter(
 	controlRequestRegistry *cache.ControlRequestRegistry,
 	controlRateRegistry *cache.ControlRateRegistry,
 	presenceRegistry *cache.PresenceRegistry,
-	timelineRecorder timeline.Recorder,
+	timelineRecorder timeline.ResultRecorder,
 	authorityRecovery *recovery.Service,
 ) *gin.Engine {
 	gin.SetMode(gin.ReleaseMode)

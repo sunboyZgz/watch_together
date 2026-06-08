@@ -17,7 +17,7 @@ import (
 
 // main wires config, server assembly, and the HTTP listen lifecycle together.
 func main() {
-	runtimeConfig, err := wtconfig.LoadServerRuntimeConfig(".")
+	runtimeConfig, err := wtconfig.LoadRoomserverRuntimeConfig(".")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "load server config: %v\n", err)
 		os.Exit(1)

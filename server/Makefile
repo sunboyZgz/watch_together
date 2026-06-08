@@ -2,7 +2,7 @@ MIGRATIONS_DIR := ./migrations
 MEDIA_MIGRATIONS_DIR := ./media_migrations
 TIMELINE_MIGRATIONS_DIR := ./timeline_migrations
 
-.PHONY: migration-create migration-up migration-down migration-version media-migration-up media-migration-down media-migration-version timeline-migration-up timeline-migration-down timeline-migration-version proto-lint proto-generate verify-phase8 verify-phase9 verify-phase10
+.PHONY: migration-create migration-up migration-down migration-version media-migration-up media-migration-down media-migration-version timeline-migration-up timeline-migration-down timeline-migration-version proto-lint proto-generate verify-phase8 verify-phase9 verify-phase10 verify-phase11
 
 migration-create:
 	@test -n "$(name)" || (echo "usage: make migration-create name=create_users_table" && exit 1)
@@ -55,3 +55,6 @@ verify-phase9:
 
 verify-phase10:
 	@powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/verify_phase10.ps1
+
+verify-phase11:
+	@powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/verify_phase11.ps1

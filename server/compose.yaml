@@ -133,6 +133,7 @@ services:
       - nats
       - kafka
       - minio-init
+      - timelineservice
     env_file:
       - .env
     environment:
@@ -175,9 +176,9 @@ services:
       MEDIA_SERVICE_MODE: ${MEDIA_SERVICE_MODE:-local}
       MEDIA_SERVICE_ADDR: ${MEDIA_SERVICE_ADDR:-http://mediaservice:8090}
       MEDIA_DATABASE_URL: ${MEDIA_DATABASE_URL:-}
-      TIMELINE_SERVICE_MODE: ${TIMELINE_SERVICE_MODE:-local}
+      TIMELINE_SERVICE_MODE: ${TIMELINE_SERVICE_MODE:-rpc}
       TIMELINE_SERVICE_ADDR: ${TIMELINE_SERVICE_ADDR:-http://timelineservice:8090}
-      TIMELINE_DATABASE_URL: ${TIMELINE_DATABASE_URL:-}
+      TIMELINE_DATABASE_URL: ${ROOMSERVER_TIMELINE_DATABASE_URL:-}
       OTEL_TRACING_ENABLED: ${OTEL_TRACING_ENABLED:-false}
       OTEL_SERVICE_NAME: ${OTEL_SERVICE_NAME:-watch-together-roomserver}
       OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
@@ -281,7 +282,7 @@ services:
     command: ["/app/mediaservice"]
 
   timelineservice:
-    profiles: ["services", "rpc-pilot"]
+    profiles: ["app", "services", "rpc-pilot"]
     image: watch-together-roomserver:dev
     container_name: anime-watch-timelineservice
     restart: unless-stopped

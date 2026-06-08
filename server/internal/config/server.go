@@ -416,6 +416,25 @@ func LoadServerRuntimeConfig(configDir string) (ServerRuntimeConfig, error) {
 	return config, nil
 }
 
+func LoadRoomserverRuntimeConfig(configDir string) (ServerRuntimeConfig, error) {
+	config, err := LoadServerRuntimeConfig(configDir)
+	if err != nil {
+		return ServerRuntimeConfig{}, err
+	}
+	if err := validateRoomserverRuntimeConfig(config); err != nil {
+		return ServerRuntimeConfig{}, err
+	}
+	return config, nil
+}
+
+func validateRoomserverRuntimeConfig(config ServerRuntimeConfig) error {
+	if normalizeServiceMode(config.ServiceClients.TimelineMode) == "rpc" &&
+		strings.TrimSpace(config.TimelineDatabaseURL) != "" {
+		return fmt.Errorf("TIMELINE_DATABASE_URL must be empty for roomserver when TIMELINE_SERVICE_MODE=rpc; use ROOMSERVER_TIMELINE_DATABASE_URL only with TIMELINE_SERVICE_MODE=local")
+	}
+	return nil
+}
+
 func parseRoomRuntimeMode(value string) (string, error) {
 	normalized := strings.ToLower(strings.TrimSpace(value))
 	if normalized == "" {

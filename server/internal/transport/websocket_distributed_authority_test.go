@@ -769,7 +769,7 @@ func newDistributedWebSocketServerWithHardening(
 	recoverer roomAuthorityRecovery,
 	controlRequests controlRequestRegistry,
 	presence presenceRegistry,
-	recorder timeline.Recorder,
+	recorder timeline.ResultRecorder,
 ) *httptest.Server {
 	t.Helper()
 	handler := NewWebSocketHandler(roomManager, true)
@@ -1129,16 +1129,24 @@ func (r *fakePresenceRegistry) Snapshot(ctx context.Context, roomID string) (cac
 
 type failingTimelineRecorder struct{}
 
-func (failingTimelineRecorder) RecordTimelineEvent(context.Context, timeline.Event) error {
-	return errors.New("outbox unavailable")
+func (failingTimelineRecorder) RecordControlResult(context.Context, timeline.ControlResult) (timeline.Event, error) {
+	return timeline.Event{}, errors.New("outbox unavailable")
+}
+
+func (failingTimelineRecorder) RecordMembershipResult(context.Context, timeline.MembershipResult) (timeline.Event, error) {
+	return timeline.Event{}, errors.New("outbox unavailable")
 }
 
 type errorTimelineRecorder struct {
 	err error
 }
 
-func (r errorTimelineRecorder) RecordTimelineEvent(context.Context, timeline.Event) error {
-	return r.err
+func (r errorTimelineRecorder) RecordControlResult(context.Context, timeline.ControlResult) (timeline.Event, error) {
+	return timeline.Event{}, r.err
+}
+
+func (r errorTimelineRecorder) RecordMembershipResult(context.Context, timeline.MembershipResult) (timeline.Event, error) {
+	return timeline.Event{}, r.err
 }
 
 func assertRoomPresence(

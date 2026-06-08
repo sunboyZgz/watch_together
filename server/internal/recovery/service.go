@@ -34,10 +34,6 @@ type RecoverableRoomStore interface {
 	ListRecoverableRoomCodes(ctx context.Context, limit int) ([]string, error)
 }
 
-type PendingOutboxReader interface {
-	ReadRoomUnpublishedTimelineEvents(ctx context.Context, roomID string) ([]timeline.Event, error)
-}
-
 type RoomStateWriter interface {
 	SetRoomState(ctx context.Context, roomID string, state protocol.RoomStatePayload) error
 }
@@ -54,8 +50,7 @@ type Service struct {
 	roomManager *room.Manager
 	roomStore   RoomDetailStore
 	scanStore   RecoverableRoomStore
-	timeline    timeline.RoomEventReader
-	outbox      PendingOutboxReader
+	timeline    timeline.RecoveryReader
 	stateWriter RoomStateWriter
 	now         func() time.Time
 }
@@ -79,8 +74,7 @@ func NewService(
 	authority AuthorityRegistry,
 	roomManager *room.Manager,
 	roomStore RoomDetailStore,
-	timelineReader timeline.RoomEventReader,
-	outbox PendingOutboxReader,
+	timelineReader timeline.RecoveryReader,
 	stateWriter RoomStateWriter,
 ) *Service {
 	if config.RecoveryTimeout <= 0 {
@@ -100,7 +94,6 @@ func NewService(
 		roomStore:   roomStore,
 		scanStore:   scanStore,
 		timeline:    timelineReader,
-		outbox:      outbox,
 		stateWriter: stateWriter,
 		now:         time.Now,
 	}
@@ -139,16 +132,9 @@ func (s *Service) TryRecoverRoomAuthority(ctx context.Context, roomID string, re
 	}
 	state := baseStateFromRoomDetail(detail, s.now())
 
-	events, err := s.timeline.ReadRoomEvents(recoveryCtx, roomID)
+	events, err := s.timeline.ReadRoomRecoveryEvents(recoveryCtx, roomID)
 	if err != nil {
-		return Result{Lease: lease}, fmt.Errorf("read kafka timeline: %w", err)
-	}
-	if s.outbox != nil {
-		pending, err := s.outbox.ReadRoomUnpublishedTimelineEvents(recoveryCtx, roomID)
-		if err != nil {
-			return Result{Lease: lease}, fmt.Errorf("read unpublished outbox: %w", err)
-		}
-		events = append(events, pending...)
+		return Result{Lease: lease}, fmt.Errorf("read room recovery timeline: %w", err)
 	}
 
 	state, requests, err := RecoverStateFromEvents(state, events)

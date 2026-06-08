@@ -36,20 +36,32 @@ const (
 	// TimelineInternalServiceRecordTimelineEventProcedure is the fully-qualified name of the
 	// TimelineInternalService's RecordTimelineEvent RPC.
 	TimelineInternalServiceRecordTimelineEventProcedure = "/watch_together.internal.v1.TimelineInternalService/RecordTimelineEvent"
+	// TimelineInternalServiceRecordControlResultProcedure is the fully-qualified name of the
+	// TimelineInternalService's RecordControlResult RPC.
+	TimelineInternalServiceRecordControlResultProcedure = "/watch_together.internal.v1.TimelineInternalService/RecordControlResult"
+	// TimelineInternalServiceRecordMembershipResultProcedure is the fully-qualified name of the
+	// TimelineInternalService's RecordMembershipResult RPC.
+	TimelineInternalServiceRecordMembershipResultProcedure = "/watch_together.internal.v1.TimelineInternalService/RecordMembershipResult"
 	// TimelineInternalServiceListRoomEventsProcedure is the fully-qualified name of the
 	// TimelineInternalService's ListRoomEvents RPC.
 	TimelineInternalServiceListRoomEventsProcedure = "/watch_together.internal.v1.TimelineInternalService/ListRoomEvents"
 	// TimelineInternalServiceListUnpublishedRoomEventsProcedure is the fully-qualified name of the
 	// TimelineInternalService's ListUnpublishedRoomEvents RPC.
 	TimelineInternalServiceListUnpublishedRoomEventsProcedure = "/watch_together.internal.v1.TimelineInternalService/ListUnpublishedRoomEvents"
+	// TimelineInternalServiceListRoomRecoveryEventsProcedure is the fully-qualified name of the
+	// TimelineInternalService's ListRoomRecoveryEvents RPC.
+	TimelineInternalServiceListRoomRecoveryEventsProcedure = "/watch_together.internal.v1.TimelineInternalService/ListRoomRecoveryEvents"
 )
 
 // TimelineInternalServiceClient is a client for the
 // watch_together.internal.v1.TimelineInternalService service.
 type TimelineInternalServiceClient interface {
 	RecordTimelineEvent(context.Context, *connect.Request[v1.RecordTimelineEventRequest]) (*connect.Response[v1.RecordTimelineEventResponse], error)
+	RecordControlResult(context.Context, *connect.Request[v1.RecordControlResultRequest]) (*connect.Response[v1.RecordControlResultResponse], error)
+	RecordMembershipResult(context.Context, *connect.Request[v1.RecordMembershipResultRequest]) (*connect.Response[v1.RecordMembershipResultResponse], error)
 	ListRoomEvents(context.Context, *connect.Request[v1.ListRoomEventsRequest]) (*connect.Response[v1.ListRoomEventsResponse], error)
 	ListUnpublishedRoomEvents(context.Context, *connect.Request[v1.ListUnpublishedRoomEventsRequest]) (*connect.Response[v1.ListUnpublishedRoomEventsResponse], error)
+	ListRoomRecoveryEvents(context.Context, *connect.Request[v1.ListRoomRecoveryEventsRequest]) (*connect.Response[v1.ListRoomRecoveryEventsResponse], error)
 }
 
 // NewTimelineInternalServiceClient constructs a client for the
@@ -70,6 +82,18 @@ func NewTimelineInternalServiceClient(httpClient connect.HTTPClient, baseURL str
 			connect.WithSchema(timelineInternalServiceMethods.ByName("RecordTimelineEvent")),
 			connect.WithClientOptions(opts...),
 		),
+		recordControlResult: connect.NewClient[v1.RecordControlResultRequest, v1.RecordControlResultResponse](
+			httpClient,
+			baseURL+TimelineInternalServiceRecordControlResultProcedure,
+			connect.WithSchema(timelineInternalServiceMethods.ByName("RecordControlResult")),
+			connect.WithClientOptions(opts...),
+		),
+		recordMembershipResult: connect.NewClient[v1.RecordMembershipResultRequest, v1.RecordMembershipResultResponse](
+			httpClient,
+			baseURL+TimelineInternalServiceRecordMembershipResultProcedure,
+			connect.WithSchema(timelineInternalServiceMethods.ByName("RecordMembershipResult")),
+			connect.WithClientOptions(opts...),
+		),
 		listRoomEvents: connect.NewClient[v1.ListRoomEventsRequest, v1.ListRoomEventsResponse](
 			httpClient,
 			baseURL+TimelineInternalServiceListRoomEventsProcedure,
@@ -82,19 +106,39 @@ func NewTimelineInternalServiceClient(httpClient connect.HTTPClient, baseURL str
 			connect.WithSchema(timelineInternalServiceMethods.ByName("ListUnpublishedRoomEvents")),
 			connect.WithClientOptions(opts...),
 		),
+		listRoomRecoveryEvents: connect.NewClient[v1.ListRoomRecoveryEventsRequest, v1.ListRoomRecoveryEventsResponse](
+			httpClient,
+			baseURL+TimelineInternalServiceListRoomRecoveryEventsProcedure,
+			connect.WithSchema(timelineInternalServiceMethods.ByName("ListRoomRecoveryEvents")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
 // timelineInternalServiceClient implements TimelineInternalServiceClient.
 type timelineInternalServiceClient struct {
 	recordTimelineEvent       *connect.Client[v1.RecordTimelineEventRequest, v1.RecordTimelineEventResponse]
+	recordControlResult       *connect.Client[v1.RecordControlResultRequest, v1.RecordControlResultResponse]
+	recordMembershipResult    *connect.Client[v1.RecordMembershipResultRequest, v1.RecordMembershipResultResponse]
 	listRoomEvents            *connect.Client[v1.ListRoomEventsRequest, v1.ListRoomEventsResponse]
 	listUnpublishedRoomEvents *connect.Client[v1.ListUnpublishedRoomEventsRequest, v1.ListUnpublishedRoomEventsResponse]
+	listRoomRecoveryEvents    *connect.Client[v1.ListRoomRecoveryEventsRequest, v1.ListRoomRecoveryEventsResponse]
 }
 
 // RecordTimelineEvent calls watch_together.internal.v1.TimelineInternalService.RecordTimelineEvent.
 func (c *timelineInternalServiceClient) RecordTimelineEvent(ctx context.Context, req *connect.Request[v1.RecordTimelineEventRequest]) (*connect.Response[v1.RecordTimelineEventResponse], error) {
 	return c.recordTimelineEvent.CallUnary(ctx, req)
+}
+
+// RecordControlResult calls watch_together.internal.v1.TimelineInternalService.RecordControlResult.
+func (c *timelineInternalServiceClient) RecordControlResult(ctx context.Context, req *connect.Request[v1.RecordControlResultRequest]) (*connect.Response[v1.RecordControlResultResponse], error) {
+	return c.recordControlResult.CallUnary(ctx, req)
+}
+
+// RecordMembershipResult calls
+// watch_together.internal.v1.TimelineInternalService.RecordMembershipResult.
+func (c *timelineInternalServiceClient) RecordMembershipResult(ctx context.Context, req *connect.Request[v1.RecordMembershipResultRequest]) (*connect.Response[v1.RecordMembershipResultResponse], error) {
+	return c.recordMembershipResult.CallUnary(ctx, req)
 }
 
 // ListRoomEvents calls watch_together.internal.v1.TimelineInternalService.ListRoomEvents.
@@ -108,12 +152,21 @@ func (c *timelineInternalServiceClient) ListUnpublishedRoomEvents(ctx context.Co
 	return c.listUnpublishedRoomEvents.CallUnary(ctx, req)
 }
 
+// ListRoomRecoveryEvents calls
+// watch_together.internal.v1.TimelineInternalService.ListRoomRecoveryEvents.
+func (c *timelineInternalServiceClient) ListRoomRecoveryEvents(ctx context.Context, req *connect.Request[v1.ListRoomRecoveryEventsRequest]) (*connect.Response[v1.ListRoomRecoveryEventsResponse], error) {
+	return c.listRoomRecoveryEvents.CallUnary(ctx, req)
+}
+
 // TimelineInternalServiceHandler is an implementation of the
 // watch_together.internal.v1.TimelineInternalService service.
 type TimelineInternalServiceHandler interface {
 	RecordTimelineEvent(context.Context, *connect.Request[v1.RecordTimelineEventRequest]) (*connect.Response[v1.RecordTimelineEventResponse], error)
+	RecordControlResult(context.Context, *connect.Request[v1.RecordControlResultRequest]) (*connect.Response[v1.RecordControlResultResponse], error)
+	RecordMembershipResult(context.Context, *connect.Request[v1.RecordMembershipResultRequest]) (*connect.Response[v1.RecordMembershipResultResponse], error)
 	ListRoomEvents(context.Context, *connect.Request[v1.ListRoomEventsRequest]) (*connect.Response[v1.ListRoomEventsResponse], error)
 	ListUnpublishedRoomEvents(context.Context, *connect.Request[v1.ListUnpublishedRoomEventsRequest]) (*connect.Response[v1.ListUnpublishedRoomEventsResponse], error)
+	ListRoomRecoveryEvents(context.Context, *connect.Request[v1.ListRoomRecoveryEventsRequest]) (*connect.Response[v1.ListRoomRecoveryEventsResponse], error)
 }
 
 // NewTimelineInternalServiceHandler builds an HTTP handler from the service implementation. It
@@ -129,6 +182,18 @@ func NewTimelineInternalServiceHandler(svc TimelineInternalServiceHandler, opts 
 		connect.WithSchema(timelineInternalServiceMethods.ByName("RecordTimelineEvent")),
 		connect.WithHandlerOptions(opts...),
 	)
+	timelineInternalServiceRecordControlResultHandler := connect.NewUnaryHandler(
+		TimelineInternalServiceRecordControlResultProcedure,
+		svc.RecordControlResult,
+		connect.WithSchema(timelineInternalServiceMethods.ByName("RecordControlResult")),
+		connect.WithHandlerOptions(opts...),
+	)
+	timelineInternalServiceRecordMembershipResultHandler := connect.NewUnaryHandler(
+		TimelineInternalServiceRecordMembershipResultProcedure,
+		svc.RecordMembershipResult,
+		connect.WithSchema(timelineInternalServiceMethods.ByName("RecordMembershipResult")),
+		connect.WithHandlerOptions(opts...),
+	)
 	timelineInternalServiceListRoomEventsHandler := connect.NewUnaryHandler(
 		TimelineInternalServiceListRoomEventsProcedure,
 		svc.ListRoomEvents,
@@ -141,14 +206,26 @@ func NewTimelineInternalServiceHandler(svc TimelineInternalServiceHandler, opts 
 		connect.WithSchema(timelineInternalServiceMethods.ByName("ListUnpublishedRoomEvents")),
 		connect.WithHandlerOptions(opts...),
 	)
+	timelineInternalServiceListRoomRecoveryEventsHandler := connect.NewUnaryHandler(
+		TimelineInternalServiceListRoomRecoveryEventsProcedure,
+		svc.ListRoomRecoveryEvents,
+		connect.WithSchema(timelineInternalServiceMethods.ByName("ListRoomRecoveryEvents")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/watch_together.internal.v1.TimelineInternalService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case TimelineInternalServiceRecordTimelineEventProcedure:
 			timelineInternalServiceRecordTimelineEventHandler.ServeHTTP(w, r)
+		case TimelineInternalServiceRecordControlResultProcedure:
+			timelineInternalServiceRecordControlResultHandler.ServeHTTP(w, r)
+		case TimelineInternalServiceRecordMembershipResultProcedure:
+			timelineInternalServiceRecordMembershipResultHandler.ServeHTTP(w, r)
 		case TimelineInternalServiceListRoomEventsProcedure:
 			timelineInternalServiceListRoomEventsHandler.ServeHTTP(w, r)
 		case TimelineInternalServiceListUnpublishedRoomEventsProcedure:
 			timelineInternalServiceListUnpublishedRoomEventsHandler.ServeHTTP(w, r)
+		case TimelineInternalServiceListRoomRecoveryEventsProcedure:
+			timelineInternalServiceListRoomRecoveryEventsHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -162,10 +239,22 @@ func (UnimplementedTimelineInternalServiceHandler) RecordTimelineEvent(context.C
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("watch_together.internal.v1.TimelineInternalService.RecordTimelineEvent is not implemented"))
 }
 
+func (UnimplementedTimelineInternalServiceHandler) RecordControlResult(context.Context, *connect.Request[v1.RecordControlResultRequest]) (*connect.Response[v1.RecordControlResultResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("watch_together.internal.v1.TimelineInternalService.RecordControlResult is not implemented"))
+}
+
+func (UnimplementedTimelineInternalServiceHandler) RecordMembershipResult(context.Context, *connect.Request[v1.RecordMembershipResultRequest]) (*connect.Response[v1.RecordMembershipResultResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("watch_together.internal.v1.TimelineInternalService.RecordMembershipResult is not implemented"))
+}
+
 func (UnimplementedTimelineInternalServiceHandler) ListRoomEvents(context.Context, *connect.Request[v1.ListRoomEventsRequest]) (*connect.Response[v1.ListRoomEventsResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("watch_together.internal.v1.TimelineInternalService.ListRoomEvents is not implemented"))
 }
 
 func (UnimplementedTimelineInternalServiceHandler) ListUnpublishedRoomEvents(context.Context, *connect.Request[v1.ListUnpublishedRoomEventsRequest]) (*connect.Response[v1.ListUnpublishedRoomEventsResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("watch_together.internal.v1.TimelineInternalService.ListUnpublishedRoomEvents is not implemented"))
+}
+
+func (UnimplementedTimelineInternalServiceHandler) ListRoomRecoveryEvents(context.Context, *connect.Request[v1.ListRoomRecoveryEventsRequest]) (*connect.Response[v1.ListRoomRecoveryEventsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("watch_together.internal.v1.TimelineInternalService.ListRoomRecoveryEvents is not implemented"))
 }

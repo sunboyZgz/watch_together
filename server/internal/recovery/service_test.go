@@ -73,8 +73,7 @@ func TestServiceRecoversStateFromKafkaAndPendingOutbox(t *testing.T) {
 		&fakeRecoveryAuthority{},
 		roomManager,
 		&fakeRoomDetailStore{durationMs: &durationMs},
-		fakeTimelineReader(kafkaEvents),
-		fakePendingOutboxReader(pendingEvents),
+		timeline.NewService(nil, fakeTimelineReader(kafkaEvents), fakePendingOutboxReader(pendingEvents)),
 		writer,
 	)
 
@@ -123,8 +122,7 @@ func TestServiceDoesNotCompleteRecoveryWhenTimelineReaderFails(t *testing.T) {
 		authority,
 		roomManager,
 		&fakeRoomDetailStore{},
-		failingTimelineReader{err: errTimelineReaderUnavailable},
-		nil,
+		timeline.NewService(nil, failingTimelineReader{err: errTimelineReaderUnavailable}, nil),
 		nil,
 	)
 

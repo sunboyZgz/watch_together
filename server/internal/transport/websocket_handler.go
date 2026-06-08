@@ -49,7 +49,7 @@ type WebSocketHandler struct {
 	controlRates        controlRateRegistry
 	presence            presenceRegistry
 	presenceRefresh     time.Duration
-	timelineRecorder    timeline.Recorder
+	timelineRecorder    timeline.ResultRecorder
 	metrics             *observability.Metrics
 	instanceID          string
 	roomRuntimeMode     string
@@ -212,7 +212,7 @@ func (h *WebSocketHandler) SetDistributedAuthorityRuntime(
 	authority roomAuthorityLookup,
 	activeDevices activeDeviceRegistry,
 	controlBus eventbus.RoomControlBus,
-	recorder timeline.Recorder,
+	recorder timeline.ResultRecorder,
 ) {
 	h.instanceID = instanceID
 	h.roomRuntimeMode = roomRuntimeModeDistributed
@@ -927,13 +927,27 @@ func (h *WebSocketHandler) refreshActiveDeviceLeaseForClient(
 
 func (h *WebSocketHandler) recordMembershipTimeline(
 	ctx context.Context,
-	eventType string,
+	membershipType string,
 	roomID string,
 	userID string,
 	deviceID string,
 	payload any,
 ) {
-	_ = h.recordTimelineEvent(ctx, eventType, roomID, userID, deviceID, "", 0, payload)
+	if h == nil || h.timelineRecorder == nil || roomID == "" {
+		return
+	}
+	recordCtx, cancel := context.WithTimeout(contextOrBackground(ctx), 300*time.Millisecond)
+	defer cancel()
+	if _, err := h.timelineRecorder.RecordMembershipResult(recordCtx, timeline.MembershipResult{
+		RoomID:         roomID,
+		UserID:         userID,
+		DeviceID:       deviceID,
+		InstanceID:     h.instanceID,
+		MembershipType: membershipType,
+		Payload:        payload,
+	}); err != nil && h.debugSync {
+		log.Printf("timeline membership result write failed room=%s type=%s err=%v", roomID, membershipType, err)
+	}
 }
 
 func (h *WebSocketHandler) recordControlAccepted(
@@ -944,7 +958,7 @@ func (h *WebSocketHandler) recordControlAccepted(
 	seq int64,
 	envelope protocol.Envelope,
 ) error {
-	err := h.recordTimelineEvent(ctx, timeline.EventTypeControlAccepted, roomID, meta.UserID, meta.DeviceID, eventType, seq, envelope)
+	err := h.recordControlTimeline(ctx, true, eventType, roomID, meta, seq, envelope)
 	if err == nil {
 		h.recordControlMetric(eventType, "accepted")
 	}
@@ -959,52 +973,52 @@ func (h *WebSocketHandler) recordControlRejected(
 	reason string,
 ) {
 	h.recordControlMetric(eventType, "rejected")
-	_ = h.recordTimelineEvent(ctx, timeline.EventTypeControlRejected, roomID, meta.UserID, meta.DeviceID, eventType, meta.ClientSeq, map[string]any{
+	_ = h.recordControlTimeline(ctx, false, eventType, roomID, meta, meta.ClientSeq, map[string]any{
 		"type":      eventType,
 		"requestId": meta.RequestID,
 		"reason":    reason,
 	})
 }
 
-func (h *WebSocketHandler) recordTimelineEvent(
+func (h *WebSocketHandler) recordControlTimeline(
 	ctx context.Context,
-	eventType string,
-	roomID string,
-	userID string,
-	deviceID string,
+	accepted bool,
 	controlType string,
+	roomID string,
+	meta controlEventMeta,
 	seq int64,
 	payload any,
 ) error {
 	if h == nil || h.timelineRecorder == nil || roomID == "" {
 		return nil
 	}
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	data, err := json.Marshal(payload)
+	recordCtx, cancel := context.WithTimeout(contextOrBackground(ctx), 300*time.Millisecond)
+	defer cancel()
+	_, err := h.timelineRecorder.RecordControlResult(recordCtx, timeline.ControlResult{
+		RoomID:       roomID,
+		UserID:       meta.UserID,
+		DeviceID:     meta.DeviceID,
+		ConnectionID: meta.ConnectionID,
+		InstanceID:   h.instanceID,
+		ControlType:  controlType,
+		Seq:          seq,
+		Accepted:     accepted,
+		Payload:      payload,
+	})
 	if err != nil {
 		if h.debugSync {
-			log.Printf("timeline event payload marshal failed room=%s type=%s err=%v", roomID, eventType, err)
-		}
-		return err
-	}
-	event := timeline.NewEvent(eventType, roomID, h.clock.Now())
-	event.UserID = userID
-	event.DeviceID = deviceID
-	event.InstanceID = h.instanceID
-	event.ControlType = controlType
-	event.Seq = seq
-	event.Payload = data
-	recordCtx, cancel := context.WithTimeout(ctx, 300*time.Millisecond)
-	defer cancel()
-	if err := h.timelineRecorder.RecordTimelineEvent(recordCtx, event); err != nil {
-		if h.debugSync {
-			log.Printf("timeline outbox write failed room=%s type=%s err=%v", roomID, eventType, err)
+			log.Printf("timeline control result write failed room=%s type=%s accepted=%t err=%v", roomID, controlType, accepted, err)
 		}
 		return err
 	}
 	return nil
+}
+
+func contextOrBackground(ctx context.Context) context.Context {
+	if ctx == nil {
+		return context.Background()
+	}
+	return ctx
 }
 
 func (h *WebSocketHandler) handleRoomDeviceSwitchReply(

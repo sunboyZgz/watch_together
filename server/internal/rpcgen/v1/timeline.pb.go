@@ -117,6 +117,310 @@ func (x *RecordTimelineEventResponse) GetRecorded() bool {
 	return false
 }
 
+type RecordControlResultRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Metadata      *RequestMetadata       `protobuf:"bytes,1,opt,name=metadata,proto3" json:"metadata,omitempty"`
+	RoomId        string                 `protobuf:"bytes,2,opt,name=room_id,json=roomId,proto3" json:"room_id,omitempty"`
+	UserId        string                 `protobuf:"bytes,3,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	DeviceId      string                 `protobuf:"bytes,4,opt,name=device_id,json=deviceId,proto3" json:"device_id,omitempty"`
+	ConnectionId  string                 `protobuf:"bytes,5,opt,name=connection_id,json=connectionId,proto3" json:"connection_id,omitempty"`
+	InstanceId    string                 `protobuf:"bytes,6,opt,name=instance_id,json=instanceId,proto3" json:"instance_id,omitempty"`
+	ControlType   string                 `protobuf:"bytes,7,opt,name=control_type,json=controlType,proto3" json:"control_type,omitempty"`
+	Seq           int64                  `protobuf:"varint,8,opt,name=seq,proto3" json:"seq,omitempty"`
+	Accepted      bool                   `protobuf:"varint,9,opt,name=accepted,proto3" json:"accepted,omitempty"`
+	Payload       []byte                 `protobuf:"bytes,10,opt,name=payload,proto3" json:"payload,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RecordControlResultRequest) Reset() {
+	*x = RecordControlResultRequest{}
+	mi := &file_server_api_internal_v1_timeline_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RecordControlResultRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RecordControlResultRequest) ProtoMessage() {}
+
+func (x *RecordControlResultRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_server_api_internal_v1_timeline_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RecordControlResultRequest.ProtoReflect.Descriptor instead.
+func (*RecordControlResultRequest) Descriptor() ([]byte, []int) {
+	return file_server_api_internal_v1_timeline_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *RecordControlResultRequest) GetMetadata() *RequestMetadata {
+	if x != nil {
+		return x.Metadata
+	}
+	return nil
+}
+
+func (x *RecordControlResultRequest) GetRoomId() string {
+	if x != nil {
+		return x.RoomId
+	}
+	return ""
+}
+
+func (x *RecordControlResultRequest) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *RecordControlResultRequest) GetDeviceId() string {
+	if x != nil {
+		return x.DeviceId
+	}
+	return ""
+}
+
+func (x *RecordControlResultRequest) GetConnectionId() string {
+	if x != nil {
+		return x.ConnectionId
+	}
+	return ""
+}
+
+func (x *RecordControlResultRequest) GetInstanceId() string {
+	if x != nil {
+		return x.InstanceId
+	}
+	return ""
+}
+
+func (x *RecordControlResultRequest) GetControlType() string {
+	if x != nil {
+		return x.ControlType
+	}
+	return ""
+}
+
+func (x *RecordControlResultRequest) GetSeq() int64 {
+	if x != nil {
+		return x.Seq
+	}
+	return 0
+}
+
+func (x *RecordControlResultRequest) GetAccepted() bool {
+	if x != nil {
+		return x.Accepted
+	}
+	return false
+}
+
+func (x *RecordControlResultRequest) GetPayload() []byte {
+	if x != nil {
+		return x.Payload
+	}
+	return nil
+}
+
+type RecordControlResultResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Event         *TimelineEvent         `protobuf:"bytes,1,opt,name=event,proto3" json:"event,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RecordControlResultResponse) Reset() {
+	*x = RecordControlResultResponse{}
+	mi := &file_server_api_internal_v1_timeline_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RecordControlResultResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RecordControlResultResponse) ProtoMessage() {}
+
+func (x *RecordControlResultResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_server_api_internal_v1_timeline_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RecordControlResultResponse.ProtoReflect.Descriptor instead.
+func (*RecordControlResultResponse) Descriptor() ([]byte, []int) {
+	return file_server_api_internal_v1_timeline_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *RecordControlResultResponse) GetEvent() *TimelineEvent {
+	if x != nil {
+		return x.Event
+	}
+	return nil
+}
+
+type RecordMembershipResultRequest struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	Metadata       *RequestMetadata       `protobuf:"bytes,1,opt,name=metadata,proto3" json:"metadata,omitempty"`
+	RoomId         string                 `protobuf:"bytes,2,opt,name=room_id,json=roomId,proto3" json:"room_id,omitempty"`
+	UserId         string                 `protobuf:"bytes,3,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	DeviceId       string                 `protobuf:"bytes,4,opt,name=device_id,json=deviceId,proto3" json:"device_id,omitempty"`
+	ConnectionId   string                 `protobuf:"bytes,5,opt,name=connection_id,json=connectionId,proto3" json:"connection_id,omitempty"`
+	InstanceId     string                 `protobuf:"bytes,6,opt,name=instance_id,json=instanceId,proto3" json:"instance_id,omitempty"`
+	MembershipType string                 `protobuf:"bytes,7,opt,name=membership_type,json=membershipType,proto3" json:"membership_type,omitempty"`
+	Payload        []byte                 `protobuf:"bytes,8,opt,name=payload,proto3" json:"payload,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *RecordMembershipResultRequest) Reset() {
+	*x = RecordMembershipResultRequest{}
+	mi := &file_server_api_internal_v1_timeline_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RecordMembershipResultRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RecordMembershipResultRequest) ProtoMessage() {}
+
+func (x *RecordMembershipResultRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_server_api_internal_v1_timeline_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RecordMembershipResultRequest.ProtoReflect.Descriptor instead.
+func (*RecordMembershipResultRequest) Descriptor() ([]byte, []int) {
+	return file_server_api_internal_v1_timeline_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *RecordMembershipResultRequest) GetMetadata() *RequestMetadata {
+	if x != nil {
+		return x.Metadata
+	}
+	return nil
+}
+
+func (x *RecordMembershipResultRequest) GetRoomId() string {
+	if x != nil {
+		return x.RoomId
+	}
+	return ""
+}
+
+func (x *RecordMembershipResultRequest) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *RecordMembershipResultRequest) GetDeviceId() string {
+	if x != nil {
+		return x.DeviceId
+	}
+	return ""
+}
+
+func (x *RecordMembershipResultRequest) GetConnectionId() string {
+	if x != nil {
+		return x.ConnectionId
+	}
+	return ""
+}
+
+func (x *RecordMembershipResultRequest) GetInstanceId() string {
+	if x != nil {
+		return x.InstanceId
+	}
+	return ""
+}
+
+func (x *RecordMembershipResultRequest) GetMembershipType() string {
+	if x != nil {
+		return x.MembershipType
+	}
+	return ""
+}
+
+func (x *RecordMembershipResultRequest) GetPayload() []byte {
+	if x != nil {
+		return x.Payload
+	}
+	return nil
+}
+
+type RecordMembershipResultResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Event         *TimelineEvent         `protobuf:"bytes,1,opt,name=event,proto3" json:"event,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RecordMembershipResultResponse) Reset() {
+	*x = RecordMembershipResultResponse{}
+	mi := &file_server_api_internal_v1_timeline_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RecordMembershipResultResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RecordMembershipResultResponse) ProtoMessage() {}
+
+func (x *RecordMembershipResultResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_server_api_internal_v1_timeline_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RecordMembershipResultResponse.ProtoReflect.Descriptor instead.
+func (*RecordMembershipResultResponse) Descriptor() ([]byte, []int) {
+	return file_server_api_internal_v1_timeline_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *RecordMembershipResultResponse) GetEvent() *TimelineEvent {
+	if x != nil {
+		return x.Event
+	}
+	return nil
+}
+
 type ListRoomEventsRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Metadata      *RequestMetadata       `protobuf:"bytes,1,opt,name=metadata,proto3" json:"metadata,omitempty"`
@@ -127,7 +431,7 @@ type ListRoomEventsRequest struct {
 
 func (x *ListRoomEventsRequest) Reset() {
 	*x = ListRoomEventsRequest{}
-	mi := &file_server_api_internal_v1_timeline_proto_msgTypes[2]
+	mi := &file_server_api_internal_v1_timeline_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -139,7 +443,7 @@ func (x *ListRoomEventsRequest) String() string {
 func (*ListRoomEventsRequest) ProtoMessage() {}
 
 func (x *ListRoomEventsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_server_api_internal_v1_timeline_proto_msgTypes[2]
+	mi := &file_server_api_internal_v1_timeline_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -152,7 +456,7 @@ func (x *ListRoomEventsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListRoomEventsRequest.ProtoReflect.Descriptor instead.
 func (*ListRoomEventsRequest) Descriptor() ([]byte, []int) {
-	return file_server_api_internal_v1_timeline_proto_rawDescGZIP(), []int{2}
+	return file_server_api_internal_v1_timeline_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *ListRoomEventsRequest) GetMetadata() *RequestMetadata {
@@ -178,7 +482,7 @@ type ListRoomEventsResponse struct {
 
 func (x *ListRoomEventsResponse) Reset() {
 	*x = ListRoomEventsResponse{}
-	mi := &file_server_api_internal_v1_timeline_proto_msgTypes[3]
+	mi := &file_server_api_internal_v1_timeline_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -190,7 +494,7 @@ func (x *ListRoomEventsResponse) String() string {
 func (*ListRoomEventsResponse) ProtoMessage() {}
 
 func (x *ListRoomEventsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_server_api_internal_v1_timeline_proto_msgTypes[3]
+	mi := &file_server_api_internal_v1_timeline_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -203,7 +507,7 @@ func (x *ListRoomEventsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListRoomEventsResponse.ProtoReflect.Descriptor instead.
 func (*ListRoomEventsResponse) Descriptor() ([]byte, []int) {
-	return file_server_api_internal_v1_timeline_proto_rawDescGZIP(), []int{3}
+	return file_server_api_internal_v1_timeline_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *ListRoomEventsResponse) GetEvents() []*TimelineEvent {
@@ -223,7 +527,7 @@ type ListUnpublishedRoomEventsRequest struct {
 
 func (x *ListUnpublishedRoomEventsRequest) Reset() {
 	*x = ListUnpublishedRoomEventsRequest{}
-	mi := &file_server_api_internal_v1_timeline_proto_msgTypes[4]
+	mi := &file_server_api_internal_v1_timeline_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -235,7 +539,7 @@ func (x *ListUnpublishedRoomEventsRequest) String() string {
 func (*ListUnpublishedRoomEventsRequest) ProtoMessage() {}
 
 func (x *ListUnpublishedRoomEventsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_server_api_internal_v1_timeline_proto_msgTypes[4]
+	mi := &file_server_api_internal_v1_timeline_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -248,7 +552,7 @@ func (x *ListUnpublishedRoomEventsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListUnpublishedRoomEventsRequest.ProtoReflect.Descriptor instead.
 func (*ListUnpublishedRoomEventsRequest) Descriptor() ([]byte, []int) {
-	return file_server_api_internal_v1_timeline_proto_rawDescGZIP(), []int{4}
+	return file_server_api_internal_v1_timeline_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *ListUnpublishedRoomEventsRequest) GetMetadata() *RequestMetadata {
@@ -274,7 +578,7 @@ type ListUnpublishedRoomEventsResponse struct {
 
 func (x *ListUnpublishedRoomEventsResponse) Reset() {
 	*x = ListUnpublishedRoomEventsResponse{}
-	mi := &file_server_api_internal_v1_timeline_proto_msgTypes[5]
+	mi := &file_server_api_internal_v1_timeline_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -286,7 +590,7 @@ func (x *ListUnpublishedRoomEventsResponse) String() string {
 func (*ListUnpublishedRoomEventsResponse) ProtoMessage() {}
 
 func (x *ListUnpublishedRoomEventsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_server_api_internal_v1_timeline_proto_msgTypes[5]
+	mi := &file_server_api_internal_v1_timeline_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -299,10 +603,106 @@ func (x *ListUnpublishedRoomEventsResponse) ProtoReflect() protoreflect.Message 
 
 // Deprecated: Use ListUnpublishedRoomEventsResponse.ProtoReflect.Descriptor instead.
 func (*ListUnpublishedRoomEventsResponse) Descriptor() ([]byte, []int) {
-	return file_server_api_internal_v1_timeline_proto_rawDescGZIP(), []int{5}
+	return file_server_api_internal_v1_timeline_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *ListUnpublishedRoomEventsResponse) GetEvents() []*TimelineEvent {
+	if x != nil {
+		return x.Events
+	}
+	return nil
+}
+
+type ListRoomRecoveryEventsRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Metadata      *RequestMetadata       `protobuf:"bytes,1,opt,name=metadata,proto3" json:"metadata,omitempty"`
+	RoomId        string                 `protobuf:"bytes,2,opt,name=room_id,json=roomId,proto3" json:"room_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListRoomRecoveryEventsRequest) Reset() {
+	*x = ListRoomRecoveryEventsRequest{}
+	mi := &file_server_api_internal_v1_timeline_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListRoomRecoveryEventsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListRoomRecoveryEventsRequest) ProtoMessage() {}
+
+func (x *ListRoomRecoveryEventsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_server_api_internal_v1_timeline_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListRoomRecoveryEventsRequest.ProtoReflect.Descriptor instead.
+func (*ListRoomRecoveryEventsRequest) Descriptor() ([]byte, []int) {
+	return file_server_api_internal_v1_timeline_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *ListRoomRecoveryEventsRequest) GetMetadata() *RequestMetadata {
+	if x != nil {
+		return x.Metadata
+	}
+	return nil
+}
+
+func (x *ListRoomRecoveryEventsRequest) GetRoomId() string {
+	if x != nil {
+		return x.RoomId
+	}
+	return ""
+}
+
+type ListRoomRecoveryEventsResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Events        []*TimelineEvent       `protobuf:"bytes,1,rep,name=events,proto3" json:"events,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListRoomRecoveryEventsResponse) Reset() {
+	*x = ListRoomRecoveryEventsResponse{}
+	mi := &file_server_api_internal_v1_timeline_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListRoomRecoveryEventsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListRoomRecoveryEventsResponse) ProtoMessage() {}
+
+func (x *ListRoomRecoveryEventsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_server_api_internal_v1_timeline_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListRoomRecoveryEventsResponse.ProtoReflect.Descriptor instead.
+func (*ListRoomRecoveryEventsResponse) Descriptor() ([]byte, []int) {
+	return file_server_api_internal_v1_timeline_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *ListRoomRecoveryEventsResponse) GetEvents() []*TimelineEvent {
 	if x != nil {
 		return x.Events
 	}
@@ -329,7 +729,7 @@ type TimelineEvent struct {
 
 func (x *TimelineEvent) Reset() {
 	*x = TimelineEvent{}
-	mi := &file_server_api_internal_v1_timeline_proto_msgTypes[6]
+	mi := &file_server_api_internal_v1_timeline_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -341,7 +741,7 @@ func (x *TimelineEvent) String() string {
 func (*TimelineEvent) ProtoMessage() {}
 
 func (x *TimelineEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_server_api_internal_v1_timeline_proto_msgTypes[6]
+	mi := &file_server_api_internal_v1_timeline_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -354,7 +754,7 @@ func (x *TimelineEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TimelineEvent.ProtoReflect.Descriptor instead.
 func (*TimelineEvent) Descriptor() ([]byte, []int) {
-	return file_server_api_internal_v1_timeline_proto_rawDescGZIP(), []int{6}
+	return file_server_api_internal_v1_timeline_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *TimelineEvent) GetEventId() string {
@@ -450,7 +850,34 @@ const file_server_api_internal_v1_timeline_proto_rawDesc = "" +
 	"\bmetadata\x18\x01 \x01(\v2+.watch_together.internal.v1.RequestMetadataR\bmetadata\x12?\n" +
 	"\x05event\x18\x02 \x01(\v2).watch_together.internal.v1.TimelineEventR\x05event\"9\n" +
 	"\x1bRecordTimelineEventResponse\x12\x1a\n" +
-	"\brecorded\x18\x01 \x01(\bR\brecorded\"y\n" +
+	"\brecorded\x18\x01 \x01(\bR\brecorded\"\xe5\x02\n" +
+	"\x1aRecordControlResultRequest\x12G\n" +
+	"\bmetadata\x18\x01 \x01(\v2+.watch_together.internal.v1.RequestMetadataR\bmetadata\x12\x17\n" +
+	"\aroom_id\x18\x02 \x01(\tR\x06roomId\x12\x17\n" +
+	"\auser_id\x18\x03 \x01(\tR\x06userId\x12\x1b\n" +
+	"\tdevice_id\x18\x04 \x01(\tR\bdeviceId\x12#\n" +
+	"\rconnection_id\x18\x05 \x01(\tR\fconnectionId\x12\x1f\n" +
+	"\vinstance_id\x18\x06 \x01(\tR\n" +
+	"instanceId\x12!\n" +
+	"\fcontrol_type\x18\a \x01(\tR\vcontrolType\x12\x10\n" +
+	"\x03seq\x18\b \x01(\x03R\x03seq\x12\x1a\n" +
+	"\baccepted\x18\t \x01(\bR\baccepted\x12\x18\n" +
+	"\apayload\x18\n" +
+	" \x01(\fR\apayload\"^\n" +
+	"\x1bRecordControlResultResponse\x12?\n" +
+	"\x05event\x18\x01 \x01(\v2).watch_together.internal.v1.TimelineEventR\x05event\"\xc0\x02\n" +
+	"\x1dRecordMembershipResultRequest\x12G\n" +
+	"\bmetadata\x18\x01 \x01(\v2+.watch_together.internal.v1.RequestMetadataR\bmetadata\x12\x17\n" +
+	"\aroom_id\x18\x02 \x01(\tR\x06roomId\x12\x17\n" +
+	"\auser_id\x18\x03 \x01(\tR\x06userId\x12\x1b\n" +
+	"\tdevice_id\x18\x04 \x01(\tR\bdeviceId\x12#\n" +
+	"\rconnection_id\x18\x05 \x01(\tR\fconnectionId\x12\x1f\n" +
+	"\vinstance_id\x18\x06 \x01(\tR\n" +
+	"instanceId\x12'\n" +
+	"\x0fmembership_type\x18\a \x01(\tR\x0emembershipType\x12\x18\n" +
+	"\apayload\x18\b \x01(\fR\apayload\"a\n" +
+	"\x1eRecordMembershipResultResponse\x12?\n" +
+	"\x05event\x18\x01 \x01(\v2).watch_together.internal.v1.TimelineEventR\x05event\"y\n" +
 	"\x15ListRoomEventsRequest\x12G\n" +
 	"\bmetadata\x18\x01 \x01(\v2+.watch_together.internal.v1.RequestMetadataR\bmetadata\x12\x17\n" +
 	"\aroom_id\x18\x02 \x01(\tR\x06roomId\"[\n" +
@@ -460,6 +887,11 @@ const file_server_api_internal_v1_timeline_proto_rawDesc = "" +
 	"\bmetadata\x18\x01 \x01(\v2+.watch_together.internal.v1.RequestMetadataR\bmetadata\x12\x17\n" +
 	"\aroom_id\x18\x02 \x01(\tR\x06roomId\"f\n" +
 	"!ListUnpublishedRoomEventsResponse\x12A\n" +
+	"\x06events\x18\x01 \x03(\v2).watch_together.internal.v1.TimelineEventR\x06events\"\x81\x01\n" +
+	"\x1dListRoomRecoveryEventsRequest\x12G\n" +
+	"\bmetadata\x18\x01 \x01(\v2+.watch_together.internal.v1.RequestMetadataR\bmetadata\x12\x17\n" +
+	"\aroom_id\x18\x02 \x01(\tR\x06roomId\"c\n" +
+	"\x1eListRoomRecoveryEventsResponse\x12A\n" +
 	"\x06events\x18\x01 \x03(\v2).watch_together.internal.v1.TimelineEventR\x06events\"\xf8\x02\n" +
 	"\rTimelineEvent\x12\x19\n" +
 	"\bevent_id\x18\x01 \x01(\tR\aeventId\x12#\n" +
@@ -476,11 +908,14 @@ const file_server_api_internal_v1_timeline_proto_rawDesc = "" +
 	"\x03seq\x18\n" +
 	" \x01(\x03R\x03seq\x12$\n" +
 	"\x0eoccurred_at_ms\x18\v \x01(\x03R\foccurredAtMs\x12\x18\n" +
-	"\apayload\x18\f \x01(\fR\apayload2\xb6\x03\n" +
+	"\apayload\x18\f \x01(\fR\apayload2\xe3\x06\n" +
 	"\x17TimelineInternalService\x12\x86\x01\n" +
-	"\x13RecordTimelineEvent\x126.watch_together.internal.v1.RecordTimelineEventRequest\x1a7.watch_together.internal.v1.RecordTimelineEventResponse\x12w\n" +
+	"\x13RecordTimelineEvent\x126.watch_together.internal.v1.RecordTimelineEventRequest\x1a7.watch_together.internal.v1.RecordTimelineEventResponse\x12\x86\x01\n" +
+	"\x13RecordControlResult\x126.watch_together.internal.v1.RecordControlResultRequest\x1a7.watch_together.internal.v1.RecordControlResultResponse\x12\x8f\x01\n" +
+	"\x16RecordMembershipResult\x129.watch_together.internal.v1.RecordMembershipResultRequest\x1a:.watch_together.internal.v1.RecordMembershipResultResponse\x12w\n" +
 	"\x0eListRoomEvents\x121.watch_together.internal.v1.ListRoomEventsRequest\x1a2.watch_together.internal.v1.ListRoomEventsResponse\x12\x98\x01\n" +
-	"\x19ListUnpublishedRoomEvents\x12<.watch_together.internal.v1.ListUnpublishedRoomEventsRequest\x1a=.watch_together.internal.v1.ListUnpublishedRoomEventsResponseB5Z3watch_together/server/internal/rpcgen/v1;internalv1b\x06proto3"
+	"\x19ListUnpublishedRoomEvents\x12<.watch_together.internal.v1.ListUnpublishedRoomEventsRequest\x1a=.watch_together.internal.v1.ListUnpublishedRoomEventsResponse\x12\x8f\x01\n" +
+	"\x16ListRoomRecoveryEvents\x129.watch_together.internal.v1.ListRoomRecoveryEventsRequest\x1a:.watch_together.internal.v1.ListRoomRecoveryEventsResponseB5Z3watch_together/server/internal/rpcgen/v1;internalv1b\x06proto3"
 
 var (
 	file_server_api_internal_v1_timeline_proto_rawDescOnce sync.Once
@@ -494,35 +929,53 @@ func file_server_api_internal_v1_timeline_proto_rawDescGZIP() []byte {
 	return file_server_api_internal_v1_timeline_proto_rawDescData
 }
 
-var file_server_api_internal_v1_timeline_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
+var file_server_api_internal_v1_timeline_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
 var file_server_api_internal_v1_timeline_proto_goTypes = []any{
 	(*RecordTimelineEventRequest)(nil),        // 0: watch_together.internal.v1.RecordTimelineEventRequest
 	(*RecordTimelineEventResponse)(nil),       // 1: watch_together.internal.v1.RecordTimelineEventResponse
-	(*ListRoomEventsRequest)(nil),             // 2: watch_together.internal.v1.ListRoomEventsRequest
-	(*ListRoomEventsResponse)(nil),            // 3: watch_together.internal.v1.ListRoomEventsResponse
-	(*ListUnpublishedRoomEventsRequest)(nil),  // 4: watch_together.internal.v1.ListUnpublishedRoomEventsRequest
-	(*ListUnpublishedRoomEventsResponse)(nil), // 5: watch_together.internal.v1.ListUnpublishedRoomEventsResponse
-	(*TimelineEvent)(nil),                     // 6: watch_together.internal.v1.TimelineEvent
-	(*RequestMetadata)(nil),                   // 7: watch_together.internal.v1.RequestMetadata
+	(*RecordControlResultRequest)(nil),        // 2: watch_together.internal.v1.RecordControlResultRequest
+	(*RecordControlResultResponse)(nil),       // 3: watch_together.internal.v1.RecordControlResultResponse
+	(*RecordMembershipResultRequest)(nil),     // 4: watch_together.internal.v1.RecordMembershipResultRequest
+	(*RecordMembershipResultResponse)(nil),    // 5: watch_together.internal.v1.RecordMembershipResultResponse
+	(*ListRoomEventsRequest)(nil),             // 6: watch_together.internal.v1.ListRoomEventsRequest
+	(*ListRoomEventsResponse)(nil),            // 7: watch_together.internal.v1.ListRoomEventsResponse
+	(*ListUnpublishedRoomEventsRequest)(nil),  // 8: watch_together.internal.v1.ListUnpublishedRoomEventsRequest
+	(*ListUnpublishedRoomEventsResponse)(nil), // 9: watch_together.internal.v1.ListUnpublishedRoomEventsResponse
+	(*ListRoomRecoveryEventsRequest)(nil),     // 10: watch_together.internal.v1.ListRoomRecoveryEventsRequest
+	(*ListRoomRecoveryEventsResponse)(nil),    // 11: watch_together.internal.v1.ListRoomRecoveryEventsResponse
+	(*TimelineEvent)(nil),                     // 12: watch_together.internal.v1.TimelineEvent
+	(*RequestMetadata)(nil),                   // 13: watch_together.internal.v1.RequestMetadata
 }
 var file_server_api_internal_v1_timeline_proto_depIdxs = []int32{
-	7, // 0: watch_together.internal.v1.RecordTimelineEventRequest.metadata:type_name -> watch_together.internal.v1.RequestMetadata
-	6, // 1: watch_together.internal.v1.RecordTimelineEventRequest.event:type_name -> watch_together.internal.v1.TimelineEvent
-	7, // 2: watch_together.internal.v1.ListRoomEventsRequest.metadata:type_name -> watch_together.internal.v1.RequestMetadata
-	6, // 3: watch_together.internal.v1.ListRoomEventsResponse.events:type_name -> watch_together.internal.v1.TimelineEvent
-	7, // 4: watch_together.internal.v1.ListUnpublishedRoomEventsRequest.metadata:type_name -> watch_together.internal.v1.RequestMetadata
-	6, // 5: watch_together.internal.v1.ListUnpublishedRoomEventsResponse.events:type_name -> watch_together.internal.v1.TimelineEvent
-	0, // 6: watch_together.internal.v1.TimelineInternalService.RecordTimelineEvent:input_type -> watch_together.internal.v1.RecordTimelineEventRequest
-	2, // 7: watch_together.internal.v1.TimelineInternalService.ListRoomEvents:input_type -> watch_together.internal.v1.ListRoomEventsRequest
-	4, // 8: watch_together.internal.v1.TimelineInternalService.ListUnpublishedRoomEvents:input_type -> watch_together.internal.v1.ListUnpublishedRoomEventsRequest
-	1, // 9: watch_together.internal.v1.TimelineInternalService.RecordTimelineEvent:output_type -> watch_together.internal.v1.RecordTimelineEventResponse
-	3, // 10: watch_together.internal.v1.TimelineInternalService.ListRoomEvents:output_type -> watch_together.internal.v1.ListRoomEventsResponse
-	5, // 11: watch_together.internal.v1.TimelineInternalService.ListUnpublishedRoomEvents:output_type -> watch_together.internal.v1.ListUnpublishedRoomEventsResponse
-	9, // [9:12] is the sub-list for method output_type
-	6, // [6:9] is the sub-list for method input_type
-	6, // [6:6] is the sub-list for extension type_name
-	6, // [6:6] is the sub-list for extension extendee
-	0, // [0:6] is the sub-list for field type_name
+	13, // 0: watch_together.internal.v1.RecordTimelineEventRequest.metadata:type_name -> watch_together.internal.v1.RequestMetadata
+	12, // 1: watch_together.internal.v1.RecordTimelineEventRequest.event:type_name -> watch_together.internal.v1.TimelineEvent
+	13, // 2: watch_together.internal.v1.RecordControlResultRequest.metadata:type_name -> watch_together.internal.v1.RequestMetadata
+	12, // 3: watch_together.internal.v1.RecordControlResultResponse.event:type_name -> watch_together.internal.v1.TimelineEvent
+	13, // 4: watch_together.internal.v1.RecordMembershipResultRequest.metadata:type_name -> watch_together.internal.v1.RequestMetadata
+	12, // 5: watch_together.internal.v1.RecordMembershipResultResponse.event:type_name -> watch_together.internal.v1.TimelineEvent
+	13, // 6: watch_together.internal.v1.ListRoomEventsRequest.metadata:type_name -> watch_together.internal.v1.RequestMetadata
+	12, // 7: watch_together.internal.v1.ListRoomEventsResponse.events:type_name -> watch_together.internal.v1.TimelineEvent
+	13, // 8: watch_together.internal.v1.ListUnpublishedRoomEventsRequest.metadata:type_name -> watch_together.internal.v1.RequestMetadata
+	12, // 9: watch_together.internal.v1.ListUnpublishedRoomEventsResponse.events:type_name -> watch_together.internal.v1.TimelineEvent
+	13, // 10: watch_together.internal.v1.ListRoomRecoveryEventsRequest.metadata:type_name -> watch_together.internal.v1.RequestMetadata
+	12, // 11: watch_together.internal.v1.ListRoomRecoveryEventsResponse.events:type_name -> watch_together.internal.v1.TimelineEvent
+	0,  // 12: watch_together.internal.v1.TimelineInternalService.RecordTimelineEvent:input_type -> watch_together.internal.v1.RecordTimelineEventRequest
+	2,  // 13: watch_together.internal.v1.TimelineInternalService.RecordControlResult:input_type -> watch_together.internal.v1.RecordControlResultRequest
+	4,  // 14: watch_together.internal.v1.TimelineInternalService.RecordMembershipResult:input_type -> watch_together.internal.v1.RecordMembershipResultRequest
+	6,  // 15: watch_together.internal.v1.TimelineInternalService.ListRoomEvents:input_type -> watch_together.internal.v1.ListRoomEventsRequest
+	8,  // 16: watch_together.internal.v1.TimelineInternalService.ListUnpublishedRoomEvents:input_type -> watch_together.internal.v1.ListUnpublishedRoomEventsRequest
+	10, // 17: watch_together.internal.v1.TimelineInternalService.ListRoomRecoveryEvents:input_type -> watch_together.internal.v1.ListRoomRecoveryEventsRequest
+	1,  // 18: watch_together.internal.v1.TimelineInternalService.RecordTimelineEvent:output_type -> watch_together.internal.v1.RecordTimelineEventResponse
+	3,  // 19: watch_together.internal.v1.TimelineInternalService.RecordControlResult:output_type -> watch_together.internal.v1.RecordControlResultResponse
+	5,  // 20: watch_together.internal.v1.TimelineInternalService.RecordMembershipResult:output_type -> watch_together.internal.v1.RecordMembershipResultResponse
+	7,  // 21: watch_together.internal.v1.TimelineInternalService.ListRoomEvents:output_type -> watch_together.internal.v1.ListRoomEventsResponse
+	9,  // 22: watch_together.internal.v1.TimelineInternalService.ListUnpublishedRoomEvents:output_type -> watch_together.internal.v1.ListUnpublishedRoomEventsResponse
+	11, // 23: watch_together.internal.v1.TimelineInternalService.ListRoomRecoveryEvents:output_type -> watch_together.internal.v1.ListRoomRecoveryEventsResponse
+	18, // [18:24] is the sub-list for method output_type
+	12, // [12:18] is the sub-list for method input_type
+	12, // [12:12] is the sub-list for extension type_name
+	12, // [12:12] is the sub-list for extension extendee
+	0,  // [0:12] is the sub-list for field type_name
 }
 
 func init() { file_server_api_internal_v1_timeline_proto_init() }
@@ -537,7 +990,7 @@ func file_server_api_internal_v1_timeline_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_server_api_internal_v1_timeline_proto_rawDesc), len(file_server_api_internal_v1_timeline_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   7,
+			NumMessages:   13,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

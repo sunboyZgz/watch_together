@@ -78,6 +78,22 @@ func TestLoadServerRuntimeConfigLoadsTimelineDatabaseURL(t *testing.T) {
 	}
 }
 
+func TestLoadRoomserverRuntimeConfigRejectsTimelineDatabaseURLInRPCMode(t *testing.T) {
+	configDir := t.TempDir()
+	mustWriteConfigFile(
+		t,
+		filepath.Join(configDir, ".env"),
+		"TIMELINE_SERVICE_MODE=rpc\nTIMELINE_SERVICE_ADDR=http://timelineservice:8090\nTIMELINE_DATABASE_URL=postgres://timeline-db\n",
+	)
+
+	if _, err := LoadRoomserverRuntimeConfig(configDir); err == nil {
+		t.Fatalf("expected roomserver config to reject TIMELINE_DATABASE_URL in timeline rpc mode")
+	}
+	if _, err := LoadServerRuntimeConfig(configDir); err != nil {
+		t.Fatalf("expected generic service config to keep accepting timeline database url: %v", err)
+	}
+}
+
 func TestLoadServerRuntimeConfigDistributedAuthorityRequiresDependencies(t *testing.T) {
 	cases := []struct {
 		name    string
