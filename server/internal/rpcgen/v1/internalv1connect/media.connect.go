@@ -51,6 +51,9 @@ const (
 	// MediaInternalServiceValidatePlayableEpisodeProcedure is the fully-qualified name of the
 	// MediaInternalService's ValidatePlayableEpisode RPC.
 	MediaInternalServiceValidatePlayableEpisodeProcedure = "/watch_together.internal.v1.MediaInternalService/ValidatePlayableEpisode"
+	// MediaInternalServiceBatchGetEpisodeSummariesProcedure is the fully-qualified name of the
+	// MediaInternalService's BatchGetEpisodeSummaries RPC.
+	MediaInternalServiceBatchGetEpisodeSummariesProcedure = "/watch_together.internal.v1.MediaInternalService/BatchGetEpisodeSummaries"
 )
 
 // MediaInternalServiceClient is a client for the watch_together.internal.v1.MediaInternalService
@@ -62,6 +65,7 @@ type MediaInternalServiceClient interface {
 	AuthorizePlayback(context.Context, *connect.Request[v1.AuthorizePlaybackRequest]) (*connect.Response[v1.AuthorizePlaybackResponse], error)
 	GetEpisodeDetail(context.Context, *connect.Request[v1.GetEpisodeDetailRequest]) (*connect.Response[v1.GetEpisodeDetailResponse], error)
 	ValidatePlayableEpisode(context.Context, *connect.Request[v1.ValidatePlayableEpisodeRequest]) (*connect.Response[v1.ValidatePlayableEpisodeResponse], error)
+	BatchGetEpisodeSummaries(context.Context, *connect.Request[v1.BatchGetEpisodeSummariesRequest]) (*connect.Response[v1.BatchGetEpisodeSummariesResponse], error)
 }
 
 // NewMediaInternalServiceClient constructs a client for the
@@ -112,17 +116,24 @@ func NewMediaInternalServiceClient(httpClient connect.HTTPClient, baseURL string
 			connect.WithSchema(mediaInternalServiceMethods.ByName("ValidatePlayableEpisode")),
 			connect.WithClientOptions(opts...),
 		),
+		batchGetEpisodeSummaries: connect.NewClient[v1.BatchGetEpisodeSummariesRequest, v1.BatchGetEpisodeSummariesResponse](
+			httpClient,
+			baseURL+MediaInternalServiceBatchGetEpisodeSummariesProcedure,
+			connect.WithSchema(mediaInternalServiceMethods.ByName("BatchGetEpisodeSummaries")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
 // mediaInternalServiceClient implements MediaInternalServiceClient.
 type mediaInternalServiceClient struct {
-	listTags                *connect.Client[v1.ListTagsRequest, v1.ListTagsResponse]
-	searchItems             *connect.Client[v1.SearchItemsRequest, v1.SearchItemsResponse]
-	getPlaybackItem         *connect.Client[v1.GetPlaybackItemRequest, v1.GetPlaybackItemResponse]
-	authorizePlayback       *connect.Client[v1.AuthorizePlaybackRequest, v1.AuthorizePlaybackResponse]
-	getEpisodeDetail        *connect.Client[v1.GetEpisodeDetailRequest, v1.GetEpisodeDetailResponse]
-	validatePlayableEpisode *connect.Client[v1.ValidatePlayableEpisodeRequest, v1.ValidatePlayableEpisodeResponse]
+	listTags                 *connect.Client[v1.ListTagsRequest, v1.ListTagsResponse]
+	searchItems              *connect.Client[v1.SearchItemsRequest, v1.SearchItemsResponse]
+	getPlaybackItem          *connect.Client[v1.GetPlaybackItemRequest, v1.GetPlaybackItemResponse]
+	authorizePlayback        *connect.Client[v1.AuthorizePlaybackRequest, v1.AuthorizePlaybackResponse]
+	getEpisodeDetail         *connect.Client[v1.GetEpisodeDetailRequest, v1.GetEpisodeDetailResponse]
+	validatePlayableEpisode  *connect.Client[v1.ValidatePlayableEpisodeRequest, v1.ValidatePlayableEpisodeResponse]
+	batchGetEpisodeSummaries *connect.Client[v1.BatchGetEpisodeSummariesRequest, v1.BatchGetEpisodeSummariesResponse]
 }
 
 // ListTags calls watch_together.internal.v1.MediaInternalService.ListTags.
@@ -156,6 +167,12 @@ func (c *mediaInternalServiceClient) ValidatePlayableEpisode(ctx context.Context
 	return c.validatePlayableEpisode.CallUnary(ctx, req)
 }
 
+// BatchGetEpisodeSummaries calls
+// watch_together.internal.v1.MediaInternalService.BatchGetEpisodeSummaries.
+func (c *mediaInternalServiceClient) BatchGetEpisodeSummaries(ctx context.Context, req *connect.Request[v1.BatchGetEpisodeSummariesRequest]) (*connect.Response[v1.BatchGetEpisodeSummariesResponse], error) {
+	return c.batchGetEpisodeSummaries.CallUnary(ctx, req)
+}
+
 // MediaInternalServiceHandler is an implementation of the
 // watch_together.internal.v1.MediaInternalService service.
 type MediaInternalServiceHandler interface {
@@ -165,6 +182,7 @@ type MediaInternalServiceHandler interface {
 	AuthorizePlayback(context.Context, *connect.Request[v1.AuthorizePlaybackRequest]) (*connect.Response[v1.AuthorizePlaybackResponse], error)
 	GetEpisodeDetail(context.Context, *connect.Request[v1.GetEpisodeDetailRequest]) (*connect.Response[v1.GetEpisodeDetailResponse], error)
 	ValidatePlayableEpisode(context.Context, *connect.Request[v1.ValidatePlayableEpisodeRequest]) (*connect.Response[v1.ValidatePlayableEpisodeResponse], error)
+	BatchGetEpisodeSummaries(context.Context, *connect.Request[v1.BatchGetEpisodeSummariesRequest]) (*connect.Response[v1.BatchGetEpisodeSummariesResponse], error)
 }
 
 // NewMediaInternalServiceHandler builds an HTTP handler from the service implementation. It returns
@@ -210,6 +228,12 @@ func NewMediaInternalServiceHandler(svc MediaInternalServiceHandler, opts ...con
 		connect.WithSchema(mediaInternalServiceMethods.ByName("ValidatePlayableEpisode")),
 		connect.WithHandlerOptions(opts...),
 	)
+	mediaInternalServiceBatchGetEpisodeSummariesHandler := connect.NewUnaryHandler(
+		MediaInternalServiceBatchGetEpisodeSummariesProcedure,
+		svc.BatchGetEpisodeSummaries,
+		connect.WithSchema(mediaInternalServiceMethods.ByName("BatchGetEpisodeSummaries")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/watch_together.internal.v1.MediaInternalService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case MediaInternalServiceListTagsProcedure:
@@ -224,6 +248,8 @@ func NewMediaInternalServiceHandler(svc MediaInternalServiceHandler, opts ...con
 			mediaInternalServiceGetEpisodeDetailHandler.ServeHTTP(w, r)
 		case MediaInternalServiceValidatePlayableEpisodeProcedure:
 			mediaInternalServiceValidatePlayableEpisodeHandler.ServeHTTP(w, r)
+		case MediaInternalServiceBatchGetEpisodeSummariesProcedure:
+			mediaInternalServiceBatchGetEpisodeSummariesHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -255,4 +281,8 @@ func (UnimplementedMediaInternalServiceHandler) GetEpisodeDetail(context.Context
 
 func (UnimplementedMediaInternalServiceHandler) ValidatePlayableEpisode(context.Context, *connect.Request[v1.ValidatePlayableEpisodeRequest]) (*connect.Response[v1.ValidatePlayableEpisodeResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("watch_together.internal.v1.MediaInternalService.ValidatePlayableEpisode is not implemented"))
+}
+
+func (UnimplementedMediaInternalServiceHandler) BatchGetEpisodeSummaries(context.Context, *connect.Request[v1.BatchGetEpisodeSummariesRequest]) (*connect.Response[v1.BatchGetEpisodeSummariesResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("watch_together.internal.v1.MediaInternalService.BatchGetEpisodeSummaries is not implemented"))
 }

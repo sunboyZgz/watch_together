@@ -1,6 +1,8 @@
 # Data Model
 
-The durable schema is SQL-first and lives under `server/migrations/`. GORM models in `server/internal/model/models.go` mirror the active tables. Phase 8 still keeps one PostgreSQL database, but table ownership is now enforced by `server/internal/store/db_ownership.yaml` plus architecture tests; see [Database Ownership](./database-ownership.md) for the owner map and future split checklist.
+The durable schema is SQL-first. Main database migrations live under `server/migrations/`; Phase 9 media database migrations live under `server/media_migrations/`. GORM models in `server/internal/model/models.go` mirror the active tables. Table ownership is enforced by `server/internal/store/db_ownership.yaml` plus architecture tests; see [Database Ownership](./database-ownership.md) for the owner map and split checklist.
+
+When `MEDIA_DATABASE_URL` is empty, media tables continue to live in the main database for local fallback. When `MEDIA_DATABASE_URL` is set, media-owned tables are migrated and read from the independent media database. The old main-database media tables are kept as shadow/rollback data during the Phase 9 pilot.
 
 ## Primary Tables
 
@@ -102,7 +104,7 @@ Stores room business records:
 
 Current room statuses are handled as `active`, `grace_period`, and `destroyed`.
 
-Phase 8 keeps the PostgreSQL foreign key shape, but room create/join/detail no longer query media tables from `PostgresRoomStore`; media detail is loaded through the media port or `MediaInternalService`.
+Phase 9 removes the cross-database foreign key from `rooms.media_episode_id` to `media_episodes.id` in the main database. The column, indexes, and room behavior remain. Room create/join/detail do not query media tables from `PostgresRoomStore`; media detail is loaded through the media port or `MediaInternalService`.
 
 ### `room_members`
 
@@ -131,7 +133,7 @@ Stores low-frequency progress:
 
 This table supports the Android home page's last-watched and continue-watching data. It does not drive real-time room sync.
 
-Phase 8 keeps the PostgreSQL foreign key shape, but progress writes validate playable episodes through the media port before `PostgresProgressStore` writes this table.
+Phase 9 removes the cross-database foreign key from `user_media_progress.media_episode_id` to `media_episodes.id` in the main database. Progress writes validate playable episodes through the media port before `PostgresProgressStore` writes this table.
 
 ### `room_timeline_outbox`
 

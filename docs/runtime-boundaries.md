@@ -1,6 +1,6 @@
 # Runtime Boundaries
 
-This document records the runtime ownership boundaries for the room system. `local_process` remains the default runtime. Phase 4 adds a `distributed_authority` MVP for multi-instance room authority, Phase 5 adds fenced authority recovery from the Kafka canonical timeline, Phase 6 adds distributed seek rate limiting plus observability, Phase 7 adds service foundation boundaries with optional media/timeline RPC adapters and logical database ownership, and Phase 8 closes the media database access boundary for room/progress while making the RPC pilot verifiable.
+This document records the runtime ownership boundaries for the room system. `local_process` remains the default runtime. Phase 4 adds a `distributed_authority` MVP for multi-instance room authority, Phase 5 adds fenced authority recovery from the Kafka canonical timeline, Phase 6 adds distributed seek rate limiting plus observability, Phase 7 adds service foundation boundaries with optional media/timeline RPC adapters and logical database ownership, Phase 8 closes the media table access boundary for room/progress while making the RPC pilot verifiable, and Phase 9 adds an optional independent media database boundary through `MEDIA_DATABASE_URL`.
 
 ## Phase 1 Boundary Markers
 
@@ -43,9 +43,9 @@ X-Watch-Together-Room-Runtime: local_process
 | Service foundation metadata | `internal/servicekit` | Request id, service name/version, deadlines, internal auth, and trace metadata. |
 | Optional internal RPC | ConnectRPC helper layer | `media` and `timeline` can run through local adapters or optional RPC services using generated typed contracts. |
 | OpenTelemetry tracing | `internal/telemetry` | Optional traces across HTTP, WebSocket control, RPC, Redis, NATS, Kafka, and PostgreSQL. |
-| Logical database ownership | PostgreSQL + docs | Phase 7 assigns table owners but does not physically split the database. |
+| Database ownership | Main PostgreSQL database plus optional media PostgreSQL database | Phase 9 can place media-owned tables in a separate database inside the same PostgreSQL server/container. |
 | Room metadata and membership | PostgreSQL | Durable business state. |
-| Media metadata | PostgreSQL | Durable catalog state. |
+| Media metadata | Media PostgreSQL database or fallback main PostgreSQL database | Durable catalog state selected by `MEDIA_DATABASE_URL`. |
 | HLS files | Local/object storage via mediactl | Served through signed playback paths and Nginx/object storage depending on delivery mode. |
 
 ## Phase 2 Snapshot Boundary
@@ -175,13 +175,29 @@ OTEL_TRACE_SAMPLE_RATIO=0.1
 
 `MEDIA_SERVICE_MODE` and `TIMELINE_SERVICE_MODE` accept `local` or `rpc`. `local` keeps current in-process adapters. `rpc` calls optional `cmd/mediaservice` or `cmd/timelineservice` over ConnectRPC. Phase 8 uses generated typed ConnectRPC contracts from `server/api/internal/v1` into `server/internal/rpcgen/v1`; Android HTTP/WebSocket payloads are unchanged. Service discovery is static endpoint configuration in this phase; Consul, etcd, and Kubernetes service discovery integration are not required by the code.
 
-`room-session` now calls the media port for episode detail during create/join/detail bootstrap. `progress` calls the media port for playable episode validation before writing `user_media_progress`. `PostgresRoomStore` and `PostgresProgressStore` no longer read `media_episodes` or `media_seasons` directly; `home-composition` remains the documented SQL read model while PostgreSQL is a single database.
+`room-session` now calls the media port for episode detail during create/join/detail bootstrap. `progress` calls the media port for playable episode validation before writing `user_media_progress`. `PostgresRoomStore` and `PostgresProgressStore` no longer read `media_episodes` or `media_seasons` directly.
 
 Accepted distributed controls fail closed when the timeline recorder fails. A local outbox error, timeline RPC timeout, or timeline RPC unavailable response rolls back the in-memory authority state, avoids accepted idempotency finalization, and does not broadcast an accepted WebSocket envelope.
 
 OpenTelemetry tracing is opt-in. Trace metadata can cross internal RPC, NATS, and Kafka boundaries, but it is not exposed in Android HTTP/WebSocket payloads.
 
-Database ownership is logical only. PostgreSQL remains a single database, but table owners and cross-context access rules are documented in [Database Ownership](./database-ownership.md) and enforced from `server/internal/store/db_ownership.yaml`. Future physical database splitting must replace cross-context writes and reads with service calls, events, or read models first.
+Phase 8 database ownership is logical only. Table owners and cross-context access rules are documented in [Database Ownership](./database-ownership.md) and enforced from `server/internal/store/db_ownership.yaml`.
+
+## Phase 9 Media Database Boundary
+
+Phase 9 adds:
+
+```text
+MEDIA_DATABASE_URL=
+```
+
+When `MEDIA_DATABASE_URL` is empty, the media store continues to use the main `DATABASE_URL`. When it is set, local media mode opens a separate `media_postgres` connection and `cmd/mediaservice` prefers that database over the main database. In `MEDIA_SERVICE_MODE=rpc`, `roomserver` calls `cmd/mediaservice` and does not connect to the media database directly.
+
+Media schema migrations live in `server/media_migrations`. Main-database migrations live in `server/migrations`; Phase 9 drops the main database foreign keys from `rooms.media_episode_id` and `user_media_progress.media_episode_id` to media tables because those FKs cannot work across PostgreSQL databases.
+
+`home-composition` no longer directly reads media tables. `PostgresHomeStore` reads user and progress episode ids from the main database, and the home service fills titles and covers through `BatchGetEpisodeSummaries` on the media port/RPC. Missing media summaries are skipped to preserve the previous inner-join behavior.
+
+`cmd/mediadbsync` copies media-owned tables from the main database shadow tables to the media database and can run `--verify-only` row count and content hash checks.
 
 ## Multi-Instance Readiness After Phase 1
 
@@ -200,7 +216,7 @@ Still not complete:
 - Device-level presence management and full multi-device UI.
 - WebSocket connection migration between instances.
 - Kafka command-ingress logging.
-- Physical PostgreSQL splitting by service.
+- Splitting into separate PostgreSQL server/container deployments.
 - Extracting `room authority` to a standalone microservice.
 
 See [distributed-architecture.md](./distributed-architecture.md) for the current module map, business flows, and monitoring data flow.

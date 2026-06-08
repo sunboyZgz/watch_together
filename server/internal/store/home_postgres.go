@@ -72,15 +72,12 @@ func (s *PostgresHomeStore) findHomeUser(ctx context.Context, userID string) (ho
 func (s *PostgresHomeStore) findLastWatched(ctx context.Context, userID string) (*home.WatchProgressSummary, error) {
 	const query = `
 		SELECT
-			episode.id::text,
-			season.title,
-			COALESCE(episode.cover_url, season.cover_url),
+			progress.media_episode_id::text,
 			progress.last_position_seconds,
 			progress.duration_seconds
 		FROM user_media_progress AS progress
-		INNER JOIN media_episodes AS episode ON episode.id = progress.media_episode_id
-		INNER JOIN media_seasons AS season ON season.id = episode.season_id
 		WHERE progress.user_id = ?
+			AND progress.media_episode_id IS NOT NULL
 		ORDER BY progress.last_watched_at DESC
 		LIMIT 1
 	`
@@ -98,15 +95,12 @@ func (s *PostgresHomeStore) findLastWatched(ctx context.Context, userID string) 
 func (s *PostgresHomeStore) findContinueWatching(ctx context.Context, userID string, limit int) ([]home.WatchProgressSummary, error) {
 	const query = `
 		SELECT
-			episode.id::text,
-			season.title,
-			COALESCE(episode.cover_url, season.cover_url),
+			progress.media_episode_id::text,
 			progress.last_position_seconds,
 			progress.duration_seconds
 		FROM user_media_progress AS progress
-		INNER JOIN media_episodes AS episode ON episode.id = progress.media_episode_id
-		INNER JOIN media_seasons AS season ON season.id = episode.season_id
 		WHERE progress.user_id = ? AND progress.completed = false
+			AND progress.media_episode_id IS NOT NULL
 		ORDER BY progress.last_watched_at DESC
 		LIMIT ?
 	`
@@ -133,18 +127,12 @@ func (s *PostgresHomeStore) findContinueWatching(ctx context.Context, userID str
 
 func scanWatchProgress(row rowScanner) (home.WatchProgressSummary, error) {
 	var item home.WatchProgressSummary
-	var coverURL sql.NullString
 	if err := row.Scan(
 		&item.MediaItemID,
-		&item.Title,
-		&coverURL,
 		&item.LastPositionSeconds,
 		&item.DurationSeconds,
 	); err != nil {
 		return home.WatchProgressSummary{}, err
-	}
-	if coverURL.Valid {
-		item.CoverURL = &coverURL.String
 	}
 	return item, nil
 }

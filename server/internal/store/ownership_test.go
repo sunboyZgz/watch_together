@@ -61,7 +61,7 @@ func TestDatabaseOwnershipRegistryCoversCoreTables(t *testing.T) {
 	}
 }
 
-func TestDatabaseOwnershipDocumentReferencesRegistryAndNoPhysicalSplit(t *testing.T) {
+func TestDatabaseOwnershipDocumentReferencesRegistryAndMediaDatabaseBoundary(t *testing.T) {
 	content, err := os.ReadFile("../../../docs/database-ownership.md")
 	if err != nil {
 		t.Fatalf("read database ownership document: %v", err)
@@ -69,7 +69,8 @@ func TestDatabaseOwnershipDocumentReferencesRegistryAndNoPhysicalSplit(t *testin
 	text := string(content)
 	for _, expected := range []string{
 		"server/internal/store/db_ownership.yaml",
-		"No physical database split",
+		"MEDIA_DATABASE_URL",
+		"independent media database",
 		"home-composition",
 	} {
 		if !strings.Contains(text, expected) {
@@ -144,6 +145,32 @@ func TestMigrationCreatedTablesDeclareOwners(t *testing.T) {
 		for _, table := range createdTables(string(contentBytes)) {
 			if _, ok := registry.Tables[table]; !ok {
 				t.Fatalf("migration %s creates table %s without ownership registry entry", filepath.Base(file), table)
+			}
+		}
+	}
+}
+
+func TestMediaMigrationCreatedTablesDeclareMediaOwner(t *testing.T) {
+	registry := loadOwnershipRegistry(t)
+	files, err := filepath.Glob("../../media_migrations/*.up.sql")
+	if err != nil {
+		t.Fatalf("glob media migrations: %v", err)
+	}
+	if len(files) == 0 {
+		t.Fatalf("expected media migrations to exist")
+	}
+	for _, file := range files {
+		contentBytes, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatalf("read media migration %s: %v", file, err)
+		}
+		for _, table := range createdTables(string(contentBytes)) {
+			ownership, ok := registry.Tables[table]
+			if !ok {
+				t.Fatalf("media migration %s creates table %s without ownership registry entry", filepath.Base(file), table)
+			}
+			if ownership.Owner != "media" {
+				t.Fatalf("media migration %s creates table %s owned by %q, want media", filepath.Base(file), table, ownership.Owner)
 			}
 		}
 	}

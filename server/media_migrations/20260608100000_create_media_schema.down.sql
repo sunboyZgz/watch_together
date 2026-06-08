@@ -1,0 +1,20 @@
+DROP INDEX IF EXISTS idx_media_episode_variants_height;
+DROP INDEX IF EXISTS idx_media_episode_variants_episode_sort;
+DROP INDEX IF EXISTS idx_media_season_tags_media_tag_id;
+DROP INDEX IF EXISTS idx_media_episodes_source_hash;
+DROP INDEX IF EXISTS idx_media_episodes_status;
+DROP INDEX IF EXISTS uniq_media_episodes_season_episode_number;
+DROP INDEX IF EXISTS idx_media_episodes_season_sort;
+DROP INDEX IF EXISTS idx_media_seasons_search_aliases_gin;
+DROP INDEX IF EXISTS idx_media_seasons_production_team;
+DROP INDEX IF EXISTS idx_media_seasons_original_title;
+DROP INDEX IF EXISTS idx_media_seasons_category;
+DROP INDEX IF EXISTS idx_media_seasons_status_sort;
+DROP INDEX IF EXISTS idx_media_tags_featured_active_sort;
+DROP INDEX IF EXISTS idx_media_tags_active_sort;
+
+DROP TABLE IF EXISTS media_episode_variants;
+DROP TABLE IF EXISTS media_season_tags;
+DROP TABLE IF EXISTS media_episodes;
+DROP TABLE IF EXISTS media_seasons;
+DROP TABLE IF EXISTS media_tags;

@@ -16,6 +16,25 @@ services:
       timeout: 5s
       retries: 5
 
+  media-postgres-init:
+    profiles: ["services"]
+    image: postgres:16-alpine
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-watch_together}
+      PGPASSWORD: ${POSTGRES_PASSWORD:-change_me_postgres_password}
+      POSTGRES_DB: ${POSTGRES_DB:-watch_together_prod}
+      MEDIA_POSTGRES_DB: ${MEDIA_POSTGRES_DB:-watch_together_media_prod}
+    entrypoint: >
+      /bin/sh -c "
+      if ! psql -h postgres -U \"$${POSTGRES_USER}\" -d postgres -tAc \"SELECT 1 FROM pg_database WHERE datname = '$${MEDIA_POSTGRES_DB}'\" | grep -q 1; then
+        createdb -h postgres -U \"$${POSTGRES_USER}\" \"$${MEDIA_POSTGRES_DB}\";
+      fi;
+      "
+
   redis:
     image: redis:7.2-alpine
     restart: unless-stopped
@@ -135,6 +154,7 @@ services:
       SERVICE_DISCOVERY_MODE: ${SERVICE_DISCOVERY_MODE:-static}
       MEDIA_SERVICE_MODE: ${MEDIA_SERVICE_MODE:-local}
       MEDIA_SERVICE_ADDR: ${MEDIA_SERVICE_ADDR:-http://mediaservice:8090}
+      MEDIA_DATABASE_URL: ${MEDIA_DATABASE_URL:-}
       TIMELINE_SERVICE_MODE: ${TIMELINE_SERVICE_MODE:-local}
       TIMELINE_SERVICE_ADDR: ${TIMELINE_SERVICE_ADDR:-http://timelineservice:8090}
       OTEL_TRACING_ENABLED: ${OTEL_TRACING_ENABLED:-false}
@@ -211,6 +231,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      media-postgres-init:
+        condition: service_completed_successfully
       minio-init:
         condition: service_completed_successfully
     env_file:
@@ -226,6 +248,7 @@ services:
       METRICS_PATH: ${METRICS_PATH:-/metrics}
       READINESS_PATH: ${READINESS_PATH:-/readyz}
       DATABASE_URL: postgres://${POSTGRES_USER:-watch_together}:${POSTGRES_PASSWORD:-change_me_postgres_password}@postgres:5432/${POSTGRES_DB:-watch_together_prod}?sslmode=disable
+      MEDIA_DATABASE_URL: postgres://${POSTGRES_USER:-watch_together}:${POSTGRES_PASSWORD:-change_me_postgres_password}@postgres:5432/${MEDIA_POSTGRES_DB:-watch_together_media_prod}?sslmode=disable
       MEDIA_STORAGE_ENDPOINT: http://minio:9000
       MEDIA_STORAGE_BUCKET: ${MEDIA_STORAGE_BUCKET:-watch-together-media}
       MEDIA_STORAGE_REGION: ${MEDIA_STORAGE_REGION:-auto}

@@ -33,14 +33,15 @@ func main() {
 		runtimeConfig.WebSocket.EventBus,
 	)
 	server := app.NewServer(app.Config{
-		AppEnv:          runtimeConfig.AppEnv,
-		Host:            runtimeConfig.Host,
-		Port:            runtimeConfig.Port,
-		LogLevel:        runtimeConfig.LogLevel,
-		InstanceID:      runtimeConfig.InstanceID,
-		RoomRuntimeMode: runtimeConfig.RoomRuntimeMode,
-		DatabaseURL:     runtimeConfig.DatabaseURL,
-		DebugSync:       runtimeConfig.DebugSync,
+		AppEnv:           runtimeConfig.AppEnv,
+		Host:             runtimeConfig.Host,
+		Port:             runtimeConfig.Port,
+		LogLevel:         runtimeConfig.LogLevel,
+		InstanceID:       runtimeConfig.InstanceID,
+		RoomRuntimeMode:  runtimeConfig.RoomRuntimeMode,
+		DatabaseURL:      runtimeConfig.DatabaseURL,
+		MediaDatabaseURL: runtimeConfig.MediaDatabaseURL,
+		DebugSync:        runtimeConfig.DebugSync,
 		Auth: app.AuthTokenConfig{
 			JWTSecret:      runtimeConfig.Auth.JWTSecret,
 			AccessTokenTTL: time.Duration(runtimeConfig.Auth.AccessTokenTTLHours) * time.Hour,

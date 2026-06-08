@@ -60,6 +60,12 @@ type PlayableEpisode struct {
 	Playable bool
 }
 
+type EpisodeSummary struct {
+	ID       string
+	Title    string
+	CoverURL *string
+}
+
 type TagList struct {
 	FeaturedTags []Tag
 	AllTags      []Tag
@@ -84,6 +90,7 @@ type Store interface {
 	FindPlaybackItem(ctx context.Context, episodeID string) (PlaybackItem, error)
 	FindEpisodeDetail(ctx context.Context, episodeID string) (EpisodeDetail, error)
 	ValidatePlayableEpisode(ctx context.Context, episodeID string) (PlayableEpisode, error)
+	BatchFindEpisodeSummaries(ctx context.Context, episodeIDs []string) ([]EpisodeSummary, error)
 }
 
 type StoreSearchParams struct {
@@ -169,6 +176,26 @@ func (s *Service) ValidatePlayableEpisode(ctx context.Context, episodeID string)
 		return PlayableEpisode{}, ErrMediaNotFound
 	}
 	return episode, nil
+}
+
+func (s *Service) BatchGetEpisodeSummaries(ctx context.Context, episodeIDs []string) ([]EpisodeSummary, error) {
+	cleaned := make([]string, 0, len(episodeIDs))
+	seen := make(map[string]struct{}, len(episodeIDs))
+	for _, episodeID := range episodeIDs {
+		episodeID = strings.TrimSpace(episodeID)
+		if episodeID == "" {
+			continue
+		}
+		if _, ok := seen[episodeID]; ok {
+			continue
+		}
+		seen[episodeID] = struct{}{}
+		cleaned = append(cleaned, episodeID)
+	}
+	if len(cleaned) == 0 {
+		return nil, nil
+	}
+	return s.store.BatchFindEpisodeSummaries(ctx, cleaned)
 }
 
 func normalizeLimit(limit int) int {

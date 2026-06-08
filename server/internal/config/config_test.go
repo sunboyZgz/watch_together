@@ -51,6 +51,19 @@ func TestLoadServerRuntimeConfigAcceptsDistributedAuthorityWithDependencies(t *t
 	}
 }
 
+func TestLoadServerRuntimeConfigLoadsMediaDatabaseURL(t *testing.T) {
+	configDir := t.TempDir()
+	mustWriteConfigFile(t, filepath.Join(configDir, ".env"), "MEDIA_DATABASE_URL=postgres://media-db\n")
+
+	cfg, err := LoadServerRuntimeConfig(configDir)
+	if err != nil {
+		t.Fatalf("load runtime config: %v", err)
+	}
+	if cfg.MediaDatabaseURL != "postgres://media-db" {
+		t.Fatalf("expected media database url, got %q", cfg.MediaDatabaseURL)
+	}
+}
+
 func TestLoadServerRuntimeConfigDistributedAuthorityRequiresDependencies(t *testing.T) {
 	cases := []struct {
 		name    string

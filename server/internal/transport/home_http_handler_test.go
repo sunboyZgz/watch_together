@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"watch_together/server/internal/home"
@@ -110,6 +111,22 @@ func TestHomeSummaryRequiresDevAccessToken(t *testing.T) {
 
 	if recorder.Code != http.StatusUnauthorized {
 		t.Fatalf("expected status %d, got %d", http.StatusUnauthorized, recorder.Code)
+	}
+}
+
+func TestHomeSummaryReturnsServiceUnavailableWhenMediaBoundaryFails(t *testing.T) {
+	handler := NewHomeHTTPHandler(home.NewService(&fakeHomeStore{err: home.ErrMediaUnavailable}))
+	request := httptest.NewRequest(http.MethodGet, "/home/summary", nil)
+	request.Header.Set("Authorization", testAuthorizationHeader("user_001"))
+	recorder := httptest.NewRecorder()
+
+	handler.Summary(recorder, request)
+
+	if recorder.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected status %d, got %d", http.StatusServiceUnavailable, recorder.Code)
+	}
+	if !strings.Contains(recorder.Body.String(), "home service is unavailable") {
+		t.Fatalf("expected stable unavailable response, got %s", recorder.Body.String())
 	}
 }
 

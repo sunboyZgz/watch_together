@@ -21,6 +21,7 @@ type ServerRuntimeConfig struct {
 	InstanceID        string
 	RoomRuntimeMode   string
 	DatabaseURL       string
+	MediaDatabaseURL  string
 	DebugSync         bool
 	Auth              AuthConfig
 	Redis             RedisConfig
@@ -216,6 +217,7 @@ func LoadServerRuntimeConfig(configDir string) (ServerRuntimeConfig, error) {
 		"SERVER_INSTANCE_ID",
 		"ROOM_RUNTIME_MODE",
 		"DATABASE_URL",
+		"MEDIA_DATABASE_URL",
 		"DEBUG_SYNC",
 		"AUTH_JWT_SECRET",
 		"AUTH_ACCESS_TOKEN_TTL_HOURS",
@@ -301,14 +303,15 @@ func LoadServerRuntimeConfig(configDir string) (ServerRuntimeConfig, error) {
 	}
 
 	config := ServerRuntimeConfig{
-		AppEnv:          trimmedString(loader, "APP_ENV"),
-		Host:            trimmedString(loader, "SERVER_HOST"),
-		Port:            trimmedString(loader, "SERVER_PORT"),
-		LogLevel:        trimmedString(loader, "LOG_LEVEL"),
-		InstanceID:      trimmedString(loader, "SERVER_INSTANCE_ID"),
-		RoomRuntimeMode: roomRuntimeMode,
-		DatabaseURL:     trimmedString(loader, "DATABASE_URL"),
-		DebugSync:       strings.EqualFold(strings.TrimSpace(loader.GetString("DEBUG_SYNC")), "true"),
+		AppEnv:           trimmedString(loader, "APP_ENV"),
+		Host:             trimmedString(loader, "SERVER_HOST"),
+		Port:             trimmedString(loader, "SERVER_PORT"),
+		LogLevel:         trimmedString(loader, "LOG_LEVEL"),
+		InstanceID:       trimmedString(loader, "SERVER_INSTANCE_ID"),
+		RoomRuntimeMode:  roomRuntimeMode,
+		DatabaseURL:      trimmedString(loader, "DATABASE_URL"),
+		MediaDatabaseURL: trimmedString(loader, "MEDIA_DATABASE_URL"),
+		DebugSync:        strings.EqualFold(strings.TrimSpace(loader.GetString("DEBUG_SYNC")), "true"),
 		Auth: AuthConfig{
 			JWTSecret:           trimmedString(loader, "AUTH_JWT_SECRET"),
 			AccessTokenTTLHours: intFromConfig(loader, "AUTH_ACCESS_TOKEN_TTL_HOURS"),

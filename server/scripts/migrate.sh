@@ -4,7 +4,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SERVER_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
-MIGRATIONS_DIR="${SERVER_DIR}/migrations"
+MIGRATIONS_DIR="${MIGRATIONS_DIR:-${SERVER_DIR}/migrations}"
 
 if ! command -v migrate >/dev/null 2>&1; then
   echo "error: migrate CLI not found"

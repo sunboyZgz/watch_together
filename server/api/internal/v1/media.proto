@@ -13,6 +13,7 @@ service MediaInternalService {
   rpc AuthorizePlayback(AuthorizePlaybackRequest) returns (AuthorizePlaybackResponse);
   rpc GetEpisodeDetail(GetEpisodeDetailRequest) returns (GetEpisodeDetailResponse);
   rpc ValidatePlayableEpisode(ValidatePlayableEpisodeRequest) returns (ValidatePlayableEpisodeResponse);
+  rpc BatchGetEpisodeSummaries(BatchGetEpisodeSummariesRequest) returns (BatchGetEpisodeSummariesResponse);
 }
 
 message ListTagsRequest {
@@ -72,6 +73,15 @@ message ValidatePlayableEpisodeResponse {
   bool playable = 2;
 }
 
+message BatchGetEpisodeSummariesRequest {
+  RequestMetadata metadata = 1;
+  repeated string episode_ids = 2;
+}
+
+message BatchGetEpisodeSummariesResponse {
+  repeated EpisodeSummary episodes = 1;
+}
+
 message MediaTag {
   string id = 1;
   string slug = 2;
@@ -109,6 +119,12 @@ message EpisodeDetail {
   optional int64 duration_ms = 5;
   optional string season_label = 6;
   optional string episode_label = 7;
+}
+
+message EpisodeSummary {
+  string id = 1;
+  string title = 2;
+  optional string cover_url = 3;
 }
 
 message MediaSearchParams {

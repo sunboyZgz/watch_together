@@ -27,7 +27,8 @@ func TestRPCStoreMatchesLocalMediaStore(t *testing.T) {
 			Title:    "Episode 1",
 			MediaURL: "episode-1/hls/master.m3u8",
 		},
-		playable: PlayableEpisode{ID: "episode-1", Playable: true},
+		playable:  PlayableEpisode{ID: "episode-1", Playable: true},
+		summaries: []EpisodeSummary{{ID: "episode-1", Title: "Episode 1"}},
 	}
 	mux := http.NewServeMux()
 	RegisterInternalRPC(mux, "", "secret", NewService(localStore))
@@ -79,6 +80,13 @@ func TestRPCStoreMatchesLocalMediaStore(t *testing.T) {
 	}
 	if playable.ID != "episode-1" || !playable.Playable {
 		t.Fatalf("unexpected playable episode: %+v", playable)
+	}
+	summaries, err := rpcStore.BatchFindEpisodeSummaries(context.Background(), []string{"episode-1"})
+	if err != nil {
+		t.Fatalf("episode summaries through rpc: %v", err)
+	}
+	if len(summaries) != 1 || summaries[0].ID != "episode-1" || summaries[0].Title != "Episode 1" {
+		t.Fatalf("unexpected episode summaries: %+v", summaries)
 	}
 }
 
@@ -133,6 +141,7 @@ type fakeRPCMediaStore struct {
 	playbackErr error
 	detailErr   error
 	playableErr error
+	summaries   []EpisodeSummary
 }
 
 func (s fakeRPCMediaStore) ListTags(context.Context, int) (TagList, error) {
@@ -162,4 +171,8 @@ func (s fakeRPCMediaStore) ValidatePlayableEpisode(context.Context, string) (Pla
 		return PlayableEpisode{}, s.playableErr
 	}
 	return s.playable, nil
+}
+
+func (s fakeRPCMediaStore) BatchFindEpisodeSummaries(context.Context, []string) ([]EpisodeSummary, error) {
+	return s.summaries, nil
 }

@@ -1,6 +1,6 @@
 # Distributed Architecture
 
-Phase 4 introduced the distributed room infrastructure MVP while keeping the public HTTP API and playback control payloads small. `local_process` remains supported. `distributed_authority` adds Redis authority leases, Redis active-device ownership, NATS Core internal routing, PostgreSQL outbox, and Kafka timeline topics. Phase 5 adds authority recovery and hardening: expired authority leases can be fenced, recovered from Kafka canonical timeline events, completed as a new active authority epoch, resumed without moving WebSocket connections, protected by Redis `requestId` idempotency, and exposed through user-level Redis presence. Phase 6 adds distributed seek rate limiting and observability: seek throttling moves to Redis in `distributed_authority`, `/readyz` reports dependency readiness, and `/metrics` exposes Prometheus metrics. Phase 7 adds the service foundation: servicekit, internal ConnectRPC contracts, optional media/timeline service skeletons, OpenTelemetry tracing, static service discovery, and logical database ownership design. Phase 8 makes the service pilot verifiable: generated typed ConnectRPC contracts replace dynamic `Struct` RPC payloads for media/timeline, the optional RPC services can be run through a compose `rpc-pilot` profile, and database ownership is enforced by a machine-readable registry plus architecture tests.
+Phase 4 introduced the distributed room infrastructure MVP while keeping the public HTTP API and playback control payloads small. `local_process` remains supported. `distributed_authority` adds Redis authority leases, Redis active-device ownership, NATS Core internal routing, PostgreSQL outbox, and Kafka timeline topics. Phase 5 adds authority recovery and hardening: expired authority leases can be fenced, recovered from Kafka canonical timeline events, completed as a new active authority epoch, resumed without moving WebSocket connections, protected by Redis `requestId` idempotency, and exposed through user-level Redis presence. Phase 6 adds distributed seek rate limiting and observability: seek throttling moves to Redis in `distributed_authority`, `/readyz` reports dependency readiness, and `/metrics` exposes Prometheus metrics. Phase 7 adds the service foundation: servicekit, internal ConnectRPC contracts, optional media/timeline service skeletons, OpenTelemetry tracing, static service discovery, and logical database ownership design. Phase 8 makes the service pilot verifiable: generated typed ConnectRPC contracts replace dynamic `Struct` RPC payloads for media/timeline, the optional RPC services can be run through a compose `rpc-pilot` profile, and database ownership is enforced by a machine-readable registry plus architecture tests. Phase 9 turns `media` into the first database-boundary pilot: `MEDIA_DATABASE_URL` can point media code at an independent media database in the same PostgreSQL server/container, while empty config keeps the single-database fallback.
 
 ## Architecture Mode
 
@@ -32,7 +32,7 @@ Backend mode in `distributed_authority`:
 
 ## Service Evolution Architecture
 
-Phase 7 is not a full microservice split. Phase 8 keeps that constraint but hardens the pilot. The default deployment still runs `roomserver` with local adapters. `MEDIA_SERVICE_MODE=rpc` and `TIMELINE_SERVICE_MODE=rpc` switch selected boundaries to the optional internal services. The `.proto` files under `server/api/internal/v1` are the source contracts; generated Go code lives under `server/internal/rpcgen/v1`. Media RPC now covers tag/search/playback plus `GetEpisodeDetail` and `ValidatePlayableEpisode`, so room and progress code no longer read media tables directly.
+Phase 7 is not a full microservice split. Phase 8 keeps that constraint but hardens the pilot. Phase 9 adds a database-boundary pilot for media without changing Android HTTP/WebSocket payloads and without extracting `room authority`. The default deployment still runs `roomserver` with local adapters and a single database. `MEDIA_DATABASE_URL` enables a separate media database, and `MEDIA_SERVICE_MODE=rpc` lets `roomserver` call `cmd/mediaservice` without directly connecting to the media database. `MEDIA_SERVICE_MODE=local` still works and uses `MEDIA_DATABASE_URL` when it is configured. The `.proto` files under `server/api/internal/v1` are the source contracts; generated Go code lives under `server/internal/rpcgen/v1`.
 
 ```mermaid
 flowchart LR
@@ -46,7 +46,8 @@ flowchart LR
   TimelineRPC[timeline RPC adapter]
   MediaService[cmd/mediaservice]
   TimelineService[cmd/timelineservice]
-  PG[(single PostgreSQL)]
+  MainPG[(main PostgreSQL database)]
+  MediaPG[(media PostgreSQL database)]
   Kafka[(Kafka)]
   Redis[(Redis)]
   NATS[(NATS)]
@@ -60,10 +61,10 @@ flowchart LR
   TimelinePort -->|TIMELINE_SERVICE_MODE=rpc| TimelineRPC
   MediaRPC --> MediaService
   TimelineRPC --> TimelineService
-  MediaLocal --> PG
-  TimelineLocal --> PG
-  MediaService --> PG
-  TimelineService --> PG
+  MediaLocal -->|MEDIA_DATABASE_URL or DATABASE_URL| MediaPG
+  TimelineLocal --> MainPG
+  MediaService -->|MEDIA_DATABASE_URL fallback DATABASE_URL| MediaPG
+  TimelineService --> MainPG
   TimelineService --> Kafka
   Roomserver --> Redis
   Roomserver --> NATS
@@ -71,11 +72,12 @@ flowchart LR
 
 ## Database Ownership
 
-Phase 7 keeps one PostgreSQL database and introduces logical ownership boundaries. Phase 8 makes those boundaries testable. Table owners and cross-context access rules live in [Database Ownership](./database-ownership.md), with the CI source of truth in `server/internal/store/db_ownership.yaml`.
+Phase 7 keeps one PostgreSQL database and introduces logical ownership boundaries. Phase 8 makes those boundaries testable. Phase 9 gives `media` its own PostgreSQL database boundary when `MEDIA_DATABASE_URL` is configured. Table owners and cross-context access rules live in [Database Ownership](./database-ownership.md), with the CI source of truth in `server/internal/store/db_ownership.yaml`.
 
 ```mermaid
 flowchart TD
-  PG[(PostgreSQL)]
+  MainPG[(Main PostgreSQL database)]
+  MediaPG[(Media PostgreSQL database)]
   Identity[identity owns users]
   Media[media owns media tables]
   RoomSession[room-session owns rooms and room_members]
@@ -83,13 +85,13 @@ flowchart TD
   Timeline[timeline owns room_timeline_outbox]
   Home[home-composition owns no tables]
 
-  PG --> Identity
-  PG --> Media
-  PG --> RoomSession
-  PG --> Progress
-  PG --> Timeline
+  MainPG --> Identity
+  MediaPG --> Media
+  MainPG --> RoomSession
+  MainPG --> Progress
+  MainPG --> Timeline
   Home -->|read model/composition only| Identity
-  Home -->|read model/composition only| Media
+  Home -->|media port/RPC summaries| Media
   Home -->|read model/composition only| Progress
 ```
 
@@ -135,7 +137,8 @@ flowchart LR
   App[app assembly]
   Room[room.Manager]
   Redis[(Redis)]
-  PG[(PostgreSQL)]
+  PG[(Main PostgreSQL)]
+  MediaPG[(Media PostgreSQL)]
   NATS[(NATS Core)]
   Outbox[room_timeline_outbox]
   OutboxWorker[cmd/outboxworker]
@@ -156,6 +159,7 @@ flowchart LR
   App --> HTTP
   App --> WS
   HTTP -->|room metadata and membership| PG
+  HTTP -->|media port local mode| MediaPG
   HTTP -->|register local room mirror| Room
   HTTP -->|claim authority lease| Redis
   WS -->|local authoritative apply| Room
@@ -183,7 +187,7 @@ flowchart LR
   Metrics -->|scrape| Obs
   Servicekit -->|optional ConnectRPC| MediaSvc
   Servicekit -->|optional ConnectRPC| TimelineSvc
-  MediaSvc --> PG
+  MediaSvc --> MediaPG
   TimelineSvc --> PG
   TimelineSvc --> Kafka
   OTel -->|traces| App
@@ -202,7 +206,8 @@ flowchart LR
 | Control request idempotency | Redis `wt:room:control_request:{roomId}:{requestId}:v1` | Stores pending, accepted, and rejected request outcomes across instances. |
 | Distributed seek rate limit | Redis `wt:room:control_rate:{roomId}:seek:v1` | Enforces seek min interval across authority takeovers and forwarded controls. |
 | User-level presence | Redis `wt:room:presence:{roomId}:v1` | Runtime online occupancy by user; does not expose device, connection, or instance IDs. |
-| Durable room business state | PostgreSQL | Rooms, members, media, users, progress. |
+| Durable main business state | PostgreSQL | Users, rooms, members, progress, and timeline outbox. |
+| Media database boundary | `MEDIA_DATABASE_URL` PostgreSQL database | Optional Phase 9 database for media-owned tables; empty config falls back to the main database. |
 | Reliable Kafka compensation | PostgreSQL outbox | Pending canonical timeline events. |
 | Durable timeline | Kafka `wt.room.timeline.v1` | Accepted/rejected control and membership result log. |
 | Derived topics | Kafka | `wt.room.control_result.v1`, `wt.room.membership.v1`. |
@@ -211,7 +216,7 @@ flowchart LR
 | Monitoring | `observability` + Prometheus | `/healthz`, `/readyz`, `/metrics`, and worker metric hooks. |
 | Service metadata | `servicekit` | Request id, service name/version, deadline, internal auth, and trace metadata conventions. |
 | Internal RPC | ConnectRPC over HTTP | Optional media/timeline RPC adapters; Android protocol remains unchanged. |
-| Logical database ownership | PostgreSQL + docs | One database remains, but tables have context owners and cross-context access rules. |
+| Database ownership | PostgreSQL databases + docs | Main and optional media databases keep owner rules and cross-context access checks. |
 | Tracing | OpenTelemetry | Optional trace spans across HTTP, WebSocket control, Redis, NATS, Kafka, RPC, and PostgreSQL. |
 
 ## Control Flow
@@ -313,7 +318,7 @@ sequenceDiagram
 Create room:
 
 1. Android calls `POST /rooms`.
-2. Room service validates the selected episode through the media port, either local `PostgresMediaStore` or `MediaInternalService`.
+2. Room service validates the selected episode through the media port, either local `PostgresMediaStore` or `MediaInternalService`. In Phase 9 the local media store can use `MEDIA_DATABASE_URL`.
 3. HTTP service writes room and host membership to PostgreSQL.
 4. Runtime registers a local room mirror with media duration from the media port.
 5. In `distributed_authority`, current instance tries to claim Redis authority.
@@ -396,6 +401,13 @@ Progress:
 2. Progress service validates the episode through the media port before writing.
 3. `PostgresProgressStore` writes only `user_media_progress` and user existence checks; it does not query media tables directly.
 
+Home summary:
+
+1. Android calls `GET /home/summary`.
+2. `PostgresHomeStore` reads user profile and progress episode ids from the main database.
+3. Home service calls `BatchGetEpisodeSummaries` through the media port to fill title and cover.
+4. Missing media summaries are skipped, preserving the old inner-join behavior.
+
 Realtime fan-out:
 
 1. Accepted WebSocket envelopes publish to NATS Core broadcast subject.
@@ -433,13 +445,41 @@ Authority recovery:
 6. `room-session -> media` and `progress -> media` now cross through the media port in both local and RPC mode.
 7. `timeline` recorder failures, including RPC timeout or unavailable errors, are fail-closed for accepted controls.
 
-## Not Phase 8 Goals
+## Phase 9 Media Database Flow
+
+```mermaid
+flowchart LR
+  MainPG[(watch_together_main)]
+  MediaPG[(watch_together_media)]
+  MediaMigrations[server/media_migrations]
+  MainMigrations[server/migrations]
+  Sync[cmd/mediadbsync]
+  Roomserver[roomserver]
+  MediaService[mediaservice]
+  MediaPort[media port]
+  Home[home summary]
+
+  MainMigrations --> MainPG
+  MediaMigrations --> MediaPG
+  Sync -->|copy and verify media tables| MediaPG
+  MainPG -->|source shadow media rows| Sync
+  Roomserver --> MediaPort
+  MediaPort -->|local mode| MediaPG
+  MediaPort -->|rpc mode| MediaService
+  MediaService --> MediaPG
+  Home -->|progress ids from main DB| MainPG
+  Home -->|BatchGetEpisodeSummaries| MediaPort
+```
+
+`cmd/mediadbsync` copies `media_tags`, `media_seasons`, `media_episodes`, `media_season_tags`, and `media_episode_variants` with stable ids and timestamps. `--verify-only` checks row counts and deterministic content hashes.
+
+## Not Phase 9 Goals
 
 - Kafka is not the online broadcast final hop.
 - Kafka is not the command ingress log.
 - JetStream is not enabled.
 - Device-level presence management and full multi-device UI are not complete.
 - WebSocket connection objects never move between instances.
-- PostgreSQL is not physically split into per-service databases.
+- A second PostgreSQL server/container is not required; the pilot uses a second database inside the existing PostgreSQL server/container.
 - `room authority` is not extracted to a separate microservice.
 - Kratos, go-zero, and go-kit are not adopted as the main framework.

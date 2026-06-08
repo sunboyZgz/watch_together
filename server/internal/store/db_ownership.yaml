@@ -20,11 +20,11 @@ tables:
   media_seasons:
     owner: media
     writers: [media]
-    readers: [media, home-composition]
+    readers: [media]
   media_episodes:
     owner: media
     writers: [media]
-    readers: [media, home-composition]
+    readers: [media]
   media_episode_variants:
     owner: media
     writers: [media]
@@ -67,12 +67,6 @@ cross_context_access:
     access: read
     path: home_postgres.go
     reason: home profile summary read model
-  - caller: home-composition
-    owner: media
-    tables: [media_episodes, media_seasons]
-    access: read
-    path: home_postgres.go
-    reason: continue-watching media labels read model
   - caller: home-composition
     owner: progress
     tables: [user_media_progress]

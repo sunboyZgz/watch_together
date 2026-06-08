@@ -166,6 +166,30 @@ func (s *RPCStore) ValidatePlayableEpisode(ctx context.Context, episodeID string
 	}, nil
 }
 
+func (s *RPCStore) BatchFindEpisodeSummaries(ctx context.Context, episodeIDs []string) ([]EpisodeSummary, error) {
+	if s == nil || s.client == nil {
+		return nil, errors.New("media rpc client is unavailable")
+	}
+	request := connect.NewRequest(&internalv1.BatchGetEpisodeSummariesRequest{
+		EpisodeIds: episodeIDs,
+	})
+	ctx, cancel, requestID, span := internalrpc.PrepareClientRequest(
+		ctx,
+		s.config,
+		internalv1connect.MediaInternalServiceBatchGetEpisodeSummariesProcedure,
+		request.Header(),
+	)
+	defer cancel()
+	defer span.End()
+	request.Msg.Metadata = internalrpc.RequestMetadata(ctx, s.config.Service, requestID)
+
+	response, err := s.client.BatchGetEpisodeSummaries(ctx, request)
+	if err != nil {
+		return nil, err
+	}
+	return episodeSummariesFromProto(response.Msg.GetEpisodes()), nil
+}
+
 func (s *RPCStore) AuthorizePlayback(ctx context.Context, episodeID string, assetPath string) (bool, error) {
 	if s == nil || s.client == nil {
 		return false, errors.New("media rpc client is unavailable")
@@ -328,6 +352,29 @@ func (h *internalRPCHandler) ValidatePlayableEpisode(
 	return connect.NewResponse(&internalv1.ValidatePlayableEpisodeResponse{
 		EpisodeId: episode.ID,
 		Playable:  episode.Playable,
+	}), nil
+}
+
+func (h *internalRPCHandler) BatchGetEpisodeSummaries(
+	ctx context.Context,
+	request *connect.Request[internalv1.BatchGetEpisodeSummariesRequest],
+) (*connect.Response[internalv1.BatchGetEpisodeSummariesResponse], error) {
+	ctx, span, err := internalrpc.PrepareServerRequest(
+		ctx,
+		request.Header(),
+		h.authToken,
+		internalv1connect.MediaInternalServiceBatchGetEpisodeSummariesProcedure,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer span.End()
+	summaries, err := h.service.store.BatchFindEpisodeSummaries(ctx, request.Msg.GetEpisodeIds())
+	if err != nil {
+		return nil, internalrpc.ToConnectError(err)
+	}
+	return connect.NewResponse(&internalv1.BatchGetEpisodeSummariesResponse{
+		Episodes: episodeSummariesToProto(summaries),
 	}), nil
 }
 
@@ -532,6 +579,33 @@ func episodeDetailFromProto(detail *internalv1.EpisodeDetail) EpisodeDetail {
 		SeasonLabel:  cloneString(detail.SeasonLabel),
 		EpisodeLabel: cloneString(detail.EpisodeLabel),
 	}
+}
+
+func episodeSummariesToProto(summaries []EpisodeSummary) []*internalv1.EpisodeSummary {
+	out := make([]*internalv1.EpisodeSummary, 0, len(summaries))
+	for _, summary := range summaries {
+		out = append(out, &internalv1.EpisodeSummary{
+			Id:       summary.ID,
+			Title:    summary.Title,
+			CoverUrl: cloneString(summary.CoverURL),
+		})
+	}
+	return out
+}
+
+func episodeSummariesFromProto(summaries []*internalv1.EpisodeSummary) []EpisodeSummary {
+	out := make([]EpisodeSummary, 0, len(summaries))
+	for _, summary := range summaries {
+		if summary == nil {
+			continue
+		}
+		out = append(out, EpisodeSummary{
+			ID:       summary.GetId(),
+			Title:    summary.GetTitle(),
+			CoverURL: cloneString(summary.CoverUrl),
+		})
+	}
+	return out
 }
 
 func cloneString(value *string) *string {

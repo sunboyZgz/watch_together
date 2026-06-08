@@ -39,6 +39,7 @@ type Config struct {
 	InstanceID        string
 	RoomRuntimeMode   string
 	DatabaseURL       string
+	MediaDatabaseURL  string
 	DebugSync         bool
 	Auth              auth.TokenConfig
 	Redis             cache.RedisConfig
@@ -101,6 +102,7 @@ type Server struct {
 	roomManager       *room.Manager
 	redis             *cache.RedisClient
 	db                *gorm.DB
+	mediaDB           *gorm.DB
 	cancel            context.CancelFunc
 	eventBus          eventbus.RoomBroadcastBus
 	controlBus        eventbus.RoomControlBus
@@ -155,11 +157,15 @@ func NewServer(config Config) *Server {
 		controlRateRegistry = cache.NewControlRateRegistry(redisClient)
 		presenceRegistry = cache.NewPresenceRegistry(redisClient, config.WebSocket.PresenceLeaseTTL)
 	}
-	db := newPostgresDB(config.DatabaseURL)
+	db := newPostgresDB("postgres", config.DatabaseURL)
 	if distributedAuthority && db == nil {
 		log.Fatal("distributed_authority requires postgres")
 	}
-	mediaService := newMediaService(db, config, serviceConfig)
+	var mediaDB *gorm.DB
+	if !isRPCMode(config.ServiceClients.MediaMode) && strings.TrimSpace(config.MediaDatabaseURL) != "" {
+		mediaDB = newPostgresDB("media_postgres", config.MediaDatabaseURL)
+	}
+	mediaService := newMediaService(db, mediaDB, config, serviceConfig)
 	roomService, roomStore := newRoomService(db, mediaService)
 	var timelineRecorder timeline.Recorder = timeline.NoopRecorder{}
 	var timelineReader timeline.RoomEventReader
@@ -245,7 +251,7 @@ func NewServer(config Config) *Server {
 	roomBroadcastBus := newRoomBroadcastBus(config.WebSocket, config.NATS, distributedAuthority)
 	roomControlBus := newRoomControlBus(config.WebSocket, config.NATS, distributedAuthority)
 	authHTTPHandler := transport.NewAuthHTTPHandler(newAuthService(db, tokenManager))
-	homeHTTPHandler := transport.NewHomeHTTPHandlerWithTokenVerifier(newHomeService(db), tokenManager)
+	homeHTTPHandler := transport.NewHomeHTTPHandlerWithTokenVerifier(newHomeService(db, mediaService), tokenManager)
 	mediaHTTPHandler := transport.NewMediaHTTPHandlerWithTokenVerifier(mediaService, tokenManager, config.Media)
 	progressHTTPHandler := transport.NewProgressHTTPHandlerWithTokenVerifier(newProgressService(db, mediaService), tokenManager)
 	router := newGinRouter(
@@ -261,7 +267,7 @@ func NewServer(config Config) *Server {
 		mediaHTTPHandler,
 		progressHTTPHandler,
 		runtimeBoundaryFromConfig(config),
-		readinessSnapshotFromConfig(config, db, redisClient, roomBroadcastBus, roomControlBus, timelineOutboxStore, authorityRecovery),
+		readinessSnapshotFromConfig(config, db, mediaDB, redisClient, roomBroadcastBus, roomControlBus, timelineOutboxStore, authorityRecovery),
 		observabilityConfig,
 		metrics,
 		broadcastInstanceID,
@@ -287,6 +293,7 @@ func NewServer(config Config) *Server {
 		roomManager:       roomManager,
 		redis:             redisClient,
 		db:                db,
+		mediaDB:           mediaDB,
 		cancel:            cancel,
 		eventBus:          roomBroadcastBus,
 		controlBus:        roomControlBus,
@@ -325,6 +332,7 @@ func runtimeBoundaryFromConfig(config Config) runtimeBoundary {
 func readinessSnapshotFromConfig(
 	config Config,
 	db *gorm.DB,
+	mediaDB *gorm.DB,
 	redisClient *cache.RedisClient,
 	roomBroadcastBus eventbus.RoomBroadcastBus,
 	roomControlBus eventbus.RoomControlBus,
@@ -338,6 +346,7 @@ func readinessSnapshotFromConfig(
 		normalizeRoomRuntimeMode(config.RoomRuntimeMode),
 		[]observability.DependencyStatus{
 			dependencyStatus("postgres", db != nil, distributedAuthority || strings.TrimSpace(config.DatabaseURL) != ""),
+			dependencyStatus("media_postgres", mediaDB != nil, !isRPCMode(config.ServiceClients.MediaMode) && strings.TrimSpace(config.MediaDatabaseURL) != ""),
 			dependencyStatus("redis", redisClient != nil, distributedAuthority || config.Redis.Enabled()),
 			dependencyStatus("nats_broadcast", !isDisabledRoomBroadcastBus(roomBroadcastBus), distributedAuthority || config.WebSocket.CrossInstanceBroadcast),
 			dependencyStatus("nats_control", !isDisabledRoomControlBus(roomControlBus), distributedAuthority),
@@ -455,14 +464,14 @@ func newRedisClient(name string, config cache.RedisConfig) *cache.RedisClient {
 	return client
 }
 
-func newPostgresDB(databaseURL string) *gorm.DB {
+func newPostgresDB(name string, databaseURL string) *gorm.DB {
 	if strings.TrimSpace(databaseURL) == "" {
-		log.Print("DATABASE_URL is not set; database-backed endpoints will return service unavailable")
+		log.Printf("%s URL is not set; database-backed endpoints may return service unavailable", name)
 		return nil
 	}
 	db, err := store.OpenPostgres(context.Background(), databaseURL)
 	if err != nil {
-		log.Printf("failed to connect database; database-backed endpoints unavailable: %v", err)
+		log.Printf("failed to connect %s; database-backed endpoints unavailable: %v", name, err)
 		return nil
 	}
 	return db
@@ -579,15 +588,15 @@ func newAuthService(db *gorm.DB, tokenManager *auth.TokenManager) *auth.Service 
 }
 
 // newHomeService connects home summary reads to the shared PostgreSQL handle when available.
-func newHomeService(db *gorm.DB) *home.Service {
-	if db == nil {
+func newHomeService(db *gorm.DB, mediaService *media.Service) *home.Service {
+	if db == nil || mediaService == nil {
 		return nil
 	}
-	return home.NewService(store.NewPostgresHomeStore(db))
+	return home.NewServiceWithMediaSummaries(store.NewPostgresHomeStore(db), mediaService)
 }
 
 // newMediaService connects media catalog APIs to the shared PostgreSQL handle when available.
-func newMediaService(db *gorm.DB, config Config, service servicekit.Config) *media.Service {
+func newMediaService(db *gorm.DB, mediaDB *gorm.DB, config Config, service servicekit.Config) *media.Service {
 	if isRPCMode(config.ServiceClients.MediaMode) {
 		rpcStore := media.NewRPCStore(config.ServiceClients.MediaAddr, internalRPCClientConfig(config, service))
 		if rpcStore == nil {
@@ -595,10 +604,16 @@ func newMediaService(db *gorm.DB, config Config, service servicekit.Config) *med
 		}
 		return media.NewService(rpcStore)
 	}
-	if db == nil {
+	var storeDB *gorm.DB
+	if strings.TrimSpace(config.MediaDatabaseURL) != "" {
+		storeDB = mediaDB
+	} else {
+		storeDB = db
+	}
+	if storeDB == nil {
 		return nil
 	}
-	return media.NewService(store.NewPostgresMediaStore(db))
+	return media.NewService(store.NewPostgresMediaStore(storeDB))
 }
 
 // newRoomService connects room business APIs to the shared PostgreSQL handle when available.
@@ -786,6 +801,16 @@ func (s *Server) Close() error {
 	}
 	if s.db != nil {
 		sqlDB, err := s.db.DB()
+		if err != nil {
+			if closeErr == nil {
+				closeErr = err
+			}
+		} else if err := sqlDB.Close(); err != nil && closeErr == nil {
+			closeErr = err
+		}
+	}
+	if s.mediaDB != nil && s.mediaDB != s.db {
+		sqlDB, err := s.mediaDB.DB()
 		if err != nil {
 			if closeErr == nil {
 				closeErr = err

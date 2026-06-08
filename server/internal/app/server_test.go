@@ -12,7 +12,10 @@ import (
 	"watch_together/server/internal/eventbus"
 	"watch_together/server/internal/observability"
 	"watch_together/server/internal/room"
+	"watch_together/server/internal/servicekit"
 	"watch_together/server/internal/transport"
+
+	"gorm.io/gorm"
 )
 
 func TestGinRouterHealthz(t *testing.T) {
@@ -127,6 +130,107 @@ func TestGinRouterMetricsDisabled(t *testing.T) {
 	}
 }
 
+func TestReadinessSnapshotReportsMediaPostgresBoundary(t *testing.T) {
+	cases := []struct {
+		name       string
+		config     Config
+		mediaDB    *gorm.DB
+		wantStatus string
+		wantReq    bool
+	}{
+		{
+			name: "local media database missing",
+			config: Config{
+				AppEnv:           "test",
+				RoomRuntimeMode:  roomRuntimeModeLocalProcess,
+				MediaDatabaseURL: "postgres://media-db",
+				ServiceClients:   ServiceClientsConfig{MediaMode: "local"},
+			},
+			wantStatus: "unavailable",
+			wantReq:    true,
+		},
+		{
+			name: "local media database connected",
+			config: Config{
+				AppEnv:           "test",
+				RoomRuntimeMode:  roomRuntimeModeLocalProcess,
+				MediaDatabaseURL: "postgres://media-db",
+				ServiceClients:   ServiceClientsConfig{MediaMode: "local"},
+			},
+			mediaDB:    &gorm.DB{},
+			wantStatus: "ok",
+			wantReq:    true,
+		},
+		{
+			name: "rpc media mode does not require roomserver media database",
+			config: Config{
+				AppEnv:           "test",
+				RoomRuntimeMode:  roomRuntimeModeLocalProcess,
+				MediaDatabaseURL: "postgres://media-db",
+				ServiceClients: ServiceClientsConfig{
+					MediaMode: "rpc",
+					MediaAddr: "http://mediaservice:8090",
+				},
+			},
+			wantStatus: "disabled",
+			wantReq:    false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			snapshot := readinessSnapshotFromConfig(
+				tc.config,
+				nil,
+				tc.mediaDB,
+				nil,
+				eventbus.NewDisabledRoomBroadcastBus(),
+				eventbus.NewDisabledRoomControlBus(),
+				nil,
+				nil,
+			)
+
+			dependency, ok := dependencyByName(snapshot.Dependencies, "media_postgres")
+			if !ok {
+				t.Fatalf("expected media_postgres dependency in readiness snapshot")
+			}
+			if dependency.Status != tc.wantStatus || dependency.Required != tc.wantReq {
+				t.Fatalf("media_postgres = status %q required %t, want status %q required %t",
+					dependency.Status,
+					dependency.Required,
+					tc.wantStatus,
+					tc.wantReq,
+				)
+			}
+		})
+	}
+}
+
+func TestNewMediaServiceDoesNotFallbackWhenConfiguredMediaDatabaseIsUnavailable(t *testing.T) {
+	mainDB := &gorm.DB{}
+	service := newMediaService(
+		mainDB,
+		nil,
+		Config{
+			MediaDatabaseURL: "postgres://media-db",
+			ServiceClients:   ServiceClientsConfig{MediaMode: "local"},
+		},
+		servicekit.Config{},
+	)
+	if service != nil {
+		t.Fatalf("expected nil media service when MEDIA_DATABASE_URL is configured but media database is unavailable")
+	}
+
+	service = newMediaService(
+		mainDB,
+		nil,
+		Config{ServiceClients: ServiceClientsConfig{MediaMode: "local"}},
+		servicekit.Config{},
+	)
+	if service == nil {
+		t.Fatalf("expected main database fallback when MEDIA_DATABASE_URL is empty")
+	}
+}
+
 func TestGinRouterKeepsProgressWildcardRoute(t *testing.T) {
 	router := newTestGinRouter()
 	recorder := httptest.NewRecorder()
@@ -217,6 +321,15 @@ func newTestGinRouterWithRuntime(runtime runtimeBoundary) http.Handler {
 
 func testReadinessSnapshot(instanceID string, runtimeMode string) observability.ReadinessSnapshot {
 	return observability.NewReadinessSnapshot("test", instanceID, runtimeMode, nil)
+}
+
+func dependencyByName(dependencies []observability.DependencyStatus, name string) (observability.DependencyStatus, bool) {
+	for _, dependency := range dependencies {
+		if dependency.Name == name {
+			return dependency, true
+		}
+	}
+	return observability.DependencyStatus{}, false
 }
 
 type fakeAppJSONStore struct {

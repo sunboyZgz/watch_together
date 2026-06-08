@@ -104,6 +104,41 @@ func (s *PostgresMediaStore) ValidatePlayableEpisode(ctx context.Context, episod
 	return media.PlayableEpisode{ID: canonicalID, Playable: true}, nil
 }
 
+func (s *PostgresMediaStore) BatchFindEpisodeSummaries(ctx context.Context, episodeIDs []string) ([]media.EpisodeSummary, error) {
+	if len(episodeIDs) == 0 {
+		return nil, nil
+	}
+	const query = `
+		SELECT
+			episode.id::text,
+			season.title,
+			COALESCE(episode.cover_url, season.cover_url) AS cover_url
+		FROM media_episodes AS episode
+		INNER JOIN media_seasons AS season ON season.id = episode.season_id
+		WHERE episode.id IN ?
+	`
+	rows, err := s.db.WithContext(ctx).Raw(query, episodeIDs).Rows()
+	if err != nil {
+		return nil, fmt.Errorf("batch find episode summaries: %w", err)
+	}
+	defer rows.Close()
+
+	summaries := make([]media.EpisodeSummary, 0, len(episodeIDs))
+	for rows.Next() {
+		var summary media.EpisodeSummary
+		var coverURL sql.NullString
+		if err := rows.Scan(&summary.ID, &summary.Title, &coverURL); err != nil {
+			return nil, fmt.Errorf("scan episode summary: %w", err)
+		}
+		summary.CoverURL = nullableStringPtr(coverURL)
+		summaries = append(summaries, summary)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate episode summaries: %w", err)
+	}
+	return summaries, nil
+}
+
 // NewPostgresMediaStore creates the PostgreSQL-backed repository for media catalog data.
 func NewPostgresMediaStore(db *gorm.DB) *PostgresMediaStore {
 	return &PostgresMediaStore{db: db}

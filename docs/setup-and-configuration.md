@@ -29,6 +29,17 @@ make migration-up
 
 The migration tooling expects `DATABASE_URL` to point at the target database.
 
+Phase 9 can run media-owned tables in an independent media database. The default local fallback leaves `MEDIA_DATABASE_URL` empty and keeps media tables in `DATABASE_URL`. To use the media database pilot in the local compose stack:
+
+```bash
+cd server
+docker compose --profile services up -d postgres media-postgres-init
+MEDIA_DATABASE_URL=postgres://app:app@127.0.0.1:5432/anime_watch_media_dev?sslmode=disable make media-migration-up
+MEDIA_DATABASE_URL=postgres://app:app@127.0.0.1:5432/anime_watch_media_dev?sslmode=disable go run ./cmd/mediadbsync
+```
+
+`media-postgres-init` creates `anime_watch_media_dev` inside the same local PostgreSQL container. It does not start a second PostgreSQL server.
+
 ## Server Configuration Loading
 
 Both `roomserver` and `mediactl` load configuration from `server/` in this order:
@@ -61,6 +72,7 @@ LOG_LEVEL=debug
 SERVER_INSTANCE_ID=
 ROOM_RUNTIME_MODE=local_process
 DATABASE_URL=postgres://app:app@127.0.0.1:5432/anime_watch_dev?sslmode=disable
+MEDIA_DATABASE_URL=
 DEBUG_SYNC=true
 AUTH_JWT_SECRET=<secret>
 AUTH_ACCESS_TOKEN_TTL_HOURS=24
@@ -134,7 +146,7 @@ MEDIA_STORAGE_FORCE_PATH_STYLE=true
 
 `ROOM_RUNTIME_MODE` supports `local_process` and `distributed_authority`. `local_process` keeps active room playback authority, WebSocket connection tables, control deduplication, and seek rate limiting in one Go process. `distributed_authority` requires `SERVER_INSTANCE_ID`, PostgreSQL, Redis, NATS, Kafka broker config, and `WS_CROSS_INSTANCE_BROADCAST_ENABLED=true`.
 
-If `DATABASE_URL` is empty or PostgreSQL cannot be opened, database-backed HTTP endpoints return `503`. If `REDIS_ADDR` is empty, the Redis-backed room state cache is disabled.
+If `DATABASE_URL` is empty or PostgreSQL cannot be opened, database-backed HTTP endpoints return `503`. If `MEDIA_DATABASE_URL` is set, local media mode and `cmd/mediaservice` use it for media-owned tables and `/readyz` reports that dependency as `media_postgres`; if it is empty, media uses the main `DATABASE_URL`. In `MEDIA_SERVICE_MODE=rpc`, `roomserver` does not connect to the media database directly. If `REDIS_ADDR` is empty, the Redis-backed room state cache is disabled.
 
 `WS_CROSS_INSTANCE_BROADCAST_ENABLED` controls Phase 3 cross-instance WebSocket fan-out. It defaults to `false`. When set to `true`, `WS_EVENT_BUS` currently accepts only `nats_core`, and `roomserver` publishes local WebSocket broadcast envelopes to `NATS_SUBJECT_ROOM_BROADCAST`.
 
@@ -179,10 +191,10 @@ Service foundation settings:
 
 - `SERVICE_NAME` and `SERVICE_VERSION` identify the current process in logs, internal RPC metadata, and traces.
 - `INTERNAL_RPC_*` configures optional ConnectRPC service endpoints. `INTERNAL_RPC_AUTH_TOKEN` protects internal calls when configured and is required for production internal RPC.
-- `SERVICE_DISCOVERY_MODE=static` is the only supported discovery mode in Phase 7 and Phase 8.
+- `SERVICE_DISCOVERY_MODE=static` is the only supported discovery mode in Phase 7 through Phase 9.
 - `MEDIA_SERVICE_MODE` and `TIMELINE_SERVICE_MODE` accept `local` or `rpc`. `local` keeps current in-process adapters. `rpc` calls `MEDIA_SERVICE_ADDR` or `TIMELINE_SERVICE_ADDR`.
 - `OTEL_TRACING_ENABLED` turns on OpenTelemetry tracing. `OTEL_EXPORTER_OTLP_ENDPOINT` points at the internal OTLP collector, and `OTEL_TRACE_SAMPLE_RATIO` must be between `0` and `1`.
-- Phase 8 keeps one PostgreSQL database. Table owners and future split rules are documented in [Database Ownership](./database-ownership.md) and enforced from `server/internal/store/db_ownership.yaml`.
+- Phase 9 keeps the old single-database fallback but can put media-owned tables in an independent PostgreSQL database through `MEDIA_DATABASE_URL`. Table owners and future split rules are documented in [Database Ownership](./database-ownership.md) and enforced from `server/internal/store/db_ownership.yaml`.
 
 See [distributed-architecture.md](./distributed-architecture.md) for the current module map, business flows, and monitoring data flow.
 
@@ -213,6 +225,24 @@ cd server
 
 The script runs `buf lint`, `buf generate`, checks generated code for drift, runs focused Go targets, runs `go test ./...`, and finishes with `git diff --check`.
 
+Run the Phase 9 verification loop on Windows:
+
+```powershell
+cd server
+.\scripts\verify_phase9.ps1
+```
+
+Media database sync:
+
+```bash
+cd server
+go run ./cmd/mediadbsync --dry-run
+go run ./cmd/mediadbsync --verify-only
+go run ./cmd/mediadbsync --batch-size 200
+```
+
+The command reads from `DATABASE_URL` by default and writes/verifies `MEDIA_DATABASE_URL`. It syncs `media_tags`, `media_seasons`, `media_episodes`, `media_season_tags`, and `media_episode_variants` in dependency order using upsert.
+
 Run the optional RPC pilot stack through compose:
 
 ```bash
@@ -224,7 +254,7 @@ OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4318 \
 docker compose --profile rpc-pilot up -d --build
 ```
 
-`rpc-pilot` starts `roomserver`, `mediaservice`, `timelineservice`, and an OTLP collector. The default stack remains local-adapter mode unless `MEDIA_SERVICE_MODE=rpc` or `TIMELINE_SERVICE_MODE=rpc` is explicitly set.
+`rpc-pilot` starts `roomserver`, `mediaservice`, `timelineservice`, an OTLP collector, and the media database init job. `mediaservice` uses `MEDIA_DATABASE_URL=postgres://app:app@postgres:5432/anime_watch_media_dev?sslmode=disable` in compose. The default stack remains local-adapter mode unless `MEDIA_SERVICE_MODE=rpc` or `TIMELINE_SERVICE_MODE=rpc` is explicitly set.
 
 RPC pilot smoke checks:
 

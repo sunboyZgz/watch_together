@@ -28,8 +28,9 @@ func main() {
 		fmt.Fprintf(os.Stderr, "load server config: %v\n", err)
 		os.Exit(1)
 	}
-	if strings.TrimSpace(runtimeConfig.DatabaseURL) == "" {
-		fmt.Fprintln(os.Stderr, "DATABASE_URL is required for mediaservice")
+	databaseURL := mediaDatabaseURL(runtimeConfig)
+	if strings.TrimSpace(databaseURL) == "" {
+		fmt.Fprintln(os.Stderr, "MEDIA_DATABASE_URL or DATABASE_URL is required for mediaservice")
 		os.Exit(1)
 	}
 	if strings.EqualFold(strings.TrimSpace(runtimeConfig.AppEnv), "prod") &&
@@ -61,7 +62,7 @@ func main() {
 		_ = telemetry.Shutdown(shutdownCtx, shutdownTelemetry)
 	}()
 
-	db, err := store.OpenPostgres(ctx, runtimeConfig.DatabaseURL)
+	db, err := store.OpenPostgres(ctx, databaseURL)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "connect postgres: %v\n", err)
 		os.Exit(1)
@@ -164,7 +165,7 @@ func postgresDependency(ctx context.Context, sqlDB *sql.DB) observability.Depend
 			status = "ok"
 		}
 	}
-	return observability.DependencyStatus{Name: "postgres", Status: status, Required: true}
+	return observability.DependencyStatus{Name: "media_postgres", Status: status, Required: true}
 }
 
 func serviceName(configured string, fallback string) string {
@@ -172,4 +173,11 @@ func serviceName(configured string, fallback string) string {
 		return configured
 	}
 	return fallback
+}
+
+func mediaDatabaseURL(config wtconfig.ServerRuntimeConfig) string {
+	if strings.TrimSpace(config.MediaDatabaseURL) != "" {
+		return strings.TrimSpace(config.MediaDatabaseURL)
+	}
+	return strings.TrimSpace(config.DatabaseURL)
 }

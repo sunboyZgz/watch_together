@@ -485,6 +485,23 @@ func (s *fakeMediaStore) ValidatePlayableEpisode(_ context.Context, episodeID st
 	return media.PlayableEpisode{}, media.ErrMediaNotFound
 }
 
+func (s *fakeMediaStore) BatchFindEpisodeSummaries(_ context.Context, episodeIDs []string) ([]media.EpisodeSummary, error) {
+	summaries := make([]media.EpisodeSummary, 0, len(episodeIDs))
+	for _, episodeID := range episodeIDs {
+		for _, item := range s.items {
+			if item.ID == episodeID {
+				summaries = append(summaries, media.EpisodeSummary{
+					ID:       item.ID,
+					Title:    item.Title,
+					CoverURL: item.CoverURL,
+				})
+				break
+			}
+		}
+	}
+	return summaries, nil
+}
+
 type fakeObjectStore struct {
 	objects map[string]string
 }

@@ -85,6 +85,8 @@ func (h *HomeHTTPHandler) writeHomeError(w http.ResponseWriter, err error) {
 		writeAPIError(w, http.StatusUnauthorized, "UNAUTHORIZED", "missing or invalid access token", nil)
 	case errors.Is(err, home.ErrUserNotFound):
 		writeAPIError(w, http.StatusUnauthorized, "UNAUTHORIZED", "user not found", nil)
+	case errors.Is(err, home.ErrMediaUnavailable):
+		writeAPIError(w, http.StatusServiceUnavailable, "INTERNAL_ERROR", "home service is unavailable", nil)
 	default:
 		writeAPIError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "home summary request failed", nil)
 	}
