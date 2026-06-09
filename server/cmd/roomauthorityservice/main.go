@@ -180,8 +180,8 @@ func main() {
 
 	metrics := observability.NewMetrics()
 	mux := http.NewServeMux()
-	installServiceEndpoints(mux, runtimeConfig, serviceConfig, metrics, sqlDB)
-	authority.RegisterInternalRPC(
+	installServiceEndpoints(mux, runtimeConfig, serviceConfig, metrics, sqlDB, redisClient, broadcastBus)
+	authority.RegisterInternalRPCWithObserver(
 		mux,
 		runtimeConfig.InternalRPC.PathPrefix,
 		runtimeConfig.InternalRPC.AuthToken,
@@ -196,6 +196,7 @@ func main() {
 			authority:      authorityRegistry,
 			recoverer:      recoveryService,
 		},
+		metrics,
 	)
 
 	addr := strings.TrimSpace(runtimeConfig.InternalRPC.Addr)
@@ -302,6 +303,8 @@ func installServiceEndpoints(
 	service servicekit.Config,
 	metrics *observability.Metrics,
 	sqlDB *sql.DB,
+	redisClient redisPinger,
+	natsBus natsStatus,
 ) {
 	metricsPath := strings.TrimSpace(config.Observability.MetricsPath)
 	if metricsPath == "" {
@@ -317,7 +320,7 @@ func installServiceEndpoints(
 		_, _ = w.Write([]byte("ok"))
 	})
 	mux.HandleFunc(readinessPath, func(w http.ResponseWriter, r *http.Request) {
-		readiness := roomauthorityReadiness(r.Context(), config, sqlDB)
+		readiness := roomauthorityReadiness(r.Context(), config, sqlDB, redisClient, natsBus)
 		status := http.StatusOK
 		if readiness.Status != "ready" {
 			status = http.StatusServiceUnavailable
@@ -335,6 +338,8 @@ func roomauthorityReadiness(
 	ctx context.Context,
 	config wtconfig.ServerRuntimeConfig,
 	sqlDB *sql.DB,
+	redisClient redisPinger,
+	natsBus natsStatus,
 ) observability.ReadinessSnapshot {
 	return observability.NewReadinessSnapshot(
 		config.AppEnv,
@@ -342,12 +347,20 @@ func roomauthorityReadiness(
 		"roomauthorityservice",
 		[]observability.DependencyStatus{
 			postgresDependency(ctx, sqlDB),
-			{Name: "redis", Status: "ok", Required: true},
-			{Name: "nats_broadcast", Status: "ok", Required: true},
-			{Name: "timeline_rpc", Status: "ok", Required: true},
+			redisDependency(ctx, redisClient),
+			natsDependency(natsBus),
+			timelineRPCDependency(ctx, config),
 			{Name: "internal_rpc", Status: "ok", Required: true},
 		},
 	)
+}
+
+type redisPinger interface {
+	Ping(ctx context.Context) error
+}
+
+type natsStatus interface {
+	IsConnected() bool
 }
 
 func postgresDependency(ctx context.Context, sqlDB *sql.DB) observability.DependencyStatus {
@@ -360,6 +373,65 @@ func postgresDependency(ctx context.Context, sqlDB *sql.DB) observability.Depend
 		}
 	}
 	return observability.DependencyStatus{Name: "postgres", Status: status, Required: true}
+}
+
+func redisDependency(ctx context.Context, redisClient redisPinger) observability.DependencyStatus {
+	status := "unavailable"
+	if redisClient != nil {
+		pingCtx, cancel := context.WithTimeout(ctx, 200*time.Millisecond)
+		defer cancel()
+		if err := redisClient.Ping(pingCtx); err == nil {
+			status = "ok"
+		}
+	}
+	return observability.DependencyStatus{Name: "redis", Status: status, Required: true}
+}
+
+func natsDependency(natsBus natsStatus) observability.DependencyStatus {
+	status := "unavailable"
+	if natsBus != nil && natsBus.IsConnected() {
+		status = "ok"
+	}
+	return observability.DependencyStatus{Name: "nats_broadcast", Status: status, Required: true}
+}
+
+func timelineRPCDependency(ctx context.Context, config wtconfig.ServerRuntimeConfig) observability.DependencyStatus {
+	status := "unavailable"
+	baseURL := internalrpc.NormalizeBaseURL(config.ServiceClients.TimelineAddr)
+	if baseURL != "" {
+		readinessPath := strings.TrimSpace(config.Observability.ReadinessPath)
+		if readinessPath == "" {
+			readinessPath = observability.DefaultReadinessPath
+		}
+		if !strings.HasPrefix(readinessPath, "/") {
+			readinessPath = "/" + readinessPath
+		}
+		probeCtx, cancel := context.WithTimeout(ctx, 300*time.Millisecond)
+		defer cancel()
+		request, err := http.NewRequestWithContext(
+			probeCtx,
+			http.MethodGet,
+			strings.TrimRight(baseURL, "/")+readinessPath,
+			nil,
+		)
+		if err == nil {
+			response, err := http.DefaultClient.Do(request)
+			if err == nil {
+				defer response.Body.Close()
+				if response.StatusCode >= 200 && response.StatusCode < 300 {
+					var snapshot observability.ReadinessSnapshot
+					if err := json.NewDecoder(response.Body).Decode(&snapshot); err == nil && snapshot.Status != "" {
+						if snapshot.Status == "ready" {
+							status = "ok"
+						}
+					} else {
+						status = "ok"
+					}
+				}
+			}
+		}
+	}
+	return observability.DependencyStatus{Name: "timeline_rpc", Status: status, Required: true}
 }
 
 func internalRPCClientConfig(config wtconfig.ServerRuntimeConfig, service servicekit.Config) internalrpc.ClientConfig {

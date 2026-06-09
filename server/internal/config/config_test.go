@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -194,7 +195,7 @@ func TestLoadServerRuntimeConfigRejectsInvalidServiceFoundationSettings(t *testi
 	}{
 		{name: "media rpc missing addr", content: "MEDIA_SERVICE_MODE=rpc\n"},
 		{name: "timeline rpc missing addr", content: "TIMELINE_SERVICE_MODE=rpc\n"},
-		{name: "authority rpc missing addr", content: "AUTHORITY_SERVICE_MODE=rpc\nAUTHORITY_SERVICE_INSTANCE_ID=roomauthorityservice-1\n"},
+		{name: "authority rpc missing addr", content: "AUTHORITY_SERVICE_MODE=rpc\nAUTHORITY_LEASE_INSTANCE_ID=roomauthorityservice-1\n"},
 		{name: "authority rpc missing instance id", content: "AUTHORITY_SERVICE_MODE=rpc\nAUTHORITY_SERVICE_ADDR=http://roomauthorityservice:8090\n"},
 		{name: "invalid discovery", content: "SERVICE_DISCOVERY_MODE=consul\n"},
 		{name: "invalid sample ratio", content: "OTEL_TRACE_SAMPLE_RATIO=1.5\n"},
@@ -207,6 +208,36 @@ func TestLoadServerRuntimeConfigRejectsInvalidServiceFoundationSettings(t *testi
 				t.Fatalf("expected invalid service foundation config to fail")
 			}
 		})
+	}
+}
+
+func TestLoadServerRuntimeConfigLoadsAuthorityLeaseInstanceID(t *testing.T) {
+	configDir := t.TempDir()
+	mustWriteConfigFile(
+		t,
+		filepath.Join(configDir, ".env"),
+		"AUTHORITY_SERVICE_MODE=rpc\nAUTHORITY_SERVICE_ADDR=http://roomauthorityservice:8090\nAUTHORITY_LEASE_INSTANCE_ID=roomauthorityservice-1\n",
+	)
+
+	cfg, err := LoadServerRuntimeConfig(configDir)
+	if err != nil {
+		t.Fatalf("load runtime config: %v", err)
+	}
+	if cfg.ServiceClients.AuthorityLeaseID != "roomauthorityservice-1" {
+		t.Fatalf("expected authority lease instance id, got %q", cfg.ServiceClients.AuthorityLeaseID)
+	}
+}
+
+func TestLoadServerRuntimeConfigDoesNotReadDeprecatedAuthorityServiceInstanceID(t *testing.T) {
+	configDir := t.TempDir()
+	mustWriteConfigFile(
+		t,
+		filepath.Join(configDir, ".env"),
+		"AUTHORITY_SERVICE_MODE=rpc\nAUTHORITY_SERVICE_ADDR=http://roomauthorityservice:8090\nAUTHORITY_SERVICE_INSTANCE_ID=roomauthorityservice-1\n",
+	)
+
+	if _, err := LoadServerRuntimeConfig(configDir); err == nil || !strings.Contains(err.Error(), "AUTHORITY_LEASE_INSTANCE_ID") {
+		t.Fatalf("expected deprecated authority service instance id to be ignored, got %v", err)
 	}
 }
 

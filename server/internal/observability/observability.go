@@ -98,6 +98,9 @@ type Metrics struct {
 	seekRateDecisions    *prometheus.CounterVec
 	natsEvents           *prometheus.CounterVec
 	authorityRecovery    *prometheus.CounterVec
+	authorityRPCRequests *prometheus.CounterVec
+	authorityRPCLatency  *prometheus.HistogramVec
+	authorityControls    *prometheus.CounterVec
 	presenceOnline       prometheus.Gauge
 	workerEvents         *prometheus.CounterVec
 }
@@ -131,6 +134,22 @@ func NewMetrics() *Metrics {
 			Name:      "authority_recovery_attempts_total",
 			Help:      "Authority recovery attempts.",
 		}, []string{"result"}),
+		authorityRPCRequests: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: "watch_together",
+			Name:      "authority_rpc_requests_total",
+			Help:      "Internal authority RPC requests by method, result, and stable error.",
+		}, []string{"method", "result", "error"}),
+		authorityRPCLatency: prometheus.NewHistogramVec(prometheus.HistogramOpts{
+			Namespace: "watch_together",
+			Name:      "authority_rpc_request_duration_seconds",
+			Help:      "Internal authority RPC request latency by method, result, and stable error.",
+			Buckets:   prometheus.DefBuckets,
+		}, []string{"method", "result", "error"}),
+		authorityControls: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: "watch_together",
+			Name:      "authority_control_results_total",
+			Help:      "Authority control apply results by type, result, and stable error.",
+		}, []string{"type", "result", "error"}),
 		presenceOnline: prometheus.NewGauge(prometheus.GaugeOpts{
 			Namespace: "watch_together",
 			Name:      "presence_online_users_current",
@@ -148,6 +167,9 @@ func NewMetrics() *Metrics {
 		metrics.seekRateDecisions,
 		metrics.natsEvents,
 		metrics.authorityRecovery,
+		metrics.authorityRPCRequests,
+		metrics.authorityRPCLatency,
+		metrics.authorityControls,
 		metrics.presenceOnline,
 		metrics.workerEvents,
 	)
@@ -194,6 +216,27 @@ func (m *Metrics) RecordAuthorityRecovery(result string) {
 		return
 	}
 	m.authorityRecovery.WithLabelValues(labelValue(result)).Inc()
+}
+
+func (m *Metrics) RecordAuthorityRPC(method string, result string, stableError string, duration time.Duration) {
+	if m == nil {
+		return
+	}
+	method = labelValue(method)
+	result = labelValue(result)
+	stableError = labelValue(stableError)
+	m.authorityRPCRequests.WithLabelValues(method, result, stableError).Inc()
+	if duration < 0 {
+		duration = 0
+	}
+	m.authorityRPCLatency.WithLabelValues(method, result, stableError).Observe(duration.Seconds())
+}
+
+func (m *Metrics) RecordAuthorityControlResult(controlType string, result string, stableError string) {
+	if m == nil {
+		return
+	}
+	m.authorityControls.WithLabelValues(labelValue(controlType), labelValue(result), labelValue(stableError)).Inc()
 }
 
 func (m *Metrics) SetPresenceOnline(count int) {

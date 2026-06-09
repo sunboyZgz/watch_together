@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestMetricsHandler(t *testing.T) {
@@ -14,6 +15,8 @@ func TestMetricsHandler(t *testing.T) {
 	metrics.RecordSeekRateLimit("limited")
 	metrics.RecordNATSEvent("broadcast_publish", "ok")
 	metrics.RecordAuthorityRecovery("success")
+	metrics.RecordAuthorityRPC("ApplyRoomControl", "error", "room authority unavailable", 10*time.Millisecond)
+	metrics.RecordAuthorityControlResult("play", "rejected", "room authority unavailable")
 	metrics.SetPresenceOnline(2)
 	metrics.RecordWorkerEvent("outboxworker", "published")
 
@@ -30,6 +33,9 @@ func TestMetricsHandler(t *testing.T) {
 		"watch_together_seek_rate_limit_decisions_total",
 		"watch_together_nats_room_events_total",
 		"watch_together_authority_recovery_attempts_total",
+		"watch_together_authority_rpc_requests_total",
+		"watch_together_authority_rpc_request_duration_seconds",
+		"watch_together_authority_control_results_total",
 		"watch_together_presence_online_users_current",
 		"watch_together_worker_events_total",
 	} {

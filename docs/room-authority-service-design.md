@@ -1,6 +1,6 @@
 # Room Authority Service Design
 
-Phase 13 defines the target `room-authority-service` boundary. Phase 14 implements a non-default RPC pilot under `rpc-pilot`: app/prod defaults still keep room authority inside `roomserver`, while the pilot can route control apply through `cmd/roomauthorityservice`. Android HTTP/WebSocket contracts remain unchanged.
+Phase 13 defines the target `room-authority-service` boundary. Phase 14 implements a non-default RPC pilot under `rpc-pilot`: app/prod defaults still keep room authority inside `roomserver`, while the pilot can route control apply through `cmd/roomauthorityservice`. Phase 15 hardens that pilot with dynamic readiness, metrics, stable failure tests, and explicit lease-owner identity. Android HTTP/WebSocket contracts remain unchanged.
 
 ## Goals
 
@@ -27,6 +27,16 @@ Phase 14 adds generated internal authority RPC and `cmd/roomauthorityservice` fo
 - `roomserver` remains the WebSocket and HTTP edge in every mode.
 - `timelineservice` remains the owner of canonical result event generation and recovery feeds.
 - Kafka remains a result log, not command ingress.
+
+## Phase 15 Hardening Status
+
+Phase 15 keeps authority RPC non-default and focuses on cutover readiness for `rpc-pilot`.
+
+- `AUTHORITY_LEASE_INSTANCE_ID` is the Redis authority lease owner used by `roomserver` HTTP bootstrap when `AUTHORITY_SERVICE_MODE=rpc`.
+- `roomauthorityservice` readiness checks PostgreSQL, Redis, NATS broadcast connectivity, timeline RPC readiness, and internal RPC availability.
+- `roomauthorityservice` exposes authority RPC request count/latency/error metrics and authority apply accepted/rejected metrics.
+- `rpc-pilot` compose is guarded by architecture tests: app/prod remain local, while only `roomserver-rpc-pilot` depends on `roomauthorityservice` and uses authority RPC.
+- Failure tests cover authority RPC unavailable and stale authority responses so ingress forgets pending requests and returns stable client errors.
 
 ## Current Baseline
 
@@ -173,7 +183,12 @@ Phase 14:
 - Implement `cmd/roomauthorityservice` behind `rpc-pilot`, while keeping roomserver-local authority as the app/prod default.
 - Prove accepted/rejected control, recovery, idempotency, active-device, seek-rate, stale-epoch, and timeline-failure parity.
 
-Phase 15+:
+Phase 15:
+
+- Harden `rpc-pilot` readiness, metrics, identity naming, and failure semantics.
+- Keep app/prod defaults on local authority.
+
+Phase 16+:
 
 - Decide whether command inbox or command ingress is necessary.
 - Introduce durable command audit only if product or operations requirements justify it.

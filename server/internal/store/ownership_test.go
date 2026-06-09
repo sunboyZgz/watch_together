@@ -139,6 +139,56 @@ func TestComposeDefaultsUseTimelineRPCBoundary(t *testing.T) {
 	}
 }
 
+func TestComposeAuthorityRPCStaysPilotOnly(t *testing.T) {
+	localCompose := readCompose(t, "../../compose.yaml")
+	localRoomserver := requireComposeService(t, localCompose, "roomserver")
+	if dependsOnService(localRoomserver.DependsOn, "roomauthorityservice") {
+		t.Fatalf("app roomserver must not depend on roomauthorityservice by default")
+	}
+	if mode := envString(localRoomserver.Environment, "AUTHORITY_SERVICE_MODE"); !strings.Contains(mode, "local") {
+		t.Fatalf("app roomserver AUTHORITY_SERVICE_MODE = %q, want local default", mode)
+	}
+	if old := envString(localRoomserver.Environment, "AUTHORITY_SERVICE_INSTANCE_ID"); old != "" {
+		t.Fatalf("app roomserver must not use deprecated AUTHORITY_SERVICE_INSTANCE_ID, got %q", old)
+	}
+
+	pilotRoomserver := requireComposeService(t, localCompose, "roomserver-rpc-pilot")
+	pilotAuthority := requireComposeService(t, localCompose, "roomauthorityservice")
+	if !dependsOnService(pilotRoomserver.DependsOn, "roomauthorityservice") {
+		t.Fatalf("rpc-pilot roomserver must depend on roomauthorityservice")
+	}
+	if mode := envString(pilotRoomserver.Environment, "AUTHORITY_SERVICE_MODE"); mode != "rpc" {
+		t.Fatalf("rpc-pilot roomserver AUTHORITY_SERVICE_MODE = %q, want rpc", mode)
+	}
+	if addr := envString(pilotRoomserver.Environment, "AUTHORITY_SERVICE_ADDR"); addr != "http://roomauthorityservice:8090" {
+		t.Fatalf("rpc-pilot roomserver AUTHORITY_SERVICE_ADDR = %q, want roomauthorityservice URL", addr)
+	}
+	if leaseID := envString(pilotRoomserver.Environment, "AUTHORITY_LEASE_INSTANCE_ID"); !strings.Contains(leaseID, "roomauthorityservice-1") {
+		t.Fatalf("rpc-pilot roomserver AUTHORITY_LEASE_INSTANCE_ID = %q, want roomauthorityservice lease owner", leaseID)
+	}
+	if old := envString(pilotRoomserver.Environment, "AUTHORITY_SERVICE_INSTANCE_ID"); old != "" {
+		t.Fatalf("rpc-pilot roomserver must not use deprecated AUTHORITY_SERVICE_INSTANCE_ID, got %q", old)
+	}
+	if !containsContext(pilotAuthority.Profiles, "rpc-pilot") {
+		t.Fatalf("roomauthorityservice profiles = %v, want rpc-pilot only", pilotAuthority.Profiles)
+	}
+	if old := envString(pilotAuthority.Environment, "AUTHORITY_SERVICE_INSTANCE_ID"); old != "" {
+		t.Fatalf("roomauthorityservice must not use deprecated AUTHORITY_SERVICE_INSTANCE_ID, got %q", old)
+	}
+
+	prodCompose := readCompose(t, "../../compose.prod.yaml")
+	prodRoomserver := requireComposeService(t, prodCompose, "roomserver")
+	if _, ok := prodCompose.Services["roomauthorityservice"]; ok {
+		t.Fatalf("prod compose must not start roomauthorityservice by default")
+	}
+	if mode := envString(prodRoomserver.Environment, "AUTHORITY_SERVICE_MODE"); !strings.Contains(mode, "local") {
+		t.Fatalf("prod roomserver AUTHORITY_SERVICE_MODE = %q, want local default", mode)
+	}
+	if old := envString(prodRoomserver.Environment, "AUTHORITY_SERVICE_INSTANCE_ID"); old != "" {
+		t.Fatalf("prod roomserver must not use deprecated AUTHORITY_SERVICE_INSTANCE_ID, got %q", old)
+	}
+}
+
 func TestStoreSQLWritesStayInsideOwnerBoundary(t *testing.T) {
 	registry := loadOwnershipRegistry(t)
 	for fileName, contextName := range registry.StoreFiles {

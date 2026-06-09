@@ -70,6 +70,15 @@ func (c *RedisClient) Raw() *redis.Client {
 	return c.client
 }
 
+func (c *RedisClient) Ping(ctx context.Context) error {
+	ctx, span := otel.Tracer("watch_together/redis").Start(ctx, "redis.ping")
+	defer span.End()
+	if c == nil || c.client == nil {
+		return ErrRedisDisabled
+	}
+	return c.client.Ping(ctx).Err()
+}
+
 func (c *RedisClient) GetJSON(ctx context.Context, key string, dest any) (bool, error) {
 	ctx, span := otel.Tracer("watch_together/redis").Start(ctx, "redis.get_json")
 	defer span.End()

@@ -75,14 +75,14 @@ type InternalRPCConfig struct {
 }
 
 type ServiceClientsConfig struct {
-	DiscoveryMode       string
-	MediaMode           string
-	MediaAddr           string
-	TimelineMode        string
-	TimelineAddr        string
-	AuthorityMode       string
-	AuthorityAddr       string
-	AuthorityInstanceID string
+	DiscoveryMode    string
+	MediaMode        string
+	MediaAddr        string
+	TimelineMode     string
+	TimelineAddr     string
+	AuthorityMode    string
+	AuthorityAddr    string
+	AuthorityLeaseID string
 }
 
 type KafkaConfig struct {
@@ -339,8 +339,8 @@ func isRPCMode(mode string) bool {
 }
 
 func authorityClaimInstanceID(config Config, fallback string) string {
-	if isRPCMode(config.ServiceClients.AuthorityMode) && strings.TrimSpace(config.ServiceClients.AuthorityInstanceID) != "" {
-		return strings.TrimSpace(config.ServiceClients.AuthorityInstanceID)
+	if isRPCMode(config.ServiceClients.AuthorityMode) && strings.TrimSpace(config.ServiceClients.AuthorityLeaseID) != "" {
+		return strings.TrimSpace(config.ServiceClients.AuthorityLeaseID)
 	}
 	return fallback
 }

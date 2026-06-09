@@ -13,8 +13,10 @@ import (
 	"connectrpc.com/connect"
 	"github.com/coder/websocket"
 
+	authoritypkg "watch_together/server/internal/authority"
 	"watch_together/server/internal/cache"
 	"watch_together/server/internal/eventbus"
+	"watch_together/server/internal/internalrpc"
 	"watch_together/server/internal/protocol"
 	"watch_together/server/internal/recovery"
 	"watch_together/server/internal/room"
@@ -176,6 +178,206 @@ func TestWebSocketDistributedAuthorityRejectsMissingAuthority(t *testing.T) {
 	readMessageAs(t, ctx, host, &envelope)
 	if envelope.Type != protocol.TypeError || envelope.Payload.Message != "room authority unavailable" {
 		t.Fatalf("unexpected missing-authority error: %+v", envelope)
+	}
+}
+
+func TestWebSocketDistributedAuthorityRPCApplyAccepted(t *testing.T) {
+	roomManager := room.NewManager()
+	createdRoom, err := roomManager.CreateRoom("user_a", "sample_001")
+	if err != nil {
+		t.Fatalf("create room: %v", err)
+	}
+	acceptedState := createdRoom.StateSnapshot()
+	acceptedState.Seq = 2
+	acceptedState.Paused = false
+	acceptedEnvelope := controlEnvelopeFromState(protocol.TypePlay, acceptedState, "authority-rpc-play")
+
+	authorityMux := http.NewServeMux()
+	authoritypkg.RegisterInternalRPC(
+		authorityMux,
+		"",
+		"",
+		nil,
+		testAuthorityApplier{response: authoritypkg.ApplyControlResponse{
+			Accepted:       true,
+			Type:           acceptedEnvelope.Type,
+			Payload:        acceptedEnvelope.Payload,
+			Seq:            2,
+			AuthorityEpoch: 1,
+		}},
+	)
+	authorityServer := httptest.NewServer(authorityMux)
+	defer authorityServer.Close()
+
+	authorityRegistry := newFakeAuthorityRegistry(createdRoom.ID(), "roomauthorityservice-1")
+	activeDevices := newFakeActiveDeviceRegistry()
+	controlRequests := newFakeControlRequestRegistry()
+	server := newDistributedWebSocketServerWithAuthorityControl(
+		t,
+		roomManager,
+		"instance-b",
+		authorityRegistry,
+		activeDevices,
+		&recordingRoomBroadcastBus{},
+		controlRequests,
+		authoritypkg.NewRPCClient(authorityServer.URL, internalrpc.ClientConfig{Timeout: time.Second}),
+	)
+	defer server.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	host := mustDialWebSocket(t, ctx, wsURL(server.URL), "user_a")
+	defer host.Close(websocket.StatusNormalClosure, "test done")
+
+	mustJoinRoom(t, ctx, host, createdRoom.ID(), "user_a")
+	if envelope := mustReadEnvelope(t, ctx, host); envelope.Type != protocol.TypeRoomState {
+		t.Fatalf("expected host room_state, got %s", envelope.Type)
+	}
+
+	mustSendEnvelope(t, ctx, host, protocol.Envelope{
+		Type: protocol.TypePlay,
+		Payload: mustJSONRaw(protocol.PlayPayload{
+			RoomID:     createdRoom.ID(),
+			UserID:     "user_a",
+			RequestID:  "authority-rpc-play",
+			PositionMs: 0,
+			Seq:        1,
+		}),
+	})
+
+	envelope := mustReadEnvelope(t, ctx, host)
+	if envelope.Type != protocol.TypePlay {
+		t.Fatalf("expected RPC accepted play envelope, got %s", envelope.Type)
+	}
+	var payload protocol.PlayPayload
+	if err := json.Unmarshal(envelope.Payload, &payload); err != nil {
+		t.Fatalf("unmarshal accepted play payload: %v", err)
+	}
+	if payload.RequestID != "authority-rpc-play" || payload.Seq != 2 {
+		t.Fatalf("unexpected accepted play payload: %+v", payload)
+	}
+}
+
+func TestWebSocketDistributedAuthorityRPCUnavailableForgetsPendingRequest(t *testing.T) {
+	roomManager := room.NewManager()
+	createdRoom, err := roomManager.CreateRoom("user_a", "sample_001")
+	if err != nil {
+		t.Fatalf("create room: %v", err)
+	}
+	authorityRegistry := newFakeAuthorityRegistry(createdRoom.ID(), "roomauthorityservice-1")
+	activeDevices := newFakeActiveDeviceRegistry()
+	controlRequests := newFakeControlRequestRegistry()
+	server := newDistributedWebSocketServerWithAuthorityControl(
+		t,
+		roomManager,
+		"instance-b",
+		authorityRegistry,
+		activeDevices,
+		&recordingRoomBroadcastBus{},
+		controlRequests,
+		testAuthorityApplier{err: errors.New("authority rpc unavailable")},
+	)
+	defer server.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	host := mustDialWebSocket(t, ctx, wsURL(server.URL), "user_a")
+	defer host.Close(websocket.StatusNormalClosure, "test done")
+
+	mustJoinRoom(t, ctx, host, createdRoom.ID(), "user_a")
+	if envelope := mustReadEnvelope(t, ctx, host); envelope.Type != protocol.TypeRoomState {
+		t.Fatalf("expected host room_state, got %s", envelope.Type)
+	}
+
+	mustSendEnvelope(t, ctx, host, protocol.Envelope{
+		Type: protocol.TypePlay,
+		Payload: mustJSONRaw(protocol.PlayPayload{
+			RoomID:     createdRoom.ID(),
+			UserID:     "user_a",
+			RequestID:  "authority-rpc-unavailable-play",
+			PositionMs: 0,
+			Seq:        1,
+		}),
+	})
+
+	var envelope protocol.ErrorEnvelope
+	readMessageAs(t, ctx, host, &envelope)
+	if envelope.Type != protocol.TypeError || envelope.Payload.Message != "room authority unavailable" {
+		t.Fatalf("unexpected authority RPC unavailable response: %+v", envelope)
+	}
+	if record := controlRequests.record(createdRoom.ID(), "authority-rpc-unavailable-play"); record.RequestID != "" {
+		t.Fatalf("expected pending request to be forgotten after authority RPC failure, got %+v", record)
+	}
+}
+
+func TestWebSocketDistributedAuthorityRPCStaleResponseForgetsPendingRequest(t *testing.T) {
+	roomManager := room.NewManager()
+	createdRoom, err := roomManager.CreateRoom("user_a", "sample_001")
+	if err != nil {
+		t.Fatalf("create room: %v", err)
+	}
+	acceptedState := createdRoom.StateSnapshot()
+	acceptedState.Seq = 2
+	acceptedEnvelope := controlEnvelopeFromState(protocol.TypePlay, acceptedState, "authority-rpc-stale-play")
+
+	authorityRegistry := newFakeAuthorityRegistry(createdRoom.ID(), "roomauthorityservice-1")
+	activeDevices := newFakeActiveDeviceRegistry()
+	controlRequests := newFakeControlRequestRegistry()
+	broadcastBus := &recordingRoomBroadcastBus{}
+	server := newDistributedWebSocketServerWithAuthorityControl(
+		t,
+		roomManager,
+		"instance-b",
+		authorityRegistry,
+		activeDevices,
+		broadcastBus,
+		controlRequests,
+		testAuthorityApplier{response: authoritypkg.ApplyControlResponse{
+			Accepted:       true,
+			Type:           acceptedEnvelope.Type,
+			Payload:        acceptedEnvelope.Payload,
+			Seq:            2,
+			AuthorityEpoch: 99,
+		}},
+	)
+	defer server.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	host := mustDialWebSocket(t, ctx, wsURL(server.URL), "user_a")
+	defer host.Close(websocket.StatusNormalClosure, "test done")
+
+	mustJoinRoom(t, ctx, host, createdRoom.ID(), "user_a")
+	if envelope := mustReadEnvelope(t, ctx, host); envelope.Type != protocol.TypeRoomState {
+		t.Fatalf("expected host room_state, got %s", envelope.Type)
+	}
+
+	mustSendEnvelope(t, ctx, host, protocol.Envelope{
+		Type: protocol.TypePlay,
+		Payload: mustJSONRaw(protocol.PlayPayload{
+			RoomID:     createdRoom.ID(),
+			UserID:     "user_a",
+			RequestID:  "authority-rpc-stale-play",
+			PositionMs: 0,
+			Seq:        1,
+		}),
+	})
+
+	var envelope protocol.ErrorEnvelope
+	readMessageAs(t, ctx, host, &envelope)
+	if envelope.Type != protocol.TypeError || envelope.Payload.Message != "room authority unavailable" {
+		t.Fatalf("unexpected stale authority RPC response: %+v", envelope)
+	}
+	if record := controlRequests.record(createdRoom.ID(), "authority-rpc-stale-play"); record.RequestID != "" {
+		t.Fatalf("expected pending request to be forgotten after stale authority response, got %+v", record)
+	}
+	for _, event := range broadcastBus.events() {
+		if event.Type == protocol.TypePlay {
+			t.Fatalf("expected stale authority response not to broadcast accepted play, got %+v", event)
+		}
 	}
 }
 
@@ -787,6 +989,40 @@ func newDistributedWebSocketServerWithHardening(
 	mux := http.NewServeMux()
 	mux.Handle("/ws", handler)
 	return httptest.NewServer(mux)
+}
+
+func newDistributedWebSocketServerWithAuthorityControl(
+	t *testing.T,
+	roomManager *room.Manager,
+	instanceID string,
+	authority *fakeAuthorityRegistry,
+	activeDevices *fakeActiveDeviceRegistry,
+	broadcastBus eventbus.RoomBroadcastBus,
+	controlRequests controlRequestRegistry,
+	authorityControl authoritypkg.ControlApplier,
+) *httptest.Server {
+	t.Helper()
+	handler := NewWebSocketHandler(roomManager, true)
+	handler.SetRoomBroadcastBus(instanceID, broadcastBus)
+	handler.SetDistributedAuthorityRuntime(instanceID, authority, activeDevices, eventbus.NewDisabledRoomControlBus(), timeline.NoopRecorder{})
+	handler.SetDistributedControlHardening(controlRequests, nil, 0)
+	handler.SetDistributedControlRateRegistry(newFakeControlRateRegistry())
+	handler.SetAuthorityControlApplier(authorityControl)
+	if err := handler.SubscribeRoomBroadcasts(context.Background()); err != nil {
+		t.Fatalf("subscribe broadcasts: %v", err)
+	}
+	mux := http.NewServeMux()
+	mux.Handle("/ws", handler)
+	return httptest.NewServer(mux)
+}
+
+type testAuthorityApplier struct {
+	response authoritypkg.ApplyControlResponse
+	err      error
+}
+
+func (a testAuthorityApplier) ApplyRoomControl(context.Context, authoritypkg.ApplyControlRequest) (authoritypkg.ApplyControlResponse, error) {
+	return a.response, a.err
 }
 
 type fakeAuthorityRegistry struct {

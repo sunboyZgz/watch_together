@@ -1,6 +1,6 @@
 # Runtime Boundaries
 
-This document records the runtime ownership boundaries for the room system. `local_process` remains the default runtime. Phase 4 adds a `distributed_authority` MVP for multi-instance room authority, Phase 5 adds fenced authority recovery from the Kafka canonical timeline, Phase 6 adds distributed seek rate limiting plus observability, Phase 7 adds service foundation boundaries with optional media/timeline RPC adapters and logical database ownership, Phase 8 closes the media table access boundary for room/progress while making the RPC pilot verifiable, Phase 9 adds an optional independent media database boundary through `MEDIA_DATABASE_URL`, Phase 10 adds an optional independent timeline database boundary through `TIMELINE_DATABASE_URL`, Phase 11 makes timeline RPC the default compose path while keeping timeline workers as separate timeline-owned processes, Phase 12 moves result timeline ownership into `cmd/timelineservice`, Phase 13 documents the future `room-authority-service` boundary, and Phase 14 implements a non-default authority RPC pilot in `rpc-pilot`.
+This document records the runtime ownership boundaries for the room system. `local_process` remains the default runtime. Phase 4 adds a `distributed_authority` MVP for multi-instance room authority, Phase 5 adds fenced authority recovery from the Kafka canonical timeline, Phase 6 adds distributed seek rate limiting plus observability, Phase 7 adds service foundation boundaries with optional media/timeline RPC adapters and logical database ownership, Phase 8 closes the media table access boundary for room/progress while making the RPC pilot verifiable, Phase 9 adds an optional independent media database boundary through `MEDIA_DATABASE_URL`, Phase 10 adds an optional independent timeline database boundary through `TIMELINE_DATABASE_URL`, Phase 11 makes timeline RPC the default compose path while keeping timeline workers as separate timeline-owned processes, Phase 12 moves result timeline ownership into `cmd/timelineservice`, Phase 13 documents the future `room-authority-service` boundary, Phase 14 implements a non-default authority RPC pilot in `rpc-pilot`, and Phase 15 hardens that pilot with readiness, metrics, identity, and failure-semantics checks.
 
 ## Phase 1 Boundary Markers
 
@@ -234,12 +234,15 @@ For explicit rollback, set `TIMELINE_SERVICE_MODE=local` and provide `ROOMSERVER
 
 Phase 12 is not command ingress. Kafka remains the canonical result log for accepted/rejected controls and membership results, while NATS remains the realtime fan-out and control request/reply transport. `room authority` remains in `roomserver`.
 
-## Phase 14 Room Authority RPC Pilot
+## Phase 15 Authority RPC Pilot Hardening
 
-Phase 14 adds the generated authority RPC and `cmd/roomauthorityservice` for the `rpc-pilot` profile. The default app/prod path does not set `AUTHORITY_SERVICE_MODE=rpc` and does not start the authority service.
+Phase 14 adds the generated authority RPC and `cmd/roomauthorityservice` for the `rpc-pilot` profile. Phase 15 hardens that pilot for cutover readiness. The default app/prod path still does not set `AUTHORITY_SERVICE_MODE=rpc` and does not start the authority service.
 
 - Keep `roomserver` as the WebSocket and HTTP edge with local connection tables.
 - Route `rpc-pilot` control apply through a per-`roomId` serial authority adapter.
+- Use `AUTHORITY_LEASE_INSTANCE_ID` as the Redis authority lease owner claimed during room HTTP bootstrap.
+- Expose dynamic `roomauthorityservice` readiness for PostgreSQL, Redis, NATS broadcast, timeline RPC, and internal RPC.
+- Expose authority RPC and authority control result metrics from the pilot service.
 - Preserve existing stable error behavior for stale epochs, recovery, idempotency, active-device checks, seek rate limits, and timeline failures.
 - Preserve Phase 12 timeline ownership; accepted control results must still be recorded through the timeline boundary before an accepted envelope can be returned or broadcast.
 - Use the current roomserver local/NATS behavior as the default and parity baseline.

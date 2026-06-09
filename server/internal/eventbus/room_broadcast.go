@@ -260,3 +260,7 @@ func (b *NATSRoomBroadcastBus) Close() error {
 	b.conn.Close()
 	return nil
 }
+
+func (b *NATSRoomBroadcastBus) IsConnected() bool {
+	return b != nil && b.conn != nil && b.conn.Status() == nats.CONNECTED
+}
