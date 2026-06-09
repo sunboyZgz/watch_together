@@ -118,11 +118,14 @@ type InternalRPCConfig struct {
 }
 
 type ServiceClientsConfig struct {
-	DiscoveryMode string
-	MediaMode     string
-	MediaAddr     string
-	TimelineMode  string
-	TimelineAddr  string
+	DiscoveryMode       string
+	MediaMode           string
+	MediaAddr           string
+	TimelineMode        string
+	TimelineAddr        string
+	AuthorityMode       string
+	AuthorityAddr       string
+	AuthorityInstanceID string
 }
 
 type TelemetryConfig struct {
@@ -202,6 +205,9 @@ func LoadServerRuntimeConfig(configDir string) (ServerRuntimeConfig, error) {
 		"MEDIA_SERVICE_ADDR":                    "",
 		"TIMELINE_SERVICE_MODE":                 "local",
 		"TIMELINE_SERVICE_ADDR":                 "",
+		"AUTHORITY_SERVICE_MODE":                "local",
+		"AUTHORITY_SERVICE_ADDR":                "",
+		"AUTHORITY_SERVICE_INSTANCE_ID":         "",
 		"OTEL_TRACING_ENABLED":                  false,
 		"OTEL_SERVICE_NAME":                     "watch-together-roomserver",
 		"OTEL_EXPORTER_OTLP_ENDPOINT":           "",
@@ -274,6 +280,9 @@ func LoadServerRuntimeConfig(configDir string) (ServerRuntimeConfig, error) {
 		"MEDIA_SERVICE_ADDR",
 		"TIMELINE_SERVICE_MODE",
 		"TIMELINE_SERVICE_ADDR",
+		"AUTHORITY_SERVICE_MODE",
+		"AUTHORITY_SERVICE_ADDR",
+		"AUTHORITY_SERVICE_INSTANCE_ID",
 		"OTEL_TRACING_ENABLED",
 		"OTEL_SERVICE_NAME",
 		"OTEL_EXPORTER_OTLP_ENDPOINT",
@@ -384,11 +393,14 @@ func LoadServerRuntimeConfig(configDir string) (ServerRuntimeConfig, error) {
 			AuthToken:  trimmedString(loader, "INTERNAL_RPC_AUTH_TOKEN"),
 		},
 		ServiceClients: ServiceClientsConfig{
-			DiscoveryMode: strings.ToLower(trimmedString(loader, "SERVICE_DISCOVERY_MODE")),
-			MediaMode:     strings.ToLower(trimmedString(loader, "MEDIA_SERVICE_MODE")),
-			MediaAddr:     trimmedString(loader, "MEDIA_SERVICE_ADDR"),
-			TimelineMode:  strings.ToLower(trimmedString(loader, "TIMELINE_SERVICE_MODE")),
-			TimelineAddr:  trimmedString(loader, "TIMELINE_SERVICE_ADDR"),
+			DiscoveryMode:       strings.ToLower(trimmedString(loader, "SERVICE_DISCOVERY_MODE")),
+			MediaMode:           strings.ToLower(trimmedString(loader, "MEDIA_SERVICE_MODE")),
+			MediaAddr:           trimmedString(loader, "MEDIA_SERVICE_ADDR"),
+			TimelineMode:        strings.ToLower(trimmedString(loader, "TIMELINE_SERVICE_MODE")),
+			TimelineAddr:        trimmedString(loader, "TIMELINE_SERVICE_ADDR"),
+			AuthorityMode:       strings.ToLower(trimmedString(loader, "AUTHORITY_SERVICE_MODE")),
+			AuthorityAddr:       trimmedString(loader, "AUTHORITY_SERVICE_ADDR"),
+			AuthorityInstanceID: trimmedString(loader, "AUTHORITY_SERVICE_INSTANCE_ID"),
 		},
 		Telemetry: TelemetryConfig{
 			TracingEnabled:   boolFromConfig(loader, "OTEL_TRACING_ENABLED"),
@@ -498,11 +510,20 @@ func validateServiceConfig(config ServerRuntimeConfig) error {
 	if mode := normalizeServiceMode(config.ServiceClients.TimelineMode); mode != "local" && mode != "rpc" {
 		return fmt.Errorf("unsupported TIMELINE_SERVICE_MODE %q; supported values: local, rpc", config.ServiceClients.TimelineMode)
 	}
+	if mode := normalizeServiceMode(config.ServiceClients.AuthorityMode); mode != "local" && mode != "rpc" {
+		return fmt.Errorf("unsupported AUTHORITY_SERVICE_MODE %q; supported values: local, rpc", config.ServiceClients.AuthorityMode)
+	}
 	if normalizeServiceMode(config.ServiceClients.MediaMode) == "rpc" && strings.TrimSpace(config.ServiceClients.MediaAddr) == "" {
 		return fmt.Errorf("MEDIA_SERVICE_ADDR is required when MEDIA_SERVICE_MODE=rpc")
 	}
 	if normalizeServiceMode(config.ServiceClients.TimelineMode) == "rpc" && strings.TrimSpace(config.ServiceClients.TimelineAddr) == "" {
 		return fmt.Errorf("TIMELINE_SERVICE_ADDR is required when TIMELINE_SERVICE_MODE=rpc")
+	}
+	if normalizeServiceMode(config.ServiceClients.AuthorityMode) == "rpc" && strings.TrimSpace(config.ServiceClients.AuthorityAddr) == "" {
+		return fmt.Errorf("AUTHORITY_SERVICE_ADDR is required when AUTHORITY_SERVICE_MODE=rpc")
+	}
+	if normalizeServiceMode(config.ServiceClients.AuthorityMode) == "rpc" && strings.TrimSpace(config.ServiceClients.AuthorityInstanceID) == "" {
+		return fmt.Errorf("AUTHORITY_SERVICE_INSTANCE_ID is required when AUTHORITY_SERVICE_MODE=rpc")
 	}
 	discoveryMode := strings.TrimSpace(config.ServiceClients.DiscoveryMode)
 	if discoveryMode == "" {

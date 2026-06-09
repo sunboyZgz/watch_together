@@ -120,6 +120,7 @@ func TestGinRouterMetricsDisabled(t *testing.T) {
 		nil,
 		nil,
 		nil,
+		nil,
 	)
 	recorder := httptest.NewRecorder()
 
@@ -410,6 +411,7 @@ func newTestGinRouterWithRuntime(runtime runtimeBoundary) http.Handler {
 		"",
 		eventbus.NewDisabledRoomBroadcastBus(),
 		eventbus.NewDisabledRoomControlBus(),
+		nil,
 		nil,
 		nil,
 		nil,

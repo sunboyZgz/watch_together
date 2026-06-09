@@ -37,7 +37,12 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
     -trimpath \
     -ldflags="-s -w" \
     -o /out/timelineservice \
-    ./cmd/timelineservice
+    ./cmd/timelineservice && \
+    CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
+    -trimpath \
+    -ldflags="-s -w" \
+    -o /out/roomauthorityservice \
+    ./cmd/roomauthorityservice
 
 FROM scratch
 
@@ -47,6 +52,7 @@ COPY --from=builder /out/outboxworker /app/outboxworker
 COPY --from=builder /out/derivedworker /app/derivedworker
 COPY --from=builder /out/mediaservice /app/mediaservice
 COPY --from=builder /out/timelineservice /app/timelineservice
+COPY --from=builder /out/roomauthorityservice /app/roomauthorityservice
 
 EXPOSE 8080
 USER 65532:65532

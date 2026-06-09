@@ -351,6 +351,10 @@ func baseStateFromRoomDetail(detail roomapi.DetailResult, now time.Time) room.St
 	}
 }
 
+func BaseStateFromRoomDetail(detail roomapi.DetailResult, now time.Time) room.State {
+	return baseStateFromRoomDetail(detail, now)
+}
+
 func roomStatePayload(state room.State) protocol.RoomStatePayload {
 	return protocol.RoomStatePayload{
 		RoomID:          state.RoomID,

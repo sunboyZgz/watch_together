@@ -14,6 +14,7 @@ import (
 	"gorm.io/gorm"
 
 	"watch_together/server/internal/auth"
+	"watch_together/server/internal/authority"
 	"watch_together/server/internal/cache"
 	"watch_together/server/internal/eventbus"
 	"watch_together/server/internal/home"
@@ -74,11 +75,14 @@ type InternalRPCConfig struct {
 }
 
 type ServiceClientsConfig struct {
-	DiscoveryMode string
-	MediaMode     string
-	MediaAddr     string
-	TimelineMode  string
-	TimelineAddr  string
+	DiscoveryMode       string
+	MediaMode           string
+	MediaAddr           string
+	TimelineMode        string
+	TimelineAddr        string
+	AuthorityMode       string
+	AuthorityAddr       string
+	AuthorityInstanceID string
 }
 
 type KafkaConfig struct {
@@ -220,7 +224,7 @@ func NewServer(config Config) *Server {
 	)
 	broadcastInstanceID := roomBroadcastInstanceID(config.InstanceID)
 	if distributedAuthority {
-		roomHTTPHandler.SetRoomAuthorityClaimer(broadcastInstanceID, authorityRegistry)
+		roomHTTPHandler.SetRoomAuthorityClaimer(authorityClaimInstanceID(config, broadcastInstanceID), authorityRegistry)
 	}
 	var authorityRecovery *recovery.Service
 	if distributedAuthority {
@@ -251,17 +255,23 @@ func NewServer(config Config) *Server {
 			roomStateCache,
 		)
 		roomHTTPHandler.SetRoomAuthorityRecovery(authorityRecovery)
-		go startAuthorityRenewLoop(
-			serverCtx,
-			config.AuthorityRecovery.RenewInterval,
-			roomManager,
-			authorityRegistry,
-			broadcastInstanceID,
-		)
+		if !isRPCMode(config.ServiceClients.AuthorityMode) {
+			go startAuthorityRenewLoop(
+				serverCtx,
+				config.AuthorityRecovery.RenewInterval,
+				roomManager,
+				authorityRegistry,
+				broadcastInstanceID,
+			)
+		}
 		go authorityRecovery.RunScanner(serverCtx, config.AuthorityRecovery.TakeoverScanInterval)
 	}
 	roomBroadcastBus := newRoomBroadcastBus(config.WebSocket, config.NATS, distributedAuthority)
 	roomControlBus := newRoomControlBus(config.WebSocket, config.NATS, distributedAuthority)
+	var authorityControl authority.ControlApplier
+	if distributedAuthority && isRPCMode(config.ServiceClients.AuthorityMode) {
+		authorityControl = authority.NewRPCClient(config.ServiceClients.AuthorityAddr, internalRPCClientConfig(config, serviceConfig))
+	}
 	authHTTPHandler := transport.NewAuthHTTPHandler(newAuthService(db, tokenManager))
 	homeHTTPHandler := transport.NewHomeHTTPHandlerWithTokenVerifier(newHomeService(db, mediaService), tokenManager)
 	mediaHTTPHandler := transport.NewMediaHTTPHandlerWithTokenVerifier(mediaService, tokenManager, config.Media)
@@ -285,6 +295,7 @@ func NewServer(config Config) *Server {
 		broadcastInstanceID,
 		roomBroadcastBus,
 		roomControlBus,
+		authorityControl,
 		authorityRegistry,
 		activeDeviceRegistry,
 		controlRequestRegistry,
@@ -325,6 +336,13 @@ func internalRPCClientConfig(config Config, service servicekit.Config) internalr
 
 func isRPCMode(mode string) bool {
 	return strings.EqualFold(strings.TrimSpace(mode), "rpc")
+}
+
+func authorityClaimInstanceID(config Config, fallback string) string {
+	if isRPCMode(config.ServiceClients.AuthorityMode) && strings.TrimSpace(config.ServiceClients.AuthorityInstanceID) != "" {
+		return strings.TrimSpace(config.ServiceClients.AuthorityInstanceID)
+	}
+	return fallback
 }
 
 func normalizeRoomRuntimeMode(mode string) string {
@@ -370,6 +388,7 @@ func readinessSnapshotFromConfig(
 			dependencyStatus("recovery", authorityRecovery != nil, distributedAuthority),
 			dependencyStatus("media_rpc", strings.TrimSpace(config.ServiceClients.MediaAddr) != "", isRPCMode(config.ServiceClients.MediaMode)),
 			dependencyStatus("timeline_rpc", strings.TrimSpace(config.ServiceClients.TimelineAddr) != "", isRPCMode(config.ServiceClients.TimelineMode)),
+			dependencyStatus("authority_rpc", strings.TrimSpace(config.ServiceClients.AuthorityAddr) != "", isRPCMode(config.ServiceClients.AuthorityMode)),
 		},
 	)
 }
@@ -511,6 +530,7 @@ func newGinRouter(
 	broadcastInstanceID string,
 	roomBroadcastBus eventbus.RoomBroadcastBus,
 	roomControlBus eventbus.RoomControlBus,
+	authorityControl authority.ControlApplier,
 	authorityRegistry *cache.RoomAuthorityRegistry,
 	activeDeviceRegistry *cache.ActiveDeviceRegistry,
 	controlRequestRegistry *cache.ControlRequestRegistry,
@@ -567,6 +587,7 @@ func newGinRouter(
 	)
 	webSocketHandler.SetMetrics(metrics)
 	webSocketHandler.SetRoomBroadcastBus(broadcastInstanceID, roomBroadcastBus)
+	webSocketHandler.SetAuthorityControlApplier(authorityControl)
 	if normalizeRoomRuntimeMode(runtime.RoomRuntimeMode) == roomRuntimeModeDistributedAuthority {
 		webSocketHandler.SetDistributedAuthorityRuntime(
 			broadcastInstanceID,

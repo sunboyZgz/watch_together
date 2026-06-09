@@ -1,6 +1,6 @@
 # Documentation
 
-This directory is the durable source of truth for the current `watch_together` implementation. It describes what is in the code today, not planned work or historical refactor notes.
+This directory is the durable source of truth for the current `watch_together` implementation. It describes what is in the code today, except for explicitly labeled design documents that define future implementation boundaries.
 
 ## Start Here
 
@@ -9,6 +9,7 @@ This directory is the durable source of truth for the current `watch_together` i
 - [Backend API Contract](./backend-api-contract.md) - HTTP envelope, authentication, media, room, progress, and playback endpoints.
 - [WebSocket Protocol](./websocket-protocol.md) - room sync event envelope, state model, and control rules.
 - [Runtime Boundaries](./runtime-boundaries.md) - current state ownership and Phase 1 statelessness boundary markers.
+- [Room Authority Service Design](./room-authority-service-design.md) - authority boundary design and Phase 14 RPC pilot notes.
 - [Database Ownership](./database-ownership.md) - logical table ownership registry, architecture checks, and future physical split checklist.
 - [Media Operations](./media-operations.md) - `mediactl`, storage drivers, HLS generation, and delivery modes.
 - [Android Client](./android-client.md) - app flow, client modules, player behavior, and configuration.
@@ -28,5 +29,6 @@ Some implementation-specific docs live beside the code they describe:
 
 - Treat code, migrations, and configuration examples as the primary source of truth.
 - Do not document planned or rejected features as implemented behavior.
+- Label design-only documents clearly when they describe future boundaries rather than current runtime behavior.
 - Keep one primary document per topic and link to it instead of duplicating large sections.
 - Move short-lived agent briefs, phase closeouts, TODO lists, and investigation notes out of `docs/` when they no longer explain the current system.

@@ -194,6 +194,8 @@ func TestLoadServerRuntimeConfigRejectsInvalidServiceFoundationSettings(t *testi
 	}{
 		{name: "media rpc missing addr", content: "MEDIA_SERVICE_MODE=rpc\n"},
 		{name: "timeline rpc missing addr", content: "TIMELINE_SERVICE_MODE=rpc\n"},
+		{name: "authority rpc missing addr", content: "AUTHORITY_SERVICE_MODE=rpc\nAUTHORITY_SERVICE_INSTANCE_ID=roomauthorityservice-1\n"},
+		{name: "authority rpc missing instance id", content: "AUTHORITY_SERVICE_MODE=rpc\nAUTHORITY_SERVICE_ADDR=http://roomauthorityservice:8090\n"},
 		{name: "invalid discovery", content: "SERVICE_DISCOVERY_MODE=consul\n"},
 		{name: "invalid sample ratio", content: "OTEL_TRACE_SAMPLE_RATIO=1.5\n"},
 	}

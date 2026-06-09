@@ -11,6 +11,7 @@ import (
 	"github.com/coder/websocket"
 	"golang.org/x/sync/semaphore"
 
+	"watch_together/server/internal/authority"
 	"watch_together/server/internal/cache"
 	"watch_together/server/internal/eventbus"
 	"watch_together/server/internal/observability"
@@ -42,6 +43,7 @@ type WebSocketHandler struct {
 	deviceSwitchTimeout time.Duration
 	roomBroadcastBus    eventbus.RoomBroadcastBus
 	roomControlBus      eventbus.RoomControlBus
+	authorityControl    authority.ControlApplier
 	roomAuthority       roomAuthorityLookup
 	authorityRecovery   roomAuthorityRecovery
 	activeDevices       activeDeviceRegistry
@@ -229,6 +231,13 @@ func (h *WebSocketHandler) SetRoomAuthorityRecovery(authorityRecovery roomAuthor
 		return
 	}
 	h.authorityRecovery = authorityRecovery
+}
+
+func (h *WebSocketHandler) SetAuthorityControlApplier(applier authority.ControlApplier) {
+	if h == nil {
+		return
+	}
+	h.authorityControl = applier
 }
 
 func (h *WebSocketHandler) SetDistributedControlHardening(
@@ -1408,6 +1417,22 @@ func (h *WebSocketHandler) handleControlEvent(
 			h.recordControlRejected(ctx, eventType, roomID, meta, err.Error())
 			return err
 		}
+		if h.authorityControl != nil {
+			authorityEpoch := int64(0)
+			authority, found, err := h.currentRoomAuthority(ctx, roomID)
+			if err != nil {
+				h.recordControlRejected(ctx, eventType, roomID, meta, err.Error())
+				return protocolMessageError{roomID: roomID, message: "room authority unavailable"}
+			}
+			if found && authority.IsRecovering() && !authority.ExpiredAt(h.clock.Now()) {
+				h.recordControlRejected(ctx, eventType, roomID, meta, "room authority recovering")
+				return protocolMessageError{roomID: roomID, message: "room authority recovering"}
+			}
+			if found && authority.IsActive() && !authority.ExpiredAt(h.clock.Now()) {
+				authorityEpoch = authority.Epoch
+			}
+			return h.forwardAuthorityRPCControlEvent(ctx, client, eventType, roomID, meta, sourceEnvelope, authorityEpoch)
+		}
 		authority, found, err := h.currentRoomAuthorityOrRecover(ctx, roomID, "control")
 		if err != nil {
 			message := authorityRecoveryErrorMessage(err)
@@ -1880,6 +1905,101 @@ func (h *WebSocketHandler) forwardControlEvent(
 		Type:    response.Type,
 		Payload: response.Payload,
 	})
+}
+
+func (h *WebSocketHandler) forwardAuthorityRPCControlEvent(
+	ctx context.Context,
+	client *room.ClientConnection,
+	eventType string,
+	roomID string,
+	meta controlEventMeta,
+	envelope protocol.Envelope,
+	authorityEpoch int64,
+) error {
+	if h.authorityControl == nil {
+		err := protocolMessageError{
+			roomID:  roomID,
+			message: "room authority unavailable",
+		}
+		h.recordControlRejected(ctx, eventType, roomID, meta, err.message)
+		return err
+	}
+	meta.AuthorityEpoch = authorityEpoch
+	duplicate, handled, err := h.reserveDistributedControlRequest(ctx, roomID, meta)
+	if err != nil {
+		h.recordControlRejected(ctx, eventType, roomID, meta, controlErrorMessage(err))
+		return err
+	}
+	if handled {
+		return client.WriteJSON(ctx, duplicate)
+	}
+	requestCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	response, err := h.authorityControl.ApplyRoomControl(requestCtx, authority.ApplyControlRequest{
+		SourceInstanceID:       h.instanceID,
+		RoomID:                 roomID,
+		UserID:                 meta.UserID,
+		DeviceID:               client.DeviceID(),
+		ConnectionID:           client.ConnectionID(),
+		Type:                   eventType,
+		Payload:                envelope.Payload,
+		RequestID:              meta.RequestID,
+		Seq:                    meta.ClientSeq,
+		ExpectedAuthorityEpoch: authorityEpoch,
+		RequestedAtMs:          h.clock.NowUnixMilli(),
+	})
+	if err != nil {
+		h.forgetDistributedControlRequest(ctx, roomID, meta.RequestID)
+		h.recordControlRejected(ctx, eventType, roomID, meta, err.Error())
+		return protocolMessageError{roomID: roomID, message: "room authority unavailable"}
+	}
+	if authorityEpoch > 0 && response.AuthorityEpoch > 0 && response.AuthorityEpoch != authorityEpoch {
+		h.forgetDistributedControlRequest(ctx, roomID, meta.RequestID)
+		h.recordControlRejected(ctx, eventType, roomID, meta, "stale authority response")
+		return protocolMessageError{roomID: roomID, message: "room authority unavailable"}
+	}
+	if response.Error != "" {
+		h.finalizeDistributedControlRejected(ctx, roomID, meta, response.Seq, response.Error)
+		h.recordControlRejected(ctx, eventType, roomID, meta, response.Error)
+		return protocolMessageError{roomID: roomID, message: response.Error}
+	}
+	if response.Type == "" {
+		return nil
+	}
+	return client.WriteJSON(ctx, protocol.Envelope{
+		Type:    response.Type,
+		Payload: response.Payload,
+	})
+}
+
+func (h *WebSocketHandler) ApplyRoomControl(
+	ctx context.Context,
+	request authority.ApplyControlRequest,
+) (authority.ApplyControlResponse, error) {
+	if h == nil {
+		return authority.ApplyControlResponse{Error: "room authority unavailable"}, nil
+	}
+	response := h.handleAuthorityRoomControlRequest(ctx, eventbus.RoomControlRequest{
+		SourceInstanceID: request.SourceInstanceID,
+		RoomID:           request.RoomID,
+		UserID:           request.UserID,
+		DeviceID:         request.DeviceID,
+		ConnectionID:     request.ConnectionID,
+		Type:             request.Type,
+		Payload:          request.Payload,
+		RequestID:        request.RequestID,
+		Seq:              request.Seq,
+		AuthorityEpoch:   request.ExpectedAuthorityEpoch,
+		RequestedAtMs:    request.RequestedAtMs,
+	})
+	return authority.ApplyControlResponse{
+		Accepted:       response.Error == "" && response.Type != "",
+		Type:           response.Type,
+		Payload:        response.Payload,
+		Seq:            response.Seq,
+		AuthorityEpoch: response.AuthorityEpoch,
+		Error:          response.Error,
+	}, nil
 }
 
 func (h *WebSocketHandler) handleAuthorityRoomControlRequest(
@@ -2687,6 +2807,19 @@ func (h *WebSocketHandler) seedRecoveredControlRequests(
 		}
 		_ = h.reserveControlRequest(roomID, requestID, h.clock.Now())
 	}
+}
+
+func (h *WebSocketHandler) SeedRecoveredControlRequests(
+	ctx context.Context,
+	roomID string,
+	authorityEpoch int64,
+	requests []recovery.RecoveredRequest,
+	requestIDs []string,
+) {
+	if h == nil {
+		return
+	}
+	h.seedRecoveredControlRequests(ctx, roomID, authorityEpoch, requests, requestIDs)
 }
 
 func (h *WebSocketHandler) seedRecoveredDistributedControlRequest(

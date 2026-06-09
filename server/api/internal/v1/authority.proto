@@ -1,0 +1,103 @@
+syntax = "proto3";
+
+package watch_together.internal.v1;
+
+import "server/api/internal/v1/common.proto";
+
+option go_package = "watch_together/server/internal/rpcgen/v1;internalv1";
+
+service RoomAuthorityInternalService {
+  rpc GetRoomAuthority(GetRoomAuthorityRequest) returns (GetRoomAuthorityResponse);
+  rpc ClaimRoomAuthority(ClaimRoomAuthorityRequest) returns (ClaimRoomAuthorityResponse);
+  rpc RenewRoomAuthority(RenewRoomAuthorityRequest) returns (RenewRoomAuthorityResponse);
+  rpc BeginRoomRecovery(BeginRoomRecoveryRequest) returns (BeginRoomRecoveryResponse);
+  rpc CompleteRoomRecovery(CompleteRoomRecoveryRequest) returns (CompleteRoomRecoveryResponse);
+  rpc ApplyRoomControl(ApplyRoomControlRequest) returns (ApplyRoomControlResponse);
+}
+
+message AuthorityLease {
+  string instance_id = 1;
+  int64 epoch = 2;
+  string status = 3;
+  int64 lease_until_ms = 4;
+}
+
+message GetRoomAuthorityRequest {
+  RequestMetadata metadata = 1;
+  string room_id = 2;
+}
+
+message GetRoomAuthorityResponse {
+  bool found = 1;
+  AuthorityLease lease = 2;
+}
+
+message ClaimRoomAuthorityRequest {
+  RequestMetadata metadata = 1;
+  string room_id = 2;
+  string instance_id = 3;
+}
+
+message ClaimRoomAuthorityResponse {
+  bool claimed = 1;
+  AuthorityLease lease = 2;
+}
+
+message RenewRoomAuthorityRequest {
+  RequestMetadata metadata = 1;
+  string room_id = 2;
+  string instance_id = 3;
+  int64 epoch = 4;
+}
+
+message RenewRoomAuthorityResponse {
+  bool renewed = 1;
+  AuthorityLease lease = 2;
+}
+
+message BeginRoomRecoveryRequest {
+  RequestMetadata metadata = 1;
+  string room_id = 2;
+  string instance_id = 3;
+}
+
+message BeginRoomRecoveryResponse {
+  bool started = 1;
+  AuthorityLease lease = 2;
+}
+
+message CompleteRoomRecoveryRequest {
+  RequestMetadata metadata = 1;
+  string room_id = 2;
+  string instance_id = 3;
+  int64 epoch = 4;
+}
+
+message CompleteRoomRecoveryResponse {
+  bool completed = 1;
+  AuthorityLease lease = 2;
+}
+
+message ApplyRoomControlRequest {
+  RequestMetadata metadata = 1;
+  string source_instance_id = 2;
+  string room_id = 3;
+  string user_id = 4;
+  string device_id = 5;
+  string connection_id = 6;
+  string type = 7;
+  bytes payload = 8;
+  string request_id = 9;
+  int64 seq = 10;
+  int64 expected_authority_epoch = 11;
+  int64 requested_at_ms = 12;
+}
+
+message ApplyRoomControlResponse {
+  bool accepted = 1;
+  string type = 2;
+  bytes payload = 3;
+  int64 seq = 4;
+  int64 authority_epoch = 5;
+  string error = 6;
+}

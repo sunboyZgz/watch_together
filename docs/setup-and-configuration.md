@@ -137,6 +137,9 @@ MEDIA_SERVICE_MODE=local
 MEDIA_SERVICE_ADDR=
 TIMELINE_SERVICE_MODE=rpc
 TIMELINE_SERVICE_ADDR=http://127.0.0.1:8091
+AUTHORITY_SERVICE_MODE=local
+AUTHORITY_SERVICE_ADDR=
+AUTHORITY_SERVICE_INSTANCE_ID=
 OTEL_TRACING_ENABLED=false
 OTEL_SERVICE_NAME=watch-together-roomserver
 OTEL_EXPORTER_OTLP_ENDPOINT=
@@ -207,10 +210,11 @@ Service foundation settings:
 
 - `SERVICE_NAME` and `SERVICE_VERSION` identify the current process in logs, internal RPC metadata, and traces.
 - `INTERNAL_RPC_*` configures optional ConnectRPC service endpoints. `INTERNAL_RPC_AUTH_TOKEN` protects internal calls when configured and is required for production internal RPC.
-- `SERVICE_DISCOVERY_MODE=static` is the only supported discovery mode in Phase 7 through Phase 11.
-- `MEDIA_SERVICE_MODE` and `TIMELINE_SERVICE_MODE` accept `local` or `rpc`. `local` keeps current in-process adapters. `rpc` calls `MEDIA_SERVICE_ADDR` or `TIMELINE_SERVICE_ADDR`.
+- `SERVICE_DISCOVERY_MODE=static` is the only supported discovery mode in Phase 7 through Phase 14.
+- `MEDIA_SERVICE_MODE`, `TIMELINE_SERVICE_MODE`, and `AUTHORITY_SERVICE_MODE` accept `local` or `rpc`. `local` keeps current in-process adapters. `rpc` calls `MEDIA_SERVICE_ADDR`, `TIMELINE_SERVICE_ADDR`, or `AUTHORITY_SERVICE_ADDR`.
+- `AUTHORITY_SERVICE_MODE=rpc` also requires `AUTHORITY_SERVICE_INSTANCE_ID`, which is the Redis authority lease identity claimed during HTTP room bootstrap for the pilot service.
 - `OTEL_TRACING_ENABLED` turns on OpenTelemetry tracing. `OTEL_EXPORTER_OTLP_ENDPOINT` points at the internal OTLP collector, and `OTEL_TRACE_SAMPLE_RATIO` must be between `0` and `1`.
-- Phase 9 keeps the old single-database fallback but can put media-owned tables in an independent PostgreSQL database through `MEDIA_DATABASE_URL`. Phase 10 does the same for timeline-owned outbox rows through `TIMELINE_DATABASE_URL`. Phase 11 makes timeline RPC the compose default while preserving `local` as an explicit single-process rollback path. Table owners and future split rules are documented in [Database Ownership](./database-ownership.md) and enforced from `server/internal/store/db_ownership.yaml`.
+- Phase 9 keeps the old single-database fallback but can put media-owned tables in an independent PostgreSQL database through `MEDIA_DATABASE_URL`. Phase 10 does the same for timeline-owned outbox rows through `TIMELINE_DATABASE_URL`. Phase 11 makes timeline RPC the compose default while preserving `local` as an explicit single-process rollback path, Phase 12 moves result timeline ownership into `cmd/timelineservice`, Phase 13 documents the authority boundary, and Phase 14 adds a non-default `roomauthorityservice` RPC pilot under `rpc-pilot`. Table owners and future split rules are documented in [Database Ownership](./database-ownership.md) and enforced from `server/internal/store/db_ownership.yaml`.
 
 See [distributed-architecture.md](./distributed-architecture.md) for the current module map, business flows, and monitoring data flow.
 
@@ -294,7 +298,7 @@ OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4318 \
 docker compose --profile rpc-pilot up -d --build
 ```
 
-`rpc-pilot` starts `roomserver`, `mediaservice`, `timelineservice`, an OTLP collector, and the media/timeline database init jobs. `mediaservice` uses `MEDIA_DATABASE_URL=postgres://app:app@postgres:5432/anime_watch_media_dev?sslmode=disable` in compose. `timelineservice` and `outboxworker` use `TIMELINE_DATABASE_URL=postgres://app:app@postgres:5432/anime_watch_timeline_dev?sslmode=disable`. Phase 11 also makes `timelineservice` part of the normal compose `app` path, so `roomserver` uses timeline RPC by default in local compose and prod compose. The code still supports `TIMELINE_SERVICE_MODE=local` for explicit rollback or bare single-process debugging.
+`rpc-pilot` starts `roomserver-rpc-pilot`, `mediaservice`, `timelineservice`, `roomauthorityservice`, an OTLP collector, and the media/timeline database init jobs. In this profile `roomserver-rpc-pilot` sets `ROOM_RUNTIME_MODE=distributed_authority`, `AUTHORITY_SERVICE_MODE=rpc`, and `AUTHORITY_SERVICE_ADDR=http://roomauthorityservice:8090`. `mediaservice` uses `MEDIA_DATABASE_URL=postgres://app:app@postgres:5432/anime_watch_media_dev?sslmode=disable` in compose. `timelineservice` and `outboxworker` use `TIMELINE_DATABASE_URL=postgres://app:app@postgres:5432/anime_watch_timeline_dev?sslmode=disable`. Phase 11 also makes `timelineservice` part of the normal compose `app` path, so `roomserver` uses timeline RPC by default in local compose and prod compose. The code still supports `TIMELINE_SERVICE_MODE=local` and `AUTHORITY_SERVICE_MODE=local` for explicit rollback or bare single-process debugging.
 
 RPC pilot smoke checks:
 

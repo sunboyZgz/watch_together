@@ -119,8 +119,8 @@ services:
       mc anonymous set download local/watch-together-media;
       "
 
-  roomserver:
-    profiles: ["app", "rpc-pilot"]
+  roomserver: &roomserver_base
+    profiles: ["app"]
     build:
       context: .
       dockerfile: Dockerfile
@@ -136,7 +136,7 @@ services:
       - timelineservice
     env_file:
       - .env
-    environment:
+    environment: &roomserver_environment
       APP_ENV: local
       SERVER_HOST: 0.0.0.0
       SERVER_PORT: 8080
@@ -179,6 +179,9 @@ services:
       TIMELINE_SERVICE_MODE: ${TIMELINE_SERVICE_MODE:-rpc}
       TIMELINE_SERVICE_ADDR: ${TIMELINE_SERVICE_ADDR:-http://timelineservice:8090}
       TIMELINE_DATABASE_URL: ${ROOMSERVER_TIMELINE_DATABASE_URL:-}
+      AUTHORITY_SERVICE_MODE: ${AUTHORITY_SERVICE_MODE:-local}
+      AUTHORITY_SERVICE_ADDR: ${AUTHORITY_SERVICE_ADDR:-}
+      AUTHORITY_SERVICE_INSTANCE_ID: ${AUTHORITY_SERVICE_INSTANCE_ID:-}
       OTEL_TRACING_ENABLED: ${OTEL_TRACING_ENABLED:-false}
       OTEL_SERVICE_NAME: ${OTEL_SERVICE_NAME:-watch-together-roomserver}
       OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
@@ -198,6 +201,28 @@ services:
       MEDIA_STORAGE_ACCESS_KEY_ID: minioadmin
       MEDIA_STORAGE_SECRET_ACCESS_KEY: minioadmin
       MEDIA_STORAGE_FORCE_PATH_STYLE: "true"
+
+  roomserver-rpc-pilot:
+    <<: *roomserver_base
+    profiles: ["rpc-pilot"]
+    container_name: anime-watch-roomserver-rpc-pilot
+    depends_on:
+      - postgres
+      - redis
+      - nats
+      - kafka
+      - minio-init
+      - timelineservice
+      - roomauthorityservice
+    environment:
+      <<: *roomserver_environment
+      SERVER_INSTANCE_ID: ${SERVER_INSTANCE_ID:-local-roomserver-1}
+      ROOM_RUNTIME_MODE: ${ROOM_RUNTIME_MODE:-distributed_authority}
+      WS_CROSS_INSTANCE_BROADCAST_ENABLED: ${WS_CROSS_INSTANCE_BROADCAST_ENABLED:-true}
+      REDIS_REQUIRED: "true"
+      AUTHORITY_SERVICE_MODE: rpc
+      AUTHORITY_SERVICE_ADDR: http://roomauthorityservice:8090
+      AUTHORITY_SERVICE_INSTANCE_ID: ${AUTHORITY_SERVICE_INSTANCE_ID:-roomauthorityservice-1}
 
   outboxworker:
     profiles: ["app"]
@@ -309,6 +334,55 @@ services:
       KAFKA_TOPIC_ROOM_TIMELINE: ${KAFKA_TOPIC_ROOM_TIMELINE:-wt.room.timeline.v1}
       KAFKA_REPLAY_TIMEOUT_MS: ${KAFKA_REPLAY_TIMEOUT_MS:-1000}
     command: ["/app/timelineservice"]
+
+  roomauthorityservice:
+    profiles: ["rpc-pilot"]
+    image: watch-together-roomserver:dev
+    container_name: anime-watch-roomauthorityservice
+    restart: unless-stopped
+    depends_on:
+      - postgres
+      - redis
+      - nats
+      - timeline-postgres-init
+      - timelineservice
+    env_file:
+      - .env
+    environment:
+      APP_ENV: local
+      SERVICE_NAME: watch-together-roomauthorityservice
+      SERVICE_VERSION: ${SERVICE_VERSION:-dev}
+      SERVER_INSTANCE_ID: ${AUTHORITY_SERVICE_INSTANCE_ID:-roomauthorityservice-1}
+      DEBUG_SYNC: "true"
+      INTERNAL_RPC_ADDR: :8090
+      INTERNAL_RPC_PATH_PREFIX: ${INTERNAL_RPC_PATH_PREFIX:-/internal.rpc}
+      INTERNAL_RPC_TIMEOUT_MS: ${INTERNAL_RPC_TIMEOUT_MS:-1000}
+      INTERNAL_RPC_AUTH_TOKEN: ${INTERNAL_RPC_AUTH_TOKEN:-}
+      TIMELINE_SERVICE_MODE: rpc
+      TIMELINE_SERVICE_ADDR: ${TIMELINE_SERVICE_ADDR:-http://timelineservice:8090}
+      WS_CROSS_INSTANCE_BROADCAST_ENABLED: "true"
+      WS_EVENT_BUS: ${WS_EVENT_BUS:-nats_core}
+      NATS_URL: ${NATS_URL:-nats://nats:4222}
+      NATS_NAME: watch-together-roomauthorityservice
+      NATS_SUBJECT_ROOM_BROADCAST: ${NATS_SUBJECT_ROOM_BROADCAST:-wt.room.broadcast.v1}
+      CONTROL_IDEMPOTENCY_TTL_MS: ${CONTROL_IDEMPOTENCY_TTL_MS:-600000}
+      WS_SEEK_MIN_INTERVAL_MS: ${WS_SEEK_MIN_INTERVAL_MS:-250}
+      AUTHORITY_RENEW_INTERVAL_MS: ${AUTHORITY_RENEW_INTERVAL_MS:-10000}
+      AUTHORITY_TAKEOVER_SCAN_INTERVAL_MS: ${AUTHORITY_TAKEOVER_SCAN_INTERVAL_MS:-30000}
+      AUTHORITY_RECOVERY_TIMEOUT_MS: ${AUTHORITY_RECOVERY_TIMEOUT_MS:-5000}
+      METRICS_ENABLED: ${METRICS_ENABLED:-true}
+      METRICS_PATH: ${METRICS_PATH:-/metrics}
+      READINESS_PATH: ${READINESS_PATH:-/readyz}
+      OTEL_TRACING_ENABLED: ${OTEL_TRACING_ENABLED:-false}
+      OTEL_SERVICE_NAME: ${OTEL_SERVICE_NAME:-watch-together-roomauthorityservice}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+      OTEL_TRACE_SAMPLE_RATIO: ${OTEL_TRACE_SAMPLE_RATIO:-0.1}
+      DATABASE_URL: postgres://app:app@postgres:5432/anime_watch_dev?sslmode=disable
+      REDIS_ADDR: redis:6380
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-watch_together_redis_dev}
+      REDIS_DB: 0
+      REDIS_REQUIRED: "true"
+    command: ["/app/roomauthorityservice"]
 
   nginx:
     profiles: ["app"]
