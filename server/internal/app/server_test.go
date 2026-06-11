@@ -107,7 +107,9 @@ func TestGinRouterMetricsDisabled(t *testing.T) {
 		transport.NewMediaHTTPHandler(nil),
 		transport.NewProgressHTTPHandler(nil),
 		runtimeBoundary{},
-		testReadinessSnapshot("", "local_process"),
+		func(context.Context) observability.ReadinessSnapshot {
+			return testReadinessSnapshot("", "local_process")
+		},
 		observability.Config{MetricsEnabled: false}.Normalized(),
 		observability.NewMetrics(),
 		"",
@@ -180,7 +182,9 @@ func TestReadinessSnapshotReportsMediaPostgresBoundary(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			snapshot := readinessSnapshotFromConfig(
+				context.Background(),
 				tc.config,
+				nil,
 				nil,
 				tc.mediaDB,
 				nil,
@@ -256,7 +260,9 @@ func TestReadinessSnapshotReportsTimelinePostgresBoundary(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			snapshot := readinessSnapshotFromConfig(
+				context.Background(),
 				tc.config,
+				nil,
 				nil,
 				nil,
 				tc.timelineDB,
@@ -280,6 +286,77 @@ func TestReadinessSnapshotReportsTimelinePostgresBoundary(t *testing.T) {
 				)
 			}
 		})
+	}
+}
+
+func TestReadinessSnapshotProbesRPCDependencies(t *testing.T) {
+	readyServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"status":"ready"}`))
+	}))
+	defer readyServer.Close()
+	notReadyServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte(`{"status":"not_ready"}`))
+	}))
+	defer notReadyServer.Close()
+
+	baseConfig := Config{
+		AppEnv:          "test",
+		RoomRuntimeMode: roomRuntimeModeLocalProcess,
+		Observability:   observability.Config{ReadinessPath: "/readyz"},
+		ServiceClients: ServiceClientsConfig{
+			IdentityMode:  "rpc",
+			IdentityAddr:  readyServer.URL,
+			MediaMode:     "rpc",
+			MediaAddr:     readyServer.URL,
+			TimelineMode:  "rpc",
+			TimelineAddr:  readyServer.URL,
+			AuthorityMode: "rpc",
+			AuthorityAddr: readyServer.URL,
+		},
+	}
+	snapshot := readinessSnapshotFromConfig(
+		context.Background(),
+		baseConfig,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		eventbus.NewDisabledRoomBroadcastBus(),
+		eventbus.NewDisabledRoomControlBus(),
+		nil,
+		nil,
+	)
+	if snapshot.Status != "ready" {
+		t.Fatalf("expected ready RPC dependencies to make snapshot ready, got %+v", snapshot)
+	}
+	for _, name := range []string{"identity_rpc", "media_rpc", "timeline_rpc", "authority_rpc"} {
+		dependency, ok := dependencyByName(snapshot.Dependencies, name)
+		if !ok || dependency.Status != "ok" || !dependency.Required {
+			t.Fatalf("expected %s to be required and ok, got %+v", name, dependency)
+		}
+	}
+
+	baseConfig.ServiceClients.AuthorityAddr = notReadyServer.URL
+	snapshot = readinessSnapshotFromConfig(
+		context.Background(),
+		baseConfig,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		eventbus.NewDisabledRoomBroadcastBus(),
+		eventbus.NewDisabledRoomControlBus(),
+		nil,
+		nil,
+	)
+	dependency, ok := dependencyByName(snapshot.Dependencies, "authority_rpc")
+	if !ok || dependency.Status != "unavailable" || snapshot.Status != "not_ready" {
+		t.Fatalf("expected unavailable authority RPC to make snapshot not ready, dependency=%+v snapshot=%+v", dependency, snapshot)
 	}
 }
 
@@ -405,7 +482,9 @@ func newTestGinRouterWithRuntime(runtime runtimeBoundary) http.Handler {
 		transport.NewMediaHTTPHandler(nil),
 		transport.NewProgressHTTPHandler(nil),
 		runtime,
-		testReadinessSnapshot(runtime.InstanceID, normalizeRoomRuntimeMode(runtime.RoomRuntimeMode)),
+		func(context.Context) observability.ReadinessSnapshot {
+			return testReadinessSnapshot(runtime.InstanceID, normalizeRoomRuntimeMode(runtime.RoomRuntimeMode))
+		},
 		observability.Config{MetricsEnabled: true}.Normalized(),
 		observability.NewMetrics(),
 		"",

@@ -1,0 +1,64 @@
+syntax = "proto3";
+
+package watch_together.internal.v1;
+
+import "server/api/internal/v1/common.proto";
+
+option go_package = "watch_together/server/internal/rpcgen/v1;internalv1";
+
+service IdentityInternalService {
+  rpc Register(RegisterRequest) returns (RegisterResponse);
+  rpc Login(LoginRequest) returns (LoginResponse);
+  rpc VerifyAccessToken(VerifyAccessTokenRequest) returns (VerifyAccessTokenResponse);
+  rpc GetUserProfile(GetUserProfileRequest) returns (GetUserProfileResponse);
+}
+
+message RegisterRequest {
+  RequestMetadata metadata = 1;
+  string account = 2;
+  string password = 3;
+  string nickname = 4;
+}
+
+message LoginRequest {
+  RequestMetadata metadata = 1;
+  string account = 2;
+  string password = 3;
+}
+
+message RegisterResponse {
+  IdentityUser user = 1;
+  string access_token = 2;
+}
+
+message LoginResponse {
+  IdentityUser user = 1;
+  string access_token = 2;
+}
+
+message VerifyAccessTokenRequest {
+  RequestMetadata metadata = 1;
+  string access_token = 2;
+}
+
+message VerifyAccessTokenResponse {
+  string user_id = 1;
+}
+
+message GetUserProfileRequest {
+  RequestMetadata metadata = 1;
+  string user_id = 2;
+}
+
+message GetUserProfileResponse {
+  IdentityUser user = 1;
+}
+
+message IdentityUser {
+  string id = 1;
+  string account = 2;
+  string nickname = 3;
+  string avatar_seed = 4;
+  optional string avatar_url = 5;
+  optional string bio = 6;
+}

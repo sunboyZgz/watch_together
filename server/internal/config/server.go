@@ -21,6 +21,7 @@ type ServerRuntimeConfig struct {
 	InstanceID          string
 	RoomRuntimeMode     string
 	DatabaseURL         string
+	IdentityDatabaseURL string
 	MediaDatabaseURL    string
 	TimelineDatabaseURL string
 	DebugSync           bool
@@ -119,6 +120,8 @@ type InternalRPCConfig struct {
 
 type ServiceClientsConfig struct {
 	DiscoveryMode    string
+	IdentityMode     string
+	IdentityAddr     string
 	MediaMode        string
 	MediaAddr        string
 	TimelineMode     string
@@ -201,6 +204,8 @@ func LoadServerRuntimeConfig(configDir string) (ServerRuntimeConfig, error) {
 		"INTERNAL_RPC_TIMEOUT_MS":               1000,
 		"INTERNAL_RPC_AUTH_TOKEN":               "",
 		"SERVICE_DISCOVERY_MODE":                "static",
+		"IDENTITY_SERVICE_MODE":                 "local",
+		"IDENTITY_SERVICE_ADDR":                 "",
 		"MEDIA_SERVICE_MODE":                    "local",
 		"MEDIA_SERVICE_ADDR":                    "",
 		"TIMELINE_SERVICE_MODE":                 "local",
@@ -224,6 +229,7 @@ func LoadServerRuntimeConfig(configDir string) (ServerRuntimeConfig, error) {
 		"SERVER_INSTANCE_ID",
 		"ROOM_RUNTIME_MODE",
 		"DATABASE_URL",
+		"IDENTITY_DATABASE_URL",
 		"MEDIA_DATABASE_URL",
 		"TIMELINE_DATABASE_URL",
 		"DEBUG_SYNC",
@@ -276,6 +282,8 @@ func LoadServerRuntimeConfig(configDir string) (ServerRuntimeConfig, error) {
 		"INTERNAL_RPC_TIMEOUT_MS",
 		"INTERNAL_RPC_AUTH_TOKEN",
 		"SERVICE_DISCOVERY_MODE",
+		"IDENTITY_SERVICE_MODE",
+		"IDENTITY_SERVICE_ADDR",
 		"MEDIA_SERVICE_MODE",
 		"MEDIA_SERVICE_ADDR",
 		"TIMELINE_SERVICE_MODE",
@@ -321,6 +329,7 @@ func LoadServerRuntimeConfig(configDir string) (ServerRuntimeConfig, error) {
 		InstanceID:          trimmedString(loader, "SERVER_INSTANCE_ID"),
 		RoomRuntimeMode:     roomRuntimeMode,
 		DatabaseURL:         trimmedString(loader, "DATABASE_URL"),
+		IdentityDatabaseURL: trimmedString(loader, "IDENTITY_DATABASE_URL"),
 		MediaDatabaseURL:    trimmedString(loader, "MEDIA_DATABASE_URL"),
 		TimelineDatabaseURL: trimmedString(loader, "TIMELINE_DATABASE_URL"),
 		DebugSync:           strings.EqualFold(strings.TrimSpace(loader.GetString("DEBUG_SYNC")), "true"),
@@ -394,6 +403,8 @@ func LoadServerRuntimeConfig(configDir string) (ServerRuntimeConfig, error) {
 		},
 		ServiceClients: ServiceClientsConfig{
 			DiscoveryMode:    strings.ToLower(trimmedString(loader, "SERVICE_DISCOVERY_MODE")),
+			IdentityMode:     strings.ToLower(trimmedString(loader, "IDENTITY_SERVICE_MODE")),
+			IdentityAddr:     trimmedString(loader, "IDENTITY_SERVICE_ADDR"),
 			MediaMode:        strings.ToLower(trimmedString(loader, "MEDIA_SERVICE_MODE")),
 			MediaAddr:        trimmedString(loader, "MEDIA_SERVICE_ADDR"),
 			TimelineMode:     strings.ToLower(trimmedString(loader, "TIMELINE_SERVICE_MODE")),
@@ -440,6 +451,14 @@ func LoadRoomserverRuntimeConfig(configDir string) (ServerRuntimeConfig, error) 
 }
 
 func validateRoomserverRuntimeConfig(config ServerRuntimeConfig) error {
+	if normalizeServiceMode(config.ServiceClients.IdentityMode) == "rpc" &&
+		strings.TrimSpace(config.IdentityDatabaseURL) != "" {
+		return fmt.Errorf("IDENTITY_DATABASE_URL must be empty for roomserver when IDENTITY_SERVICE_MODE=rpc; use ROOMSERVER_IDENTITY_DATABASE_URL only with IDENTITY_SERVICE_MODE=local")
+	}
+	if normalizeServiceMode(config.ServiceClients.MediaMode) == "rpc" &&
+		strings.TrimSpace(config.MediaDatabaseURL) != "" {
+		return fmt.Errorf("MEDIA_DATABASE_URL must be empty for roomserver when MEDIA_SERVICE_MODE=rpc; use ROOMSERVER_MEDIA_DATABASE_URL only with MEDIA_SERVICE_MODE=local")
+	}
 	if normalizeServiceMode(config.ServiceClients.TimelineMode) == "rpc" &&
 		strings.TrimSpace(config.TimelineDatabaseURL) != "" {
 		return fmt.Errorf("TIMELINE_DATABASE_URL must be empty for roomserver when TIMELINE_SERVICE_MODE=rpc; use ROOMSERVER_TIMELINE_DATABASE_URL only with TIMELINE_SERVICE_MODE=local")
@@ -507,6 +526,9 @@ func validateServiceConfig(config ServerRuntimeConfig) error {
 	if mode := normalizeServiceMode(config.ServiceClients.MediaMode); mode != "local" && mode != "rpc" {
 		return fmt.Errorf("unsupported MEDIA_SERVICE_MODE %q; supported values: local, rpc", config.ServiceClients.MediaMode)
 	}
+	if mode := normalizeServiceMode(config.ServiceClients.IdentityMode); mode != "local" && mode != "rpc" {
+		return fmt.Errorf("unsupported IDENTITY_SERVICE_MODE %q; supported values: local, rpc", config.ServiceClients.IdentityMode)
+	}
 	if mode := normalizeServiceMode(config.ServiceClients.TimelineMode); mode != "local" && mode != "rpc" {
 		return fmt.Errorf("unsupported TIMELINE_SERVICE_MODE %q; supported values: local, rpc", config.ServiceClients.TimelineMode)
 	}
@@ -515,6 +537,9 @@ func validateServiceConfig(config ServerRuntimeConfig) error {
 	}
 	if normalizeServiceMode(config.ServiceClients.MediaMode) == "rpc" && strings.TrimSpace(config.ServiceClients.MediaAddr) == "" {
 		return fmt.Errorf("MEDIA_SERVICE_ADDR is required when MEDIA_SERVICE_MODE=rpc")
+	}
+	if normalizeServiceMode(config.ServiceClients.IdentityMode) == "rpc" && strings.TrimSpace(config.ServiceClients.IdentityAddr) == "" {
+		return fmt.Errorf("IDENTITY_SERVICE_ADDR is required when IDENTITY_SERVICE_MODE=rpc")
 	}
 	if normalizeServiceMode(config.ServiceClients.TimelineMode) == "rpc" && strings.TrimSpace(config.ServiceClients.TimelineAddr) == "" {
 		return fmt.Errorf("TIMELINE_SERVICE_ADDR is required when TIMELINE_SERVICE_MODE=rpc")

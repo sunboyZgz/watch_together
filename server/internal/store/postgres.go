@@ -83,6 +83,19 @@ func (s *PostgresUserStore) FindUserByAccount(ctx context.Context, account strin
 	return userFromModel(dbUser), nil
 }
 
+// FindUserByID loads a public user profile by canonical user id.
+func (s *PostgresUserStore) FindUserByID(ctx context.Context, userID string) (auth.User, error) {
+	var dbUser model.User
+	err := s.db.WithContext(ctx).Where("id = ?", userID).First(&dbUser).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return auth.User{}, auth.ErrUserNotFound
+		}
+		return auth.User{}, fmt.Errorf("find user by id: %w", err)
+	}
+	return userFromModel(dbUser), nil
+}
+
 type rowScanner interface {
 	Scan(dest ...any) error
 }

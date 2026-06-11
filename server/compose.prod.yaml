@@ -17,7 +17,6 @@ services:
       retries: 5
 
   media-postgres-init:
-    profiles: ["services"]
     image: postgres:16-alpine
     restart: "no"
     depends_on:
@@ -129,6 +128,8 @@ services:
         condition: service_started
       kafka:
         condition: service_started
+      mediaservice:
+        condition: service_started
       timelineservice:
         condition: service_started
       minio-init:
@@ -172,9 +173,9 @@ services:
       INTERNAL_RPC_TIMEOUT_MS: ${INTERNAL_RPC_TIMEOUT_MS:-1000}
       INTERNAL_RPC_AUTH_TOKEN: ${INTERNAL_RPC_AUTH_TOKEN:-change_me_internal_rpc_token}
       SERVICE_DISCOVERY_MODE: ${SERVICE_DISCOVERY_MODE:-static}
-      MEDIA_SERVICE_MODE: ${MEDIA_SERVICE_MODE:-local}
+      MEDIA_SERVICE_MODE: ${MEDIA_SERVICE_MODE:-rpc}
       MEDIA_SERVICE_ADDR: ${MEDIA_SERVICE_ADDR:-http://mediaservice:8090}
-      MEDIA_DATABASE_URL: ${MEDIA_DATABASE_URL:-}
+      MEDIA_DATABASE_URL: ${ROOMSERVER_MEDIA_DATABASE_URL:-}
       TIMELINE_SERVICE_MODE: ${TIMELINE_SERVICE_MODE:-rpc}
       TIMELINE_SERVICE_ADDR: ${TIMELINE_SERVICE_ADDR:-http://timelineservice:8090}
       TIMELINE_DATABASE_URL: ${ROOMSERVER_TIMELINE_DATABASE_URL:-}
@@ -252,7 +253,6 @@ services:
     command: ["/app/derivedworker"]
 
   mediaservice:
-    profiles: ["services"]
     image: watch-together-roomserver:${WATCH_TOGETHER_IMAGE_TAG:-prod}
     restart: unless-stopped
     depends_on:

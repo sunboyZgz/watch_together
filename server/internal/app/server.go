@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -40,6 +41,7 @@ type Config struct {
 	InstanceID          string
 	RoomRuntimeMode     string
 	DatabaseURL         string
+	IdentityDatabaseURL string
 	MediaDatabaseURL    string
 	TimelineDatabaseURL string
 	DebugSync           bool
@@ -78,6 +80,8 @@ type ServiceClientsConfig struct {
 	DiscoveryMode    string
 	MediaMode        string
 	MediaAddr        string
+	IdentityMode     string
+	IdentityAddr     string
 	TimelineMode     string
 	TimelineAddr     string
 	AuthorityMode    string
@@ -107,12 +111,17 @@ type Server struct {
 	roomManager       *room.Manager
 	redis             *cache.RedisClient
 	db                *gorm.DB
+	identityDB        *gorm.DB
 	mediaDB           *gorm.DB
 	timelineDB        *gorm.DB
 	cancel            context.CancelFunc
 	eventBus          eventbus.RoomBroadcastBus
 	controlBus        eventbus.RoomControlBus
 	telemetryShutdown telemetry.ShutdownFunc
+}
+
+type accessTokenVerifier interface {
+	VerifyAccessToken(rawToken string) (auth.TokenClaims, error)
 }
 
 const (
@@ -167,6 +176,10 @@ func NewServer(config Config) *Server {
 	if distributedAuthority && db == nil {
 		log.Fatal("distributed_authority requires postgres")
 	}
+	var identityDB *gorm.DB
+	if !isRPCMode(config.ServiceClients.IdentityMode) && strings.TrimSpace(config.IdentityDatabaseURL) != "" {
+		identityDB = newPostgresDB("identity_postgres", config.IdentityDatabaseURL)
+	}
 	var mediaDB *gorm.DB
 	if !isRPCMode(config.ServiceClients.MediaMode) && strings.TrimSpace(config.MediaDatabaseURL) != "" {
 		mediaDB = newPostgresDB("media_postgres", config.MediaDatabaseURL)
@@ -176,6 +189,7 @@ func NewServer(config Config) *Server {
 		timelineDB = newPostgresDB("timeline_postgres", config.TimelineDatabaseURL)
 	}
 	mediaService := newMediaService(db, mediaDB, config, serviceConfig)
+	identityService := newIdentityService(db, identityDB, config, serviceConfig, tokenManager)
 	roomService, roomStore := newRoomService(db, mediaService)
 	var timelineRecorder timeline.ResultRecorder = timeline.NoopRecorder{}
 	var timelineRecoveryReader timeline.RecoveryReader
@@ -218,7 +232,7 @@ func NewServer(config Config) *Server {
 	roomHTTPHandler := transport.NewRoomHTTPHandlerWithTokenVerifierAndRoomStateWriter(
 		roomManager,
 		roomService,
-		tokenManager,
+		identityService,
 		roomStateCache,
 		config.Media,
 	)
@@ -272,24 +286,26 @@ func NewServer(config Config) *Server {
 	if distributedAuthority && isRPCMode(config.ServiceClients.AuthorityMode) {
 		authorityControl = authority.NewRPCClient(config.ServiceClients.AuthorityAddr, internalRPCClientConfig(config, serviceConfig))
 	}
-	authHTTPHandler := transport.NewAuthHTTPHandler(newAuthService(db, tokenManager))
-	homeHTTPHandler := transport.NewHomeHTTPHandlerWithTokenVerifier(newHomeService(db, mediaService), tokenManager)
-	mediaHTTPHandler := transport.NewMediaHTTPHandlerWithTokenVerifier(mediaService, tokenManager, config.Media)
-	progressHTTPHandler := transport.NewProgressHTTPHandlerWithTokenVerifier(newProgressService(db, mediaService), tokenManager)
+	authHTTPHandler := transport.NewAuthHTTPHandler(identityService)
+	homeHTTPHandler := transport.NewHomeHTTPHandlerWithTokenVerifier(newHomeService(db, mediaService), identityService)
+	mediaHTTPHandler := transport.NewMediaHTTPHandlerWithTokenVerifier(mediaService, identityService, config.Media)
+	progressHTTPHandler := transport.NewProgressHTTPHandlerWithTokenVerifier(newProgressService(db, mediaService), identityService)
 	router := newGinRouter(
 		serverCtx,
 		roomManager,
 		config.DebugSync,
 		config.WebSocket,
 		roomStateCache,
-		tokenManager,
+		identityService,
 		roomHTTPHandler,
 		authHTTPHandler,
 		homeHTTPHandler,
 		mediaHTTPHandler,
 		progressHTTPHandler,
 		runtimeBoundaryFromConfig(config),
-		readinessSnapshotFromConfig(config, db, mediaDB, timelineDB, redisClient, roomBroadcastBus, roomControlBus, timelineOutboxStore, authorityRecovery),
+		func(ctx context.Context) observability.ReadinessSnapshot {
+			return readinessSnapshotFromConfig(ctx, config, db, identityDB, mediaDB, timelineDB, redisClient, roomBroadcastBus, roomControlBus, timelineOutboxStore, authorityRecovery)
+		},
 		observabilityConfig,
 		metrics,
 		broadcastInstanceID,
@@ -316,6 +332,7 @@ func NewServer(config Config) *Server {
 		roomManager:       roomManager,
 		redis:             redisClient,
 		db:                db,
+		identityDB:        identityDB,
 		mediaDB:           mediaDB,
 		timelineDB:        timelineDB,
 		cancel:            cancel,
@@ -361,8 +378,10 @@ func runtimeBoundaryFromConfig(config Config) runtimeBoundary {
 }
 
 func readinessSnapshotFromConfig(
+	ctx context.Context,
 	config Config,
 	db *gorm.DB,
+	identityDB *gorm.DB,
 	mediaDB *gorm.DB,
 	timelineDB *gorm.DB,
 	redisClient *cache.RedisClient,
@@ -378,6 +397,7 @@ func readinessSnapshotFromConfig(
 		normalizeRoomRuntimeMode(config.RoomRuntimeMode),
 		[]observability.DependencyStatus{
 			dependencyStatus("postgres", db != nil, distributedAuthority || strings.TrimSpace(config.DatabaseURL) != ""),
+			dependencyStatus("identity_postgres", identityDB != nil, !isRPCMode(config.ServiceClients.IdentityMode) && strings.TrimSpace(config.IdentityDatabaseURL) != ""),
 			dependencyStatus("media_postgres", mediaDB != nil, !isRPCMode(config.ServiceClients.MediaMode) && strings.TrimSpace(config.MediaDatabaseURL) != ""),
 			dependencyStatus("timeline_postgres", timelineDB != nil, !isRPCMode(config.ServiceClients.TimelineMode) && strings.TrimSpace(config.TimelineDatabaseURL) != ""),
 			dependencyStatus("redis", redisClient != nil, distributedAuthority || config.Redis.Enabled()),
@@ -386,9 +406,10 @@ func readinessSnapshotFromConfig(
 			dependencyStatus("kafka", len(config.Kafka.Brokers) > 0, distributedAuthority),
 			dependencyStatus("outbox", timelineOutboxStore != nil || isRPCMode(config.ServiceClients.TimelineMode), distributedAuthority),
 			dependencyStatus("recovery", authorityRecovery != nil, distributedAuthority),
-			dependencyStatus("media_rpc", strings.TrimSpace(config.ServiceClients.MediaAddr) != "", isRPCMode(config.ServiceClients.MediaMode)),
-			dependencyStatus("timeline_rpc", strings.TrimSpace(config.ServiceClients.TimelineAddr) != "", isRPCMode(config.ServiceClients.TimelineMode)),
-			dependencyStatus("authority_rpc", strings.TrimSpace(config.ServiceClients.AuthorityAddr) != "", isRPCMode(config.ServiceClients.AuthorityMode)),
+			rpcDependencyStatus(ctx, "identity_rpc", config.ServiceClients.IdentityAddr, config.Observability, isRPCMode(config.ServiceClients.IdentityMode)),
+			rpcDependencyStatus(ctx, "media_rpc", config.ServiceClients.MediaAddr, config.Observability, isRPCMode(config.ServiceClients.MediaMode)),
+			rpcDependencyStatus(ctx, "timeline_rpc", config.ServiceClients.TimelineAddr, config.Observability, isRPCMode(config.ServiceClients.TimelineMode)),
+			rpcDependencyStatus(ctx, "authority_rpc", config.ServiceClients.AuthorityAddr, config.Observability, isRPCMode(config.ServiceClients.AuthorityMode)),
 		},
 	)
 }
@@ -401,6 +422,40 @@ func dependencyStatus(name string, ok bool, required bool) observability.Depende
 		status = "unavailable"
 	}
 	return observability.DependencyStatus{Name: name, Status: status, Required: required}
+}
+
+func rpcDependencyStatus(ctx context.Context, name string, addr string, config observability.Config, required bool) observability.DependencyStatus {
+	if !required {
+		return observability.DependencyStatus{Name: name, Status: "disabled", Required: false}
+	}
+	baseURL := internalrpc.NormalizeBaseURL(addr)
+	if baseURL == "" {
+		return observability.DependencyStatus{Name: name, Status: "unavailable", Required: true}
+	}
+	readinessPath := strings.TrimSpace(config.Normalized().ReadinessPath)
+	if !strings.HasPrefix(readinessPath, "/") {
+		readinessPath = "/" + readinessPath
+	}
+	probeCtx, cancel := context.WithTimeout(ctx, 300*time.Millisecond)
+	defer cancel()
+	request, err := http.NewRequestWithContext(probeCtx, http.MethodGet, strings.TrimRight(baseURL, "/")+readinessPath, nil)
+	if err != nil {
+		return observability.DependencyStatus{Name: name, Status: "unavailable", Required: true}
+	}
+	client := http.Client{Timeout: 300 * time.Millisecond}
+	response, err := client.Do(request)
+	if err != nil {
+		return observability.DependencyStatus{Name: name, Status: "unavailable", Required: true}
+	}
+	defer response.Body.Close()
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return observability.DependencyStatus{Name: name, Status: "unavailable", Required: true}
+	}
+	var snapshot observability.ReadinessSnapshot
+	if err := json.NewDecoder(response.Body).Decode(&snapshot); err != nil || snapshot.Status != "ready" {
+		return observability.DependencyStatus{Name: name, Status: "unavailable", Required: true}
+	}
+	return observability.DependencyStatus{Name: name, Status: "ok", Required: true}
 }
 
 func isDisabledRoomBroadcastBus(bus eventbus.RoomBroadcastBus) bool {
@@ -517,14 +572,14 @@ func newGinRouter(
 	debugSync bool,
 	webSocketConfig transport.WebSocketRuntimeConfig,
 	roomStateCache *cache.RoomStateCache,
-	tokenManager *auth.TokenManager,
+	tokenVerifier accessTokenVerifier,
 	roomHTTPHandler *transport.RoomHTTPHandler,
 	authHTTPHandler *transport.AuthHTTPHandler,
 	homeHTTPHandler *transport.HomeHTTPHandler,
 	mediaHTTPHandler *transport.MediaHTTPHandler,
 	progressHTTPHandler *transport.ProgressHTTPHandler,
 	runtime runtimeBoundary,
-	readiness observability.ReadinessSnapshot,
+	readinessProvider func(context.Context) observability.ReadinessSnapshot,
 	observabilityConfig observability.Config,
 	metrics *observability.Metrics,
 	broadcastInstanceID string,
@@ -558,6 +613,10 @@ func newGinRouter(
 		c.String(http.StatusOK, "ok")
 	})
 	router.GET(observabilityConfig.ReadinessPath, func(c *gin.Context) {
+		readiness := observability.ReadinessSnapshot{Status: "ready"}
+		if readinessProvider != nil {
+			readiness = readinessProvider(c.Request.Context())
+		}
 		status := http.StatusOK
 		if readiness.Status != "ready" {
 			status = http.StatusServiceUnavailable
@@ -582,7 +641,7 @@ func newGinRouter(
 		debugSync,
 		webSocketConfig,
 		roomStateCache,
-		tokenManager,
+		tokenVerifier,
 		roomHTTPHandler.RoomLeaver(),
 	)
 	webSocketHandler.SetMetrics(metrics)
@@ -615,12 +674,27 @@ func newGinRouter(
 	return router
 }
 
-// newAuthService connects the auth API to the shared PostgreSQL handle when available.
-func newAuthService(db *gorm.DB, tokenManager *auth.TokenManager) *auth.Service {
-	if db == nil {
+// newIdentityService connects identity APIs to a local PostgreSQL store or the identity RPC boundary.
+func newIdentityService(
+	db *gorm.DB,
+	identityDB *gorm.DB,
+	config Config,
+	service servicekit.Config,
+	tokenManager *auth.TokenManager,
+) auth.IdentityService {
+	if isRPCMode(config.ServiceClients.IdentityMode) {
+		return auth.NewRPCClient(config.ServiceClients.IdentityAddr, internalRPCClientConfig(config, service))
+	}
+	var storeDB *gorm.DB
+	if strings.TrimSpace(config.IdentityDatabaseURL) != "" {
+		storeDB = identityDB
+	} else {
+		storeDB = db
+	}
+	if storeDB == nil {
 		return nil
 	}
-	return auth.NewServiceWithTokenManager(store.NewPostgresUserStore(db), tokenManager)
+	return auth.NewServiceWithTokenManager(store.NewPostgresUserStore(storeDB), tokenManager)
 }
 
 // newHomeService connects home summary reads to the shared PostgreSQL handle when available.
@@ -858,7 +932,17 @@ func (s *Server) Close() error {
 			closeErr = err
 		}
 	}
-	if s.mediaDB != nil && s.mediaDB != s.db {
+	if s.identityDB != nil && s.identityDB != s.db {
+		sqlDB, err := s.identityDB.DB()
+		if err != nil {
+			if closeErr == nil {
+				closeErr = err
+			}
+		} else if err := sqlDB.Close(); err != nil && closeErr == nil {
+			closeErr = err
+		}
+	}
+	if s.mediaDB != nil && s.mediaDB != s.db && s.mediaDB != s.identityDB {
 		sqlDB, err := s.mediaDB.DB()
 		if err != nil {
 			if closeErr == nil {
@@ -868,7 +952,7 @@ func (s *Server) Close() error {
 			closeErr = err
 		}
 	}
-	if s.timelineDB != nil && s.timelineDB != s.db && s.timelineDB != s.mediaDB {
+	if s.timelineDB != nil && s.timelineDB != s.db && s.timelineDB != s.identityDB && s.timelineDB != s.mediaDB {
 		sqlDB, err := s.timelineDB.DB()
 		if err != nil {
 			if closeErr == nil {

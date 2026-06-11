@@ -65,6 +65,19 @@ func TestLoadServerRuntimeConfigLoadsMediaDatabaseURL(t *testing.T) {
 	}
 }
 
+func TestLoadServerRuntimeConfigLoadsIdentityDatabaseURL(t *testing.T) {
+	configDir := t.TempDir()
+	mustWriteConfigFile(t, filepath.Join(configDir, ".env"), "IDENTITY_DATABASE_URL=postgres://identity-db\n")
+
+	cfg, err := LoadServerRuntimeConfig(configDir)
+	if err != nil {
+		t.Fatalf("load runtime config: %v", err)
+	}
+	if cfg.IdentityDatabaseURL != "postgres://identity-db" {
+		t.Fatalf("expected identity database url, got %q", cfg.IdentityDatabaseURL)
+	}
+}
+
 func TestLoadServerRuntimeConfigLoadsTimelineDatabaseURL(t *testing.T) {
 	configDir := t.TempDir()
 	mustWriteConfigFile(t, filepath.Join(configDir, ".env"), "TIMELINE_DATABASE_URL=postgres://timeline-db\n")
@@ -79,19 +92,40 @@ func TestLoadServerRuntimeConfigLoadsTimelineDatabaseURL(t *testing.T) {
 	}
 }
 
-func TestLoadRoomserverRuntimeConfigRejectsTimelineDatabaseURLInRPCMode(t *testing.T) {
-	configDir := t.TempDir()
-	mustWriteConfigFile(
-		t,
-		filepath.Join(configDir, ".env"),
-		"TIMELINE_SERVICE_MODE=rpc\nTIMELINE_SERVICE_ADDR=http://timelineservice:8090\nTIMELINE_DATABASE_URL=postgres://timeline-db\n",
-	)
-
-	if _, err := LoadRoomserverRuntimeConfig(configDir); err == nil {
-		t.Fatalf("expected roomserver config to reject TIMELINE_DATABASE_URL in timeline rpc mode")
+func TestLoadRoomserverRuntimeConfigRejectsOwnedDatabaseURLInRPCMode(t *testing.T) {
+	cases := []struct {
+		name        string
+		content     string
+		wantMessage string
+	}{
+		{
+			name:        "identity",
+			content:     "IDENTITY_SERVICE_MODE=rpc\nIDENTITY_SERVICE_ADDR=http://identityservice:8090\nIDENTITY_DATABASE_URL=postgres://identity-db\n",
+			wantMessage: "IDENTITY_DATABASE_URL",
+		},
+		{
+			name:        "media",
+			content:     "MEDIA_SERVICE_MODE=rpc\nMEDIA_SERVICE_ADDR=http://mediaservice:8090\nMEDIA_DATABASE_URL=postgres://media-db\n",
+			wantMessage: "MEDIA_DATABASE_URL",
+		},
+		{
+			name:        "timeline",
+			content:     "TIMELINE_SERVICE_MODE=rpc\nTIMELINE_SERVICE_ADDR=http://timelineservice:8090\nTIMELINE_DATABASE_URL=postgres://timeline-db\n",
+			wantMessage: "TIMELINE_DATABASE_URL",
+		},
 	}
-	if _, err := LoadServerRuntimeConfig(configDir); err != nil {
-		t.Fatalf("expected generic service config to keep accepting timeline database url: %v", err)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			configDir := t.TempDir()
+			mustWriteConfigFile(t, filepath.Join(configDir, ".env"), tc.content)
+
+			if _, err := LoadRoomserverRuntimeConfig(configDir); err == nil || !strings.Contains(err.Error(), tc.wantMessage) {
+				t.Fatalf("expected roomserver config to reject %s in rpc mode, got %v", tc.wantMessage, err)
+			}
+			if _, err := LoadServerRuntimeConfig(configDir); err != nil {
+				t.Fatalf("expected generic service config to keep accepting owned database url: %v", err)
+			}
+		})
 	}
 }
 
@@ -194,6 +228,7 @@ func TestLoadServerRuntimeConfigRejectsInvalidServiceFoundationSettings(t *testi
 		content string
 	}{
 		{name: "media rpc missing addr", content: "MEDIA_SERVICE_MODE=rpc\n"},
+		{name: "identity rpc missing addr", content: "IDENTITY_SERVICE_MODE=rpc\n"},
 		{name: "timeline rpc missing addr", content: "TIMELINE_SERVICE_MODE=rpc\n"},
 		{name: "authority rpc missing addr", content: "AUTHORITY_SERVICE_MODE=rpc\nAUTHORITY_LEASE_INSTANCE_ID=roomauthorityservice-1\n"},
 		{name: "authority rpc missing instance id", content: "AUTHORITY_SERVICE_MODE=rpc\nAUTHORITY_SERVICE_ADDR=http://roomauthorityservice:8090\n"},

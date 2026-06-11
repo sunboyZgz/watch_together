@@ -81,6 +81,7 @@ export default function (data) {
           payload: {
             roomId: data.roomCode,
             userId: user.userId,
+            deviceId: user.deviceId || `load-device-${__VU}`,
           },
         }));
       });
@@ -225,6 +226,7 @@ function authUserFromResponse(response) {
   return {
     userId: body.data.user.id,
     token: body.data.accessToken,
+    deviceId: `load-device-${account}`,
   };
 }
 

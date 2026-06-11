@@ -29,6 +29,7 @@ type User struct {
 type UserStore interface {
 	CreateUser(ctx context.Context, params CreateUserParams) (User, error)
 	FindUserByAccount(ctx context.Context, account string) (User, error)
+	FindUserByID(ctx context.Context, userID string) (User, error)
 }
 
 type CreateUserParams struct {
@@ -46,6 +47,13 @@ type Service struct {
 type AuthResult struct {
 	User        User
 	AccessToken string
+}
+
+type IdentityService interface {
+	Register(ctx context.Context, account string, password string, nickname string) (AuthResult, error)
+	Login(ctx context.Context, account string, password string) (AuthResult, error)
+	VerifyAccessToken(rawToken string) (TokenClaims, error)
+	GetUserProfile(ctx context.Context, userID string) (User, error)
 }
 
 // NewService builds the auth service around a persistent user store.
@@ -108,6 +116,24 @@ func (s *Service) Login(ctx context.Context, account string, password string) (A
 	}
 
 	return s.authResult(user)
+}
+
+func (s *Service) VerifyAccessToken(rawToken string) (TokenClaims, error) {
+	if s == nil {
+		return TokenClaims{}, ErrInvalidToken
+	}
+	return s.tokenManager.VerifyAccessToken(rawToken)
+}
+
+func (s *Service) GetUserProfile(ctx context.Context, userID string) (User, error) {
+	if s == nil || s.store == nil {
+		return User{}, ErrUserNotFound
+	}
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return User{}, ErrInvalidInput
+	}
+	return s.store.FindUserByID(ctx, userID)
 }
 
 func normalizeAccount(account string) string {

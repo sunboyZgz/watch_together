@@ -139,14 +139,67 @@ func TestComposeDefaultsUseTimelineRPCBoundary(t *testing.T) {
 	}
 }
 
-func TestComposeAuthorityRPCStaysPilotOnly(t *testing.T) {
+func TestComposeAppUsesFullRPCBoundaryAndProdKeepsAuthorityLocal(t *testing.T) {
 	localCompose := readCompose(t, "../../compose.yaml")
 	localRoomserver := requireComposeService(t, localCompose, "roomserver")
-	if dependsOnService(localRoomserver.DependsOn, "roomauthorityservice") {
-		t.Fatalf("app roomserver must not depend on roomauthorityservice by default")
+	localIdentity := requireComposeService(t, localCompose, "identityservice")
+	localMedia := requireComposeService(t, localCompose, "mediaservice")
+	localAuthority := requireComposeService(t, localCompose, "roomauthorityservice")
+
+	for _, serviceName := range []string{"identityservice", "mediaservice", "timelineservice", "roomauthorityservice"} {
+		if !dependsOnService(localRoomserver.DependsOn, serviceName) {
+			t.Fatalf("app roomserver must depend on %s by default", serviceName)
+		}
 	}
-	if mode := envString(localRoomserver.Environment, "AUTHORITY_SERVICE_MODE"); !strings.Contains(mode, "local") {
-		t.Fatalf("app roomserver AUTHORITY_SERVICE_MODE = %q, want local default", mode)
+	if mode := envString(localRoomserver.Environment, "ROOM_RUNTIME_MODE"); !strings.Contains(mode, "distributed_authority") {
+		t.Fatalf("app roomserver ROOM_RUNTIME_MODE = %q, want distributed_authority default", mode)
+	}
+	if mode := envString(localRoomserver.Environment, "MEDIA_SERVICE_MODE"); !strings.Contains(mode, "rpc") {
+		t.Fatalf("app roomserver MEDIA_SERVICE_MODE = %q, want rpc default", mode)
+	}
+	if mode := envString(localRoomserver.Environment, "IDENTITY_SERVICE_MODE"); !strings.Contains(mode, "rpc") {
+		t.Fatalf("app roomserver IDENTITY_SERVICE_MODE = %q, want rpc default", mode)
+	}
+	if addr := envString(localRoomserver.Environment, "IDENTITY_SERVICE_ADDR"); !strings.Contains(addr, "http://identityservice:8090") {
+		t.Fatalf("app roomserver IDENTITY_SERVICE_ADDR = %q, want identityservice URL", addr)
+	}
+	identityDatabaseURL := envString(localRoomserver.Environment, "IDENTITY_DATABASE_URL")
+	if strings.Contains(identityDatabaseURL, "${IDENTITY_DATABASE_URL") {
+		t.Fatalf("app roomserver must not receive identity-owned IDENTITY_DATABASE_URL directly, got %q", identityDatabaseURL)
+	}
+	if identityDatabaseURL != "" && !strings.Contains(identityDatabaseURL, "ROOMSERVER_IDENTITY_DATABASE_URL") {
+		t.Fatalf("app roomserver identity DB override must be explicit, got %q", identityDatabaseURL)
+	}
+	if addr := envString(localRoomserver.Environment, "MEDIA_SERVICE_ADDR"); !strings.Contains(addr, "http://mediaservice:8090") {
+		t.Fatalf("app roomserver MEDIA_SERVICE_ADDR = %q, want mediaservice URL", addr)
+	}
+	mediaDatabaseURL := envString(localRoomserver.Environment, "MEDIA_DATABASE_URL")
+	if strings.Contains(mediaDatabaseURL, "${MEDIA_DATABASE_URL") {
+		t.Fatalf("app roomserver must not receive media-owned MEDIA_DATABASE_URL directly, got %q", mediaDatabaseURL)
+	}
+	if mediaDatabaseURL != "" && !strings.Contains(mediaDatabaseURL, "ROOMSERVER_MEDIA_DATABASE_URL") {
+		t.Fatalf("app roomserver media DB override must be explicit, got %q", mediaDatabaseURL)
+	}
+	if mode := envString(localRoomserver.Environment, "AUTHORITY_SERVICE_MODE"); !strings.Contains(mode, "rpc") {
+		t.Fatalf("app roomserver AUTHORITY_SERVICE_MODE = %q, want rpc default", mode)
+	}
+	if addr := envString(localRoomserver.Environment, "AUTHORITY_SERVICE_ADDR"); !strings.Contains(addr, "http://roomauthorityservice:8090") {
+		t.Fatalf("app roomserver AUTHORITY_SERVICE_ADDR = %q, want roomauthorityservice URL", addr)
+	}
+	if leaseID := envString(localRoomserver.Environment, "AUTHORITY_LEASE_INSTANCE_ID"); !strings.Contains(leaseID, "roomauthorityservice-1") {
+		t.Fatalf("app roomserver AUTHORITY_LEASE_INSTANCE_ID = %q, want roomauthorityservice lease owner", leaseID)
+	}
+	if serviceInstanceID := envString(localAuthority.Environment, "SERVER_INSTANCE_ID"); !strings.Contains(serviceInstanceID, "roomauthorityservice-1") {
+		t.Fatalf("roomauthorityservice SERVER_INSTANCE_ID = %q, want matching lease owner", serviceInstanceID)
+	}
+	if !containsContext(localIdentity.Profiles, "app") {
+		t.Fatalf("identityservice profiles = %v, want app profile", localIdentity.Profiles)
+	}
+	if !containsContext(localMedia.Profiles, "app") {
+		t.Fatalf("mediaservice profiles = %v, want app profile", localMedia.Profiles)
+	}
+	if !containsContext(localAuthority.Profiles, "app") {
+		t.Fatalf("roomauthorityservice profiles = %v, want app profile", localAuthority.Profiles)
 	}
 	if old := envString(localRoomserver.Environment, "AUTHORITY_SERVICE_INSTANCE_ID"); old != "" {
 		t.Fatalf("app roomserver must not use deprecated AUTHORITY_SERVICE_INSTANCE_ID, got %q", old)
@@ -154,6 +207,12 @@ func TestComposeAuthorityRPCStaysPilotOnly(t *testing.T) {
 
 	pilotRoomserver := requireComposeService(t, localCompose, "roomserver-rpc-pilot")
 	pilotAuthority := requireComposeService(t, localCompose, "roomauthorityservice")
+	if !dependsOnService(pilotRoomserver.DependsOn, "identityservice") {
+		t.Fatalf("rpc-pilot roomserver must depend on identityservice")
+	}
+	if !dependsOnService(pilotRoomserver.DependsOn, "mediaservice") {
+		t.Fatalf("rpc-pilot roomserver must depend on mediaservice")
+	}
 	if !dependsOnService(pilotRoomserver.DependsOn, "roomauthorityservice") {
 		t.Fatalf("rpc-pilot roomserver must depend on roomauthorityservice")
 	}
@@ -170,7 +229,7 @@ func TestComposeAuthorityRPCStaysPilotOnly(t *testing.T) {
 		t.Fatalf("rpc-pilot roomserver must not use deprecated AUTHORITY_SERVICE_INSTANCE_ID, got %q", old)
 	}
 	if !containsContext(pilotAuthority.Profiles, "rpc-pilot") {
-		t.Fatalf("roomauthorityservice profiles = %v, want rpc-pilot only", pilotAuthority.Profiles)
+		t.Fatalf("roomauthorityservice profiles = %v, want rpc-pilot profile", pilotAuthority.Profiles)
 	}
 	if old := envString(pilotAuthority.Environment, "AUTHORITY_SERVICE_INSTANCE_ID"); old != "" {
 		t.Fatalf("roomauthorityservice must not use deprecated AUTHORITY_SERVICE_INSTANCE_ID, got %q", old)
@@ -178,14 +237,45 @@ func TestComposeAuthorityRPCStaysPilotOnly(t *testing.T) {
 
 	prodCompose := readCompose(t, "../../compose.prod.yaml")
 	prodRoomserver := requireComposeService(t, prodCompose, "roomserver")
+	prodMedia := requireComposeService(t, prodCompose, "mediaservice")
 	if _, ok := prodCompose.Services["roomauthorityservice"]; ok {
 		t.Fatalf("prod compose must not start roomauthorityservice by default")
+	}
+	if !dependsOnService(prodRoomserver.DependsOn, "mediaservice") {
+		t.Fatalf("prod roomserver must depend on mediaservice by default")
+	}
+	if mode := envString(prodRoomserver.Environment, "MEDIA_SERVICE_MODE"); !strings.Contains(mode, "rpc") {
+		t.Fatalf("prod roomserver MEDIA_SERVICE_MODE = %q, want rpc default", mode)
+	}
+	if mediaDatabaseURL := envString(prodRoomserver.Environment, "MEDIA_DATABASE_URL"); strings.Contains(mediaDatabaseURL, "${MEDIA_DATABASE_URL") {
+		t.Fatalf("prod roomserver must not receive media-owned MEDIA_DATABASE_URL directly, got %q", mediaDatabaseURL)
+	}
+	if len(prodMedia.Profiles) != 0 {
+		t.Fatalf("prod mediaservice should be a default service, got profiles %v", prodMedia.Profiles)
 	}
 	if mode := envString(prodRoomserver.Environment, "AUTHORITY_SERVICE_MODE"); !strings.Contains(mode, "local") {
 		t.Fatalf("prod roomserver AUTHORITY_SERVICE_MODE = %q, want local default", mode)
 	}
 	if old := envString(prodRoomserver.Environment, "AUTHORITY_SERVICE_INSTANCE_ID"); old != "" {
 		t.Fatalf("prod roomserver must not use deprecated AUTHORITY_SERVICE_INSTANCE_ID, got %q", old)
+	}
+}
+
+func TestNginxExposesRoomserverReadinessForAppSmoke(t *testing.T) {
+	content, err := os.ReadFile("../../deploy/nginx/default.conf")
+	if err != nil {
+		t.Fatalf("read nginx config: %v", err)
+	}
+	text := string(content)
+	for _, expected := range []string{
+		"location = /healthz",
+		"location = /readyz",
+		"location = /metrics",
+		"proxy_pass http://watch_together_api",
+	} {
+		if !strings.Contains(text, expected) {
+			t.Fatalf("expected nginx config to contain %q", expected)
+		}
 	}
 }
 

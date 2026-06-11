@@ -1,6 +1,6 @@
 # Room Authority Service Design
 
-Phase 13 defines the target `room-authority-service` boundary. Phase 14 implements a non-default RPC pilot under `rpc-pilot`: app/prod defaults still keep room authority inside `roomserver`, while the pilot can route control apply through `cmd/roomauthorityservice`. Phase 15 hardens that pilot with dynamic readiness, metrics, stable failure tests, and explicit lease-owner identity. Android HTTP/WebSocket contracts remain unchanged.
+Phase 13 defines the target `room-authority-service` boundary. Phase 14 implements a non-default RPC pilot under `rpc-pilot`. Phase 15 hardens that pilot with dynamic readiness, metrics, stable failure tests, and explicit lease-owner identity. Phase 16 promotes authority RPC into the local compose `app` development path, while production compose still keeps room authority inside `roomserver` by default. Phase 17/18 adds identity RPC to the same local app baseline; this does not change the authority contract. Android HTTP/WebSocket contracts remain unchanged.
 
 ## Goals
 
@@ -15,6 +15,7 @@ Phase 13 defines the target `room-authority-service` boundary. Phase 14 implemen
 - Do not add `cmd/roomauthorityservice` or compose entries in Phase 13.
 - Do not route production or local compose traffic through a new authority service in Phase 13.
 - Do not route app/prod default traffic through authority RPC in Phase 14.
+- Do not route production default traffic through authority RPC in Phase 16.
 - Do not move WebSocket connection objects, send queues, heartbeat state, or local client tables out of `roomserver`.
 - Do not change Android HTTP/WebSocket request or response shapes.
 
@@ -30,13 +31,25 @@ Phase 14 adds generated internal authority RPC and `cmd/roomauthorityservice` fo
 
 ## Phase 15 Hardening Status
 
-Phase 15 keeps authority RPC non-default and focuses on cutover readiness for `rpc-pilot`.
+At the end of Phase 15, authority RPC was still non-default and focused on cutover readiness for `rpc-pilot`.
 
 - `AUTHORITY_LEASE_INSTANCE_ID` is the Redis authority lease owner used by `roomserver` HTTP bootstrap when `AUTHORITY_SERVICE_MODE=rpc`.
 - `roomauthorityservice` readiness checks PostgreSQL, Redis, NATS broadcast connectivity, timeline RPC readiness, and internal RPC availability.
 - `roomauthorityservice` exposes authority RPC request count/latency/error metrics and authority apply accepted/rejected metrics.
-- `rpc-pilot` compose is guarded by architecture tests: app/prod remain local, while only `roomserver-rpc-pilot` depends on `roomauthorityservice` and uses authority RPC.
+- Phase 15 architecture tests kept app/prod local while only `roomserver-rpc-pilot` depended on `roomauthorityservice` and used authority RPC. Phase 16 updates that guard so local app now uses authority RPC and prod remains local.
 - Failure tests cover authority RPC unavailable and stale authority responses so ingress forgets pending requests and returns stable client errors.
+
+## Phase 16 Local App Status
+
+Phase 16 makes local compose `app` the default full-RPC serviceized development path.
+
+- `server/compose.yaml --profile app` starts `mediaservice`, `timelineservice`, and `roomauthorityservice`.
+- App `roomserver` sets `ROOM_RUNTIME_MODE=distributed_authority`, `MEDIA_SERVICE_MODE=rpc`, `TIMELINE_SERVICE_MODE=rpc`, and `AUTHORITY_SERVICE_MODE=rpc`.
+- App `roomserver` also sets `IDENTITY_SERVICE_MODE=rpc`, so register/login/token verification can cross the identity service boundary.
+- App `roomserver` uses `AUTHORITY_LEASE_INSTANCE_ID=roomauthorityservice-1` by default so HTTP bootstrap claims Redis authority leases for the service identity.
+- App `roomserver /readyz` actively probes `authority_rpc` through `roomauthorityservice /readyz`; unavailable authority RPC makes roomserver readiness `not_ready`.
+- `server/compose.prod.yaml` still does not start `roomauthorityservice` by default and keeps `AUTHORITY_SERVICE_MODE=local`.
+- Bare `go run ./cmd/roomserver` keeps local adapters by default for fast single-process debugging.
 
 ## Current Baseline
 
@@ -48,7 +61,7 @@ Today, `distributed_authority` uses these ownership boundaries:
 - `timelineservice` owns canonical timeline result event construction and recovery-ready event feeds.
 - `outboxworker` publishes timeline outbox rows to Kafka, and `derivedworker` publishes derived topics.
 
-This baseline is the parity target for Phase 14.
+This baseline is the parity target for Phase 14 and the production rollback path after Phase 16.
 
 ## Target Boundary
 
@@ -180,15 +193,21 @@ Phase 14:
 
 - Add generated internal authority RPC and local/RPC adapter parity tests.
 - Add non-default `AUTHORITY_SERVICE_MODE=rpc`.
-- Implement `cmd/roomauthorityservice` behind `rpc-pilot`, while keeping roomserver-local authority as the app/prod default.
+- Implement `cmd/roomauthorityservice` behind `rpc-pilot`, while keeping roomserver-local authority as the app/prod default during Phase 14.
 - Prove accepted/rejected control, recovery, idempotency, active-device, seek-rate, stale-epoch, and timeline-failure parity.
 
 Phase 15:
 
 - Harden `rpc-pilot` readiness, metrics, identity naming, and failure semantics.
-- Keep app/prod defaults on local authority.
+- Keep app/prod defaults on local authority during Phase 15.
 
-Phase 16+:
+Phase 16:
+
+- Make local compose `app` default to authority RPC together with media and timeline RPC.
+- Add an app full-RPC smoke gate that verifies HTTP bootstrap, WebSocket join, accepted controls, authority metrics, and timeline outbox writes.
+- Keep production compose on local authority by default.
+
+Phase 17+:
 
 - Decide whether command inbox or command ingress is necessary.
 - Introduce durable command audit only if product or operations requirements justify it.
@@ -197,7 +216,7 @@ Phase 16+:
 
 - Documentation clearly states that `room authority` is still in `roomserver` today.
 - Documentation clearly states that Phase 13 is design-only.
-- No compose defaults include `room-authority-service`.
+- Local compose app and rpc-pilot include `roomauthorityservice`; production compose does not include it by default.
 - No generated authority proto or runtime service skeleton is added in Phase 13.
 - Kafka is consistently described as a result log, not command ingress.
 - Android HTTP/WebSocket contracts remain unchanged.

@@ -12,7 +12,7 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
   media-postgres-init:
-    profiles: ["services", "rpc-pilot"]
+    profiles: ["app", "services", "rpc-pilot"]
     image: postgres:16
     container_name: anime-watch-media-postgres-init
     depends_on:
@@ -133,7 +133,10 @@ services:
       - nats
       - kafka
       - minio-init
+      - identityservice
+      - mediaservice
       - timelineservice
+      - roomauthorityservice
     env_file:
       - .env
     environment: &roomserver_environment
@@ -142,9 +145,9 @@ services:
       SERVER_PORT: 8080
       LOG_LEVEL: debug
       SERVER_INSTANCE_ID: ${SERVER_INSTANCE_ID:-local-roomserver-1}
-      ROOM_RUNTIME_MODE: ${ROOM_RUNTIME_MODE:-local_process}
+      ROOM_RUNTIME_MODE: ${ROOMSERVER_RUNTIME_MODE:-distributed_authority}
       DEBUG_SYNC: "true"
-      WS_CROSS_INSTANCE_BROADCAST_ENABLED: ${WS_CROSS_INSTANCE_BROADCAST_ENABLED:-false}
+      WS_CROSS_INSTANCE_BROADCAST_ENABLED: ${ROOMSERVER_WS_CROSS_INSTANCE_BROADCAST_ENABLED:-true}
       WS_EVENT_BUS: ${WS_EVENT_BUS:-nats_core}
       NATS_URL: ${NATS_URL:-nats://nats:4222}
       NATS_NAME: ${NATS_NAME:-watch-together-roomserver}
@@ -173,15 +176,18 @@ services:
       INTERNAL_RPC_TIMEOUT_MS: ${INTERNAL_RPC_TIMEOUT_MS:-1000}
       INTERNAL_RPC_AUTH_TOKEN: ${INTERNAL_RPC_AUTH_TOKEN:-}
       SERVICE_DISCOVERY_MODE: ${SERVICE_DISCOVERY_MODE:-static}
-      MEDIA_SERVICE_MODE: ${MEDIA_SERVICE_MODE:-local}
-      MEDIA_SERVICE_ADDR: ${MEDIA_SERVICE_ADDR:-http://mediaservice:8090}
-      MEDIA_DATABASE_URL: ${MEDIA_DATABASE_URL:-}
-      TIMELINE_SERVICE_MODE: ${TIMELINE_SERVICE_MODE:-rpc}
-      TIMELINE_SERVICE_ADDR: ${TIMELINE_SERVICE_ADDR:-http://timelineservice:8090}
+      IDENTITY_SERVICE_MODE: ${ROOMSERVER_IDENTITY_SERVICE_MODE:-rpc}
+      IDENTITY_SERVICE_ADDR: ${ROOMSERVER_IDENTITY_SERVICE_ADDR:-http://identityservice:8090}
+      IDENTITY_DATABASE_URL: ${ROOMSERVER_IDENTITY_DATABASE_URL:-}
+      MEDIA_SERVICE_MODE: ${ROOMSERVER_MEDIA_SERVICE_MODE:-rpc}
+      MEDIA_SERVICE_ADDR: ${ROOMSERVER_MEDIA_SERVICE_ADDR:-http://mediaservice:8090}
+      MEDIA_DATABASE_URL: ${ROOMSERVER_MEDIA_DATABASE_URL:-}
+      TIMELINE_SERVICE_MODE: ${ROOMSERVER_TIMELINE_SERVICE_MODE:-rpc}
+      TIMELINE_SERVICE_ADDR: ${ROOMSERVER_TIMELINE_SERVICE_ADDR:-http://timelineservice:8090}
       TIMELINE_DATABASE_URL: ${ROOMSERVER_TIMELINE_DATABASE_URL:-}
-      AUTHORITY_SERVICE_MODE: ${AUTHORITY_SERVICE_MODE:-local}
-      AUTHORITY_SERVICE_ADDR: ${AUTHORITY_SERVICE_ADDR:-}
-      AUTHORITY_LEASE_INSTANCE_ID: ${AUTHORITY_LEASE_INSTANCE_ID:-}
+      AUTHORITY_SERVICE_MODE: ${ROOMSERVER_AUTHORITY_SERVICE_MODE:-rpc}
+      AUTHORITY_SERVICE_ADDR: ${ROOMSERVER_AUTHORITY_SERVICE_ADDR:-http://roomauthorityservice:8090}
+      AUTHORITY_LEASE_INSTANCE_ID: ${ROOMSERVER_AUTHORITY_LEASE_INSTANCE_ID:-roomauthorityservice-1}
       OTEL_TRACING_ENABLED: ${OTEL_TRACING_ENABLED:-false}
       OTEL_SERVICE_NAME: ${OTEL_SERVICE_NAME:-watch-together-roomserver}
       OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
@@ -191,7 +197,7 @@ services:
       REDIS_ADDR: redis:6380
       REDIS_PASSWORD: ${REDIS_PASSWORD:-watch_together_redis_dev}
       REDIS_DB: 0
-      REDIS_REQUIRED: "false"
+      REDIS_REQUIRED: ${ROOMSERVER_REDIS_REQUIRED:-true}
       MEDIA_DELIVERY_MODE: ${MEDIA_DELIVERY_MODE:-nginx_auth_request}
       MEDIA_PLAYBACK_SIGNING_SECRET: ${MEDIA_PLAYBACK_SIGNING_SECRET:-watch_together_local_dev_media_playback_secret_change_me}
       MEDIA_INTERNAL_BASE_URL: http://minio:9000/watch-together-media
@@ -212,17 +218,50 @@ services:
       - nats
       - kafka
       - minio-init
+      - identityservice
+      - mediaservice
       - timelineservice
       - roomauthorityservice
     environment:
       <<: *roomserver_environment
       SERVER_INSTANCE_ID: ${SERVER_INSTANCE_ID:-local-roomserver-1}
-      ROOM_RUNTIME_MODE: ${ROOM_RUNTIME_MODE:-distributed_authority}
-      WS_CROSS_INSTANCE_BROADCAST_ENABLED: ${WS_CROSS_INSTANCE_BROADCAST_ENABLED:-true}
+      ROOM_RUNTIME_MODE: ${ROOMSERVER_RUNTIME_MODE:-distributed_authority}
+      WS_CROSS_INSTANCE_BROADCAST_ENABLED: ${ROOMSERVER_WS_CROSS_INSTANCE_BROADCAST_ENABLED:-true}
       REDIS_REQUIRED: "true"
       AUTHORITY_SERVICE_MODE: rpc
       AUTHORITY_SERVICE_ADDR: http://roomauthorityservice:8090
-      AUTHORITY_LEASE_INSTANCE_ID: ${AUTHORITY_LEASE_INSTANCE_ID:-roomauthorityservice-1}
+      AUTHORITY_LEASE_INSTANCE_ID: ${ROOMSERVER_AUTHORITY_LEASE_INSTANCE_ID:-roomauthorityservice-1}
+
+  identityservice:
+    profiles: ["app", "services", "rpc-pilot"]
+    image: watch-together-roomserver:dev
+    container_name: anime-watch-identityservice
+    restart: unless-stopped
+    depends_on:
+      - postgres
+    env_file:
+      - .env
+    environment:
+      APP_ENV: local
+      SERVICE_NAME: watch-together-identityservice
+      SERVICE_VERSION: ${SERVICE_VERSION:-dev}
+      INTERNAL_RPC_ADDR: :8090
+      INTERNAL_RPC_PATH_PREFIX: ${INTERNAL_RPC_PATH_PREFIX:-/internal.rpc}
+      INTERNAL_RPC_AUTH_TOKEN: ${INTERNAL_RPC_AUTH_TOKEN:-}
+      METRICS_ENABLED: ${METRICS_ENABLED:-true}
+      METRICS_PATH: ${METRICS_PATH:-/metrics}
+      READINESS_PATH: ${READINESS_PATH:-/readyz}
+      AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:-watch_together_local_dev_jwt_secret_change_me}
+      AUTH_ACCESS_TOKEN_TTL_HOURS: ${AUTH_ACCESS_TOKEN_TTL_HOURS:-24}
+      DATABASE_URL: postgres://app:app@postgres:5432/anime_watch_dev?sslmode=disable
+      IDENTITY_DATABASE_URL: ${IDENTITY_DATABASE_URL:-}
+      OTEL_TRACING_ENABLED: ${OTEL_TRACING_ENABLED:-false}
+      OTEL_SERVICE_NAME: ${OTEL_SERVICE_NAME:-watch-together-identityservice}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+      OTEL_TRACE_SAMPLE_RATIO: ${OTEL_TRACE_SAMPLE_RATIO:-0.1}
+    ports:
+      - "8093:8090"
+    command: ["/app/identityservice"]
 
   outboxworker:
     profiles: ["app"]
@@ -276,7 +315,7 @@ services:
     command: ["/app/derivedworker"]
 
   mediaservice:
-    profiles: ["services", "rpc-pilot"]
+    profiles: ["app", "services", "rpc-pilot"]
     image: watch-together-roomserver:dev
     container_name: anime-watch-mediaservice
     restart: unless-stopped
@@ -304,6 +343,8 @@ services:
       MEDIA_STORAGE_ACCESS_KEY_ID: minioadmin
       MEDIA_STORAGE_SECRET_ACCESS_KEY: minioadmin
       MEDIA_STORAGE_FORCE_PATH_STYLE: "true"
+    ports:
+      - "8090:8090"
     command: ["/app/mediaservice"]
 
   timelineservice:
@@ -333,10 +374,12 @@ services:
       KAFKA_CLIENT_ID: ${KAFKA_CLIENT_ID:-watch-together-timelineservice}
       KAFKA_TOPIC_ROOM_TIMELINE: ${KAFKA_TOPIC_ROOM_TIMELINE:-wt.room.timeline.v1}
       KAFKA_REPLAY_TIMEOUT_MS: ${KAFKA_REPLAY_TIMEOUT_MS:-1000}
+    ports:
+      - "8091:8090"
     command: ["/app/timelineservice"]
 
   roomauthorityservice:
-    profiles: ["rpc-pilot"]
+    profiles: ["app", "rpc-pilot"]
     image: watch-together-roomserver:dev
     container_name: anime-watch-roomauthorityservice
     restart: unless-stopped
@@ -352,7 +395,7 @@ services:
       APP_ENV: local
       SERVICE_NAME: watch-together-roomauthorityservice
       SERVICE_VERSION: ${SERVICE_VERSION:-dev}
-      SERVER_INSTANCE_ID: ${AUTHORITY_LEASE_INSTANCE_ID:-roomauthorityservice-1}
+      SERVER_INSTANCE_ID: ${ROOMSERVER_AUTHORITY_LEASE_INSTANCE_ID:-${AUTHORITY_LEASE_INSTANCE_ID:-roomauthorityservice-1}}
       DEBUG_SYNC: "true"
       INTERNAL_RPC_ADDR: :8090
       INTERNAL_RPC_PATH_PREFIX: ${INTERNAL_RPC_PATH_PREFIX:-/internal.rpc}
@@ -382,6 +425,8 @@ services:
       REDIS_PASSWORD: ${REDIS_PASSWORD:-watch_together_redis_dev}
       REDIS_DB: 0
       REDIS_REQUIRED: "true"
+    ports:
+      - "8092:8090"
     command: ["/app/roomauthorityservice"]
 
   nginx:

@@ -1,6 +1,7 @@
 package transport
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -9,7 +10,12 @@ import (
 )
 
 type AuthHTTPHandler struct {
-	authService *auth.Service
+	authService authHTTPService
+}
+
+type authHTTPService interface {
+	Register(ctx context.Context, account string, password string, nickname string) (auth.AuthResult, error)
+	Login(ctx context.Context, account string, password string) (auth.AuthResult, error)
 }
 
 type authRequest struct {
@@ -32,7 +38,7 @@ type userResponse struct {
 }
 
 // NewAuthHTTPHandler builds the HTTP entrypoint for account login and registration.
-func NewAuthHTTPHandler(authService *auth.Service) *AuthHTTPHandler {
+func NewAuthHTTPHandler(authService authHTTPService) *AuthHTTPHandler {
 	return &AuthHTTPHandler{authService: authService}
 }
 

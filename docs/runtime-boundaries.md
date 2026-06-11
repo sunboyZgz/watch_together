@@ -1,6 +1,6 @@
 # Runtime Boundaries
 
-This document records the runtime ownership boundaries for the room system. `local_process` remains the default runtime. Phase 4 adds a `distributed_authority` MVP for multi-instance room authority, Phase 5 adds fenced authority recovery from the Kafka canonical timeline, Phase 6 adds distributed seek rate limiting plus observability, Phase 7 adds service foundation boundaries with optional media/timeline RPC adapters and logical database ownership, Phase 8 closes the media table access boundary for room/progress while making the RPC pilot verifiable, Phase 9 adds an optional independent media database boundary through `MEDIA_DATABASE_URL`, Phase 10 adds an optional independent timeline database boundary through `TIMELINE_DATABASE_URL`, Phase 11 makes timeline RPC the default compose path while keeping timeline workers as separate timeline-owned processes, Phase 12 moves result timeline ownership into `cmd/timelineservice`, Phase 13 documents the future `room-authority-service` boundary, Phase 14 implements a non-default authority RPC pilot in `rpc-pilot`, and Phase 15 hardens that pilot with readiness, metrics, identity, and failure-semantics checks.
+This document records the runtime ownership boundaries for the room system. `local_process` remains the default runtime for bare `go run ./cmd/roomserver`. Phase 4 adds a `distributed_authority` MVP for multi-instance room authority, Phase 5 adds fenced authority recovery from the Kafka canonical timeline, Phase 6 adds distributed seek rate limiting plus observability, Phase 7 adds service foundation boundaries with optional media/timeline RPC adapters and logical database ownership, Phase 8 closes the media table access boundary for room/progress while making the RPC pilot verifiable, Phase 9 adds an optional independent media database boundary through `MEDIA_DATABASE_URL`, Phase 10 adds an optional independent timeline database boundary through `TIMELINE_DATABASE_URL`, Phase 11 makes timeline RPC the default compose path while keeping timeline workers as separate timeline-owned processes, Phase 12 moves result timeline ownership into `cmd/timelineservice`, Phase 13 documents the future `room-authority-service` boundary, Phase 14 implements a non-default authority RPC pilot in `rpc-pilot`, Phase 15 hardens that pilot with readiness, metrics, identity, and failure-semantics checks, Phase 16 makes local compose `app` default to media, timeline, and authority RPC, and Phase 17/18 adds `cmd/identityservice` to the local app RPC path. Production compose defaults media/timeline to RPC and keeps authority local by default.
 
 ## Phase 1 Boundary Markers
 
@@ -41,7 +41,7 @@ X-Watch-Together-Room-Runtime: local_process
 | Seek rate limiting | Local memory or Redis control rate registry | `local_process` uses process-local throttling. `distributed_authority` uses Redis `wt:room:control_rate:{roomId}:seek:v1`. |
 | Observability | `internal/observability` | `/healthz`, `/readyz`, `/metrics`, Prometheus metrics, and worker metric hooks. |
 | Service foundation metadata | `internal/servicekit` | Request id, service name/version, deadlines, internal auth, and trace metadata. |
-| Optional internal RPC | ConnectRPC helper layer | `media` can run through local or RPC adapters; timeline RPC is the default compose path with local retained for explicit rollback. |
+| Internal RPC | ConnectRPC helper layer | Bare runs keep local adapters by default; local compose app defaults media, timeline, and authority to RPC with local retained for explicit rollback. |
 | OpenTelemetry tracing | `internal/telemetry` | Optional traces across HTTP, WebSocket control, RPC, Redis, NATS, Kafka, and PostgreSQL. |
 | Database ownership | Main PostgreSQL database plus optional media and timeline PostgreSQL databases | Phase 9 can place media-owned tables in a separate database; Phase 10 can place timeline-owned outbox rows in a separate database. Both are databases inside the same PostgreSQL server/container by default. |
 | Room metadata and membership | PostgreSQL | Durable business state. |
@@ -49,7 +49,7 @@ X-Watch-Together-Room-Runtime: local_process
 | Timeline outbox | Timeline PostgreSQL database or fallback main PostgreSQL database | Durable outbox state selected by `TIMELINE_DATABASE_URL`; default compose access is through `cmd/timelineservice` and timeline-owned workers. |
 | HLS files | Local/object storage via mediactl | Served through signed playback paths and Nginx/object storage depending on delivery mode. |
 
-Phase 14 note: `rpc-pilot` can run `cmd/roomauthorityservice` and route control apply through internal authority RPC. App/prod defaults still keep active room playback authority on the existing roomserver local/NATS path.
+Current note: local compose `app` runs `cmd/identityservice`, `cmd/mediaservice`, `cmd/timelineservice`, and `cmd/roomauthorityservice` by default. `roomserver` still owns Android-facing HTTP/WebSocket ingress and local connection tables, but it calls those internal services through RPC. Production compose defaults media/timeline RPC and still keeps active room playback authority on the existing roomserver local/NATS path unless explicitly changed later.
 
 ## Phase 2 Snapshot Boundary
 
@@ -168,6 +168,8 @@ INTERNAL_RPC_AUTH_TOKEN=
 SERVICE_DISCOVERY_MODE=static
 MEDIA_SERVICE_MODE=local
 MEDIA_SERVICE_ADDR=
+IDENTITY_SERVICE_MODE=local
+IDENTITY_SERVICE_ADDR=
 TIMELINE_SERVICE_MODE=rpc
 TIMELINE_SERVICE_ADDR=http://127.0.0.1:8091
 OTEL_TRACING_ENABLED=false
@@ -176,7 +178,7 @@ OTEL_EXPORTER_OTLP_ENDPOINT=
 OTEL_TRACE_SAMPLE_RATIO=0.1
 ```
 
-`MEDIA_SERVICE_MODE` and `TIMELINE_SERVICE_MODE` accept `local` or `rpc`. `local` keeps current in-process adapters. `rpc` calls `cmd/mediaservice` or `cmd/timelineservice` over ConnectRPC. Phase 8 uses generated typed ConnectRPC contracts from `server/api/internal/v1` into `server/internal/rpcgen/v1`; Android HTTP/WebSocket payloads are unchanged. Phase 11 makes timeline RPC the default compose path: roomserver records and reads timeline data through `cmd/timelineservice`, while `cmd/outboxworker` and `cmd/derivedworker` remain separate timeline-owned workers. Service discovery is static endpoint configuration in this phase; Consul, etcd, and Kubernetes service discovery integration are not required by the code.
+`IDENTITY_SERVICE_MODE`, `MEDIA_SERVICE_MODE`, `TIMELINE_SERVICE_MODE`, and `AUTHORITY_SERVICE_MODE` accept `local` or `rpc`. `local` keeps current in-process adapters. `rpc` calls `cmd/identityservice`, `cmd/mediaservice`, `cmd/timelineservice`, or `cmd/roomauthorityservice` over ConnectRPC. Phase 8 uses generated typed ConnectRPC contracts from `server/api/internal/v1` into `server/internal/rpcgen/v1`; Android HTTP/WebSocket payloads are unchanged. Phase 11 makes timeline RPC the default compose path: roomserver records and reads timeline data through `cmd/timelineservice`, while `cmd/outboxworker` and `cmd/derivedworker` remain separate timeline-owned workers. Local compose `app` now defaults to `IDENTITY_SERVICE_MODE=rpc`, `MEDIA_SERVICE_MODE=rpc`, `TIMELINE_SERVICE_MODE=rpc`, and `AUTHORITY_SERVICE_MODE=rpc`; roomserver `/readyz` actively probes `identity_rpc`, `media_rpc`, `timeline_rpc`, and `authority_rpc`. Production compose defaults media/timeline RPC but leaves authority local. Service discovery is static endpoint configuration in this phase; Consul, etcd, and Kubernetes service discovery integration are not required by the code.
 
 `room-session` now calls the media port for episode detail during create/join/detail bootstrap. `progress` calls the media port for playable episode validation before writing `user_media_progress`. `PostgresRoomStore` and `PostgresProgressStore` no longer read `media_episodes` or `media_seasons` directly.
 
@@ -230,22 +232,43 @@ TIMELINE_SERVICE_ADDR=http://timelineservice:8090
 
 In local and production compose, `roomserver` depends on `timelineservice`, does not receive the timeline-owned `TIMELINE_DATABASE_URL`, and reports `timeline_rpc` readiness instead of requiring `timeline_postgres`. Phase 12 moves default roomserver calls to typed result APIs: `RecordControlResult`, `RecordMembershipResult`, and `ListRoomRecoveryEvents`. `cmd/timelineservice` owns canonical result event generation, outbox writes, and recovery feed composition. `cmd/outboxworker` owns outbox publish retry, and `cmd/derivedworker` owns derived topic projection. These processes share the timeline bounded context but keep separate failure domains and scaling knobs.
 
-For explicit rollback, set `TIMELINE_SERVICE_MODE=local` and provide `ROOMSERVER_TIMELINE_DATABASE_URL` in compose so only roomserver receives the direct timeline DB URL. Bare single-process debugging can still use the code default local adapter.
+For explicit rollback, set `ROOMSERVER_TIMELINE_SERVICE_MODE=local` and provide `ROOMSERVER_TIMELINE_DATABASE_URL` in compose so only roomserver receives the direct timeline DB URL. Bare single-process debugging can still use the code default local adapter.
 
 Phase 12 is not command ingress. Kafka remains the canonical result log for accepted/rejected controls and membership results, while NATS remains the realtime fan-out and control request/reply transport. `room authority` remains in `roomserver`.
 
-## Phase 15 Authority RPC Pilot Hardening
+## Phase 16 Local App Full RPC Path
 
-Phase 14 adds the generated authority RPC and `cmd/roomauthorityservice` for the `rpc-pilot` profile. Phase 15 hardens that pilot for cutover readiness. The default app/prod path still does not set `AUTHORITY_SERVICE_MODE=rpc` and does not start the authority service.
+Phase 14 adds the generated authority RPC and `cmd/roomauthorityservice` for the `rpc-pilot` profile. Phase 15 hardens that pilot for cutover readiness. Phase 16 promotes the same service into local compose `app`, while production compose still does not start `roomauthorityservice` by default. Phase 17/18 adds `cmd/identityservice` to the same local app RPC baseline.
 
 - Keep `roomserver` as the WebSocket and HTTP edge with local connection tables.
-- Route `rpc-pilot` control apply through a per-`roomId` serial authority adapter.
+- Route local compose `app` and `rpc-pilot` control apply through a per-`roomId` serial authority adapter.
 - Use `AUTHORITY_LEASE_INSTANCE_ID` as the Redis authority lease owner claimed during room HTTP bootstrap.
 - Expose dynamic `roomauthorityservice` readiness for PostgreSQL, Redis, NATS broadcast, timeline RPC, and internal RPC.
 - Expose authority RPC and authority control result metrics from the pilot service.
 - Preserve existing stable error behavior for stale epochs, recovery, idempotency, active-device checks, seek rate limits, and timeline failures.
 - Preserve Phase 12 timeline ownership; accepted control results must still be recorded through the timeline boundary before an accepted envelope can be returned or broadcast.
-- Use the current roomserver local/NATS behavior as the default and parity baseline.
+- Use the current roomserver local/NATS behavior as the production default and parity baseline.
+
+Local compose `app` uses compose-only roomserver overrides so `.env` values meant for bare `go run` do not accidentally force the serviceized path back to local:
+
+```text
+ROOMSERVER_RUNTIME_MODE=distributed_authority
+ROOMSERVER_IDENTITY_SERVICE_MODE=rpc
+ROOMSERVER_MEDIA_SERVICE_MODE=rpc
+ROOMSERVER_TIMELINE_SERVICE_MODE=rpc
+ROOMSERVER_AUTHORITY_SERVICE_MODE=rpc
+ROOMSERVER_AUTHORITY_LEASE_INSTANCE_ID=roomauthorityservice-1
+```
+
+Rollback in compose is explicit:
+
+```text
+ROOMSERVER_RUNTIME_MODE=local_process
+ROOMSERVER_IDENTITY_SERVICE_MODE=local
+ROOMSERVER_MEDIA_SERVICE_MODE=local
+ROOMSERVER_TIMELINE_SERVICE_MODE=local
+ROOMSERVER_AUTHORITY_SERVICE_MODE=local
+```
 
 See [Room Authority Service Design](./room-authority-service-design.md) for the proposed lifecycle and control-apply contract shape.
 
@@ -267,6 +290,6 @@ Still not complete:
 - WebSocket connection migration between instances.
 - Kafka command-ingress logging.
 - Splitting into separate PostgreSQL server/container deployments.
-- Making `room-authority-service` the default app/prod authority path.
+- Making `room-authority-service` the default production authority path.
 
 See [distributed-architecture.md](./distributed-architecture.md) for the current module map, business flows, and monitoring data flow.

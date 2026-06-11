@@ -40,6 +40,7 @@ func main() {
 		InstanceID:          runtimeConfig.InstanceID,
 		RoomRuntimeMode:     runtimeConfig.RoomRuntimeMode,
 		DatabaseURL:         runtimeConfig.DatabaseURL,
+		IdentityDatabaseURL: runtimeConfig.IdentityDatabaseURL,
 		MediaDatabaseURL:    runtimeConfig.MediaDatabaseURL,
 		TimelineDatabaseURL: runtimeConfig.TimelineDatabaseURL,
 		DebugSync:           runtimeConfig.DebugSync,
@@ -109,6 +110,8 @@ func main() {
 		},
 		ServiceClients: app.ServiceClientsConfig{
 			DiscoveryMode:    runtimeConfig.ServiceClients.DiscoveryMode,
+			IdentityMode:     runtimeConfig.ServiceClients.IdentityMode,
+			IdentityAddr:     runtimeConfig.ServiceClients.IdentityAddr,
 			MediaMode:        runtimeConfig.ServiceClients.MediaMode,
 			MediaAddr:        runtimeConfig.ServiceClients.MediaAddr,
 			TimelineMode:     runtimeConfig.ServiceClients.TimelineMode,

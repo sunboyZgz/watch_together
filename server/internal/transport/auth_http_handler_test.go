@@ -142,3 +142,12 @@ func (s *fakeUserStore) FindUserByAccount(_ context.Context, account string) (au
 	}
 	return user, nil
 }
+
+func (s *fakeUserStore) FindUserByID(_ context.Context, userID string) (auth.User, error) {
+	for _, user := range s.usersByAccount {
+		if user.ID == userID {
+			return user, nil
+		}
+	}
+	return auth.User{}, auth.ErrUserNotFound
+}
