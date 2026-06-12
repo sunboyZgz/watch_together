@@ -82,6 +82,8 @@ type ServiceClientsConfig struct {
 	MediaAddr        string
 	IdentityMode     string
 	IdentityAddr     string
+	RoomMode         string
+	RoomAddr         string
 	TimelineMode     string
 	TimelineAddr     string
 	AuthorityMode    string
@@ -190,7 +192,7 @@ func NewServer(config Config) *Server {
 	}
 	mediaService := newMediaService(db, mediaDB, config, serviceConfig)
 	identityService := newIdentityService(db, identityDB, config, serviceConfig, tokenManager)
-	roomService, roomStore := newRoomService(db, mediaService)
+	roomService, roomStore := newRoomService(db, mediaService, config, serviceConfig)
 	var timelineRecorder timeline.ResultRecorder = timeline.NoopRecorder{}
 	var timelineRecoveryReader timeline.RecoveryReader
 	var timelineOutboxStore *store.PostgresTimelineOutboxStore
@@ -407,6 +409,7 @@ func readinessSnapshotFromConfig(
 			dependencyStatus("outbox", timelineOutboxStore != nil || isRPCMode(config.ServiceClients.TimelineMode), distributedAuthority),
 			dependencyStatus("recovery", authorityRecovery != nil, distributedAuthority),
 			rpcDependencyStatus(ctx, "identity_rpc", config.ServiceClients.IdentityAddr, config.Observability, isRPCMode(config.ServiceClients.IdentityMode)),
+			rpcDependencyStatus(ctx, "room_rpc", config.ServiceClients.RoomAddr, config.Observability, isRPCMode(config.ServiceClients.RoomMode)),
 			rpcDependencyStatus(ctx, "media_rpc", config.ServiceClients.MediaAddr, config.Observability, isRPCMode(config.ServiceClients.MediaMode)),
 			rpcDependencyStatus(ctx, "timeline_rpc", config.ServiceClients.TimelineAddr, config.Observability, isRPCMode(config.ServiceClients.TimelineMode)),
 			rpcDependencyStatus(ctx, "authority_rpc", config.ServiceClients.AuthorityAddr, config.Observability, isRPCMode(config.ServiceClients.AuthorityMode)),
@@ -740,11 +743,22 @@ func newTimelineOutboxStore(db *gorm.DB, timelineDB *gorm.DB, config Config) *st
 }
 
 // newRoomService connects room business APIs to the shared PostgreSQL handle when available.
-func newRoomService(db *gorm.DB, mediaService *media.Service) (*roomapi.Service, *store.PostgresRoomStore) {
+func newRoomService(
+	db *gorm.DB,
+	mediaService *media.Service,
+	config Config,
+	service servicekit.Config,
+) (roomapi.BusinessService, *store.PostgresRoomStore) {
+	var roomStore *store.PostgresRoomStore
+	if db != nil {
+		roomStore = store.NewPostgresRoomStore(db)
+	}
+	if isRPCMode(config.ServiceClients.RoomMode) {
+		return roomapi.NewRPCClient(config.ServiceClients.RoomAddr, internalRPCClientConfig(config, service)), roomStore
+	}
 	if db == nil {
 		return nil, nil
 	}
-	roomStore := store.NewPostgresRoomStore(db)
 	if mediaService == nil {
 		return nil, roomStore
 	}

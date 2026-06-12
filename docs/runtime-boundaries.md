@@ -1,6 +1,6 @@
 # Runtime Boundaries
 
-This document records the runtime ownership boundaries for the room system. `local_process` remains the default runtime for bare `go run ./cmd/roomserver`. Phase 4 adds a `distributed_authority` MVP for multi-instance room authority, Phase 5 adds fenced authority recovery from the Kafka canonical timeline, Phase 6 adds distributed seek rate limiting plus observability, Phase 7 adds service foundation boundaries with optional media/timeline RPC adapters and logical database ownership, Phase 8 closes the media table access boundary for room/progress while making the RPC pilot verifiable, Phase 9 adds an optional independent media database boundary through `MEDIA_DATABASE_URL`, Phase 10 adds an optional independent timeline database boundary through `TIMELINE_DATABASE_URL`, Phase 11 makes timeline RPC the default compose path while keeping timeline workers as separate timeline-owned processes, Phase 12 moves result timeline ownership into `cmd/timelineservice`, Phase 13 documents the future `room-authority-service` boundary, Phase 14 implements a non-default authority RPC pilot in `rpc-pilot`, Phase 15 hardens that pilot with readiness, metrics, identity, and failure-semantics checks, Phase 16 makes local compose `app` default to media, timeline, and authority RPC, and Phase 17/18 adds `cmd/identityservice` to the local app RPC path. Production compose defaults media/timeline to RPC and keeps authority local by default.
+This document records the runtime ownership boundaries for the room system. `local_process` remains the default runtime for bare `go run ./cmd/roomserver`. Phase 4 adds a `distributed_authority` MVP for multi-instance room authority, Phase 5 adds fenced authority recovery from the Kafka canonical timeline, Phase 6 adds distributed seek rate limiting plus observability, Phase 7 adds service foundation boundaries with optional media/timeline RPC adapters and logical database ownership, Phase 8 closes the media table access boundary for room/progress while making the RPC pilot verifiable, Phase 9 adds an optional independent media database boundary through `MEDIA_DATABASE_URL`, Phase 10 adds an optional independent timeline database boundary through `TIMELINE_DATABASE_URL`, Phase 11 makes timeline RPC the default compose path while keeping timeline workers as separate timeline-owned processes, Phase 12 moves result timeline ownership into `cmd/timelineservice`, Phase 13 documents the future `room-authority-service` boundary, Phase 14 implements a non-default authority RPC pilot in `rpc-pilot`, Phase 15 hardens that pilot with readiness, metrics, identity, and failure-semantics checks, Phase 16 makes local compose `app` default to media, timeline, and authority RPC, Phase 17/18 adds `cmd/identityservice`, and Phase 19 adds `cmd/roomservice` for room metadata and membership RPC. Production compose defaults room/media/timeline to RPC and keeps authority local by default.
 
 ## Phase 1 Boundary Markers
 
@@ -41,7 +41,7 @@ X-Watch-Together-Room-Runtime: local_process
 | Seek rate limiting | Local memory or Redis control rate registry | `local_process` uses process-local throttling. `distributed_authority` uses Redis `wt:room:control_rate:{roomId}:seek:v1`. |
 | Observability | `internal/observability` | `/healthz`, `/readyz`, `/metrics`, Prometheus metrics, and worker metric hooks. |
 | Service foundation metadata | `internal/servicekit` | Request id, service name/version, deadlines, internal auth, and trace metadata. |
-| Internal RPC | ConnectRPC helper layer | Bare runs keep local adapters by default; local compose app defaults media, timeline, and authority to RPC with local retained for explicit rollback. |
+| Internal RPC | ConnectRPC helper layer | Bare runs keep local adapters by default; local compose app defaults identity, room, media, timeline, and authority to RPC with local retained for explicit rollback. |
 | OpenTelemetry tracing | `internal/telemetry` | Optional traces across HTTP, WebSocket control, RPC, Redis, NATS, Kafka, and PostgreSQL. |
 | Database ownership | Main PostgreSQL database plus optional media and timeline PostgreSQL databases | Phase 9 can place media-owned tables in a separate database; Phase 10 can place timeline-owned outbox rows in a separate database. Both are databases inside the same PostgreSQL server/container by default. |
 | Room metadata and membership | PostgreSQL | Durable business state. |
@@ -49,7 +49,7 @@ X-Watch-Together-Room-Runtime: local_process
 | Timeline outbox | Timeline PostgreSQL database or fallback main PostgreSQL database | Durable outbox state selected by `TIMELINE_DATABASE_URL`; default compose access is through `cmd/timelineservice` and timeline-owned workers. |
 | HLS files | Local/object storage via mediactl | Served through signed playback paths and Nginx/object storage depending on delivery mode. |
 
-Current note: local compose `app` runs `cmd/identityservice`, `cmd/mediaservice`, `cmd/timelineservice`, and `cmd/roomauthorityservice` by default. `roomserver` still owns Android-facing HTTP/WebSocket ingress and local connection tables, but it calls those internal services through RPC. Production compose defaults media/timeline RPC and still keeps active room playback authority on the existing roomserver local/NATS path unless explicitly changed later.
+Current note: local compose `app` runs `cmd/identityservice`, `cmd/roomservice`, `cmd/mediaservice`, `cmd/timelineservice`, and `cmd/roomauthorityservice` by default. `roomserver` still owns Android-facing HTTP/WebSocket ingress and local connection tables, but it calls those internal services through RPC. Production compose defaults room/media/timeline RPC and still keeps active room playback authority on the existing roomserver local/NATS path unless explicitly changed later.
 
 ## Phase 2 Snapshot Boundary
 
@@ -178,7 +178,7 @@ OTEL_EXPORTER_OTLP_ENDPOINT=
 OTEL_TRACE_SAMPLE_RATIO=0.1
 ```
 
-`IDENTITY_SERVICE_MODE`, `MEDIA_SERVICE_MODE`, `TIMELINE_SERVICE_MODE`, and `AUTHORITY_SERVICE_MODE` accept `local` or `rpc`. `local` keeps current in-process adapters. `rpc` calls `cmd/identityservice`, `cmd/mediaservice`, `cmd/timelineservice`, or `cmd/roomauthorityservice` over ConnectRPC. Phase 8 uses generated typed ConnectRPC contracts from `server/api/internal/v1` into `server/internal/rpcgen/v1`; Android HTTP/WebSocket payloads are unchanged. Phase 11 makes timeline RPC the default compose path: roomserver records and reads timeline data through `cmd/timelineservice`, while `cmd/outboxworker` and `cmd/derivedworker` remain separate timeline-owned workers. Local compose `app` now defaults to `IDENTITY_SERVICE_MODE=rpc`, `MEDIA_SERVICE_MODE=rpc`, `TIMELINE_SERVICE_MODE=rpc`, and `AUTHORITY_SERVICE_MODE=rpc`; roomserver `/readyz` actively probes `identity_rpc`, `media_rpc`, `timeline_rpc`, and `authority_rpc`. Production compose defaults media/timeline RPC but leaves authority local. Service discovery is static endpoint configuration in this phase; Consul, etcd, and Kubernetes service discovery integration are not required by the code.
+`IDENTITY_SERVICE_MODE`, `ROOM_SERVICE_MODE`, `MEDIA_SERVICE_MODE`, `TIMELINE_SERVICE_MODE`, and `AUTHORITY_SERVICE_MODE` accept `local` or `rpc`. `local` keeps current in-process adapters. `rpc` calls `cmd/identityservice`, `cmd/roomservice`, `cmd/mediaservice`, `cmd/timelineservice`, or `cmd/roomauthorityservice` over ConnectRPC. Phase 8 uses generated typed ConnectRPC contracts from `server/api/internal/v1` into `server/internal/rpcgen/v1`; Android HTTP/WebSocket payloads are unchanged. Phase 11 makes timeline RPC the default compose path: roomserver records and reads timeline data through `cmd/timelineservice`, while `cmd/outboxworker` and `cmd/derivedworker` remain separate timeline-owned workers. Local compose `app` now defaults to `IDENTITY_SERVICE_MODE=rpc`, `ROOM_SERVICE_MODE=rpc`, `MEDIA_SERVICE_MODE=rpc`, `TIMELINE_SERVICE_MODE=rpc`, and `AUTHORITY_SERVICE_MODE=rpc`; roomserver `/readyz` actively probes `identity_rpc`, `room_rpc`, `media_rpc`, `timeline_rpc`, and `authority_rpc`. Production compose defaults room/media/timeline RPC but leaves authority local. Service discovery is static endpoint configuration in this phase; Consul, etcd, and Kubernetes service discovery integration are not required by the code.
 
 `room-session` now calls the media port for episode detail during create/join/detail bootstrap. `progress` calls the media port for playable episode validation before writing `user_media_progress`. `PostgresRoomStore` and `PostgresProgressStore` no longer read `media_episodes` or `media_seasons` directly.
 
@@ -254,6 +254,7 @@ Local compose `app` uses compose-only roomserver overrides so `.env` values mean
 ```text
 ROOMSERVER_RUNTIME_MODE=distributed_authority
 ROOMSERVER_IDENTITY_SERVICE_MODE=rpc
+ROOMSERVER_ROOM_SERVICE_MODE=rpc
 ROOMSERVER_MEDIA_SERVICE_MODE=rpc
 ROOMSERVER_TIMELINE_SERVICE_MODE=rpc
 ROOMSERVER_AUTHORITY_SERVICE_MODE=rpc
@@ -265,6 +266,7 @@ Rollback in compose is explicit:
 ```text
 ROOMSERVER_RUNTIME_MODE=local_process
 ROOMSERVER_IDENTITY_SERVICE_MODE=local
+ROOMSERVER_ROOM_SERVICE_MODE=local
 ROOMSERVER_MEDIA_SERVICE_MODE=local
 ROOMSERVER_TIMELINE_SERVICE_MODE=local
 ROOMSERVER_AUTHORITY_SERVICE_MODE=local

@@ -69,6 +69,14 @@ type Store interface {
 	IsActiveMemberByCode(ctx context.Context, roomCode string, userID string) (bool, error)
 }
 
+type BusinessService interface {
+	CreateRoom(ctx context.Context, hostUserID string, mediaItemID string) (CreateRoomResult, error)
+	JoinRoomByCode(ctx context.Context, roomCode string, userID string) (JoinRoomResult, error)
+	LeaveRoomByCode(ctx context.Context, roomCode string, userID string) error
+	DetailByCode(ctx context.Context, roomCode string) (DetailResult, error)
+	IsActiveMemberByCode(ctx context.Context, roomCode string, userID string) (bool, error)
+}
+
 type MediaDetailLookup interface {
 	EpisodeDetail(ctx context.Context, episodeID string) (mediacatalog.EpisodeDetail, error)
 }

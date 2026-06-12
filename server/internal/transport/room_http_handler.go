@@ -17,7 +17,7 @@ import (
 
 type RoomHTTPHandler struct {
 	roomRuntime       roomRuntimeRegistry
-	roomService       *roomapi.Service
+	roomService       roomapi.BusinessService
 	tokenVerifier     accessTokenVerifier
 	playbackSigner    *mediaPlaybackSigner
 	delivery          *mediaDelivery
@@ -136,13 +136,13 @@ type roomDetailResponse struct {
 }
 
 // NewRoomHTTPHandler builds the HTTP entrypoint for room creation and join-by-code.
-func NewRoomHTTPHandler(roomManager *room.Manager, roomService *roomapi.Service) *RoomHTTPHandler {
+func NewRoomHTTPHandler(roomManager *room.Manager, roomService roomapi.BusinessService) *RoomHTTPHandler {
 	return NewRoomHTTPHandlerWithTokenVerifier(roomManager, roomService, nil)
 }
 
 func NewRoomHTTPHandlerWithTokenVerifier(
 	roomManager *room.Manager,
-	roomService *roomapi.Service,
+	roomService roomapi.BusinessService,
 	tokenVerifier accessTokenVerifier,
 	playbackConfigs ...MediaPlaybackConfig,
 ) *RoomHTTPHandler {
@@ -157,7 +157,7 @@ func NewRoomHTTPHandlerWithTokenVerifier(
 
 func NewRoomHTTPHandlerWithTokenVerifierAndRoomStateWriter(
 	roomManager *room.Manager,
-	roomService *roomapi.Service,
+	roomService roomapi.BusinessService,
 	tokenVerifier accessTokenVerifier,
 	roomStateWriter latestRoomStateWriter,
 	playbackConfigs ...MediaPlaybackConfig,
@@ -197,7 +197,7 @@ func (h *RoomHTTPHandler) SetRoomAuthorityRecovery(recoveryService roomAuthority
 
 func newRoomHTTPHandlerWithRuntime(
 	roomRuntime roomRuntimeRegistry,
-	roomService *roomapi.Service,
+	roomService roomapi.BusinessService,
 	tokenVerifier accessTokenVerifier,
 	playbackConfigs ...MediaPlaybackConfig,
 ) *RoomHTTPHandler {

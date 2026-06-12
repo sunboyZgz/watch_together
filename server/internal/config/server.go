@@ -122,6 +122,8 @@ type ServiceClientsConfig struct {
 	DiscoveryMode    string
 	IdentityMode     string
 	IdentityAddr     string
+	RoomMode         string
+	RoomAddr         string
 	MediaMode        string
 	MediaAddr        string
 	TimelineMode     string
@@ -206,6 +208,8 @@ func LoadServerRuntimeConfig(configDir string) (ServerRuntimeConfig, error) {
 		"SERVICE_DISCOVERY_MODE":                "static",
 		"IDENTITY_SERVICE_MODE":                 "local",
 		"IDENTITY_SERVICE_ADDR":                 "",
+		"ROOM_SERVICE_MODE":                     "local",
+		"ROOM_SERVICE_ADDR":                     "",
 		"MEDIA_SERVICE_MODE":                    "local",
 		"MEDIA_SERVICE_ADDR":                    "",
 		"TIMELINE_SERVICE_MODE":                 "local",
@@ -284,6 +288,8 @@ func LoadServerRuntimeConfig(configDir string) (ServerRuntimeConfig, error) {
 		"SERVICE_DISCOVERY_MODE",
 		"IDENTITY_SERVICE_MODE",
 		"IDENTITY_SERVICE_ADDR",
+		"ROOM_SERVICE_MODE",
+		"ROOM_SERVICE_ADDR",
 		"MEDIA_SERVICE_MODE",
 		"MEDIA_SERVICE_ADDR",
 		"TIMELINE_SERVICE_MODE",
@@ -405,6 +411,8 @@ func LoadServerRuntimeConfig(configDir string) (ServerRuntimeConfig, error) {
 			DiscoveryMode:    strings.ToLower(trimmedString(loader, "SERVICE_DISCOVERY_MODE")),
 			IdentityMode:     strings.ToLower(trimmedString(loader, "IDENTITY_SERVICE_MODE")),
 			IdentityAddr:     trimmedString(loader, "IDENTITY_SERVICE_ADDR"),
+			RoomMode:         strings.ToLower(trimmedString(loader, "ROOM_SERVICE_MODE")),
+			RoomAddr:         trimmedString(loader, "ROOM_SERVICE_ADDR"),
 			MediaMode:        strings.ToLower(trimmedString(loader, "MEDIA_SERVICE_MODE")),
 			MediaAddr:        trimmedString(loader, "MEDIA_SERVICE_ADDR"),
 			TimelineMode:     strings.ToLower(trimmedString(loader, "TIMELINE_SERVICE_MODE")),
@@ -529,6 +537,9 @@ func validateServiceConfig(config ServerRuntimeConfig) error {
 	if mode := normalizeServiceMode(config.ServiceClients.IdentityMode); mode != "local" && mode != "rpc" {
 		return fmt.Errorf("unsupported IDENTITY_SERVICE_MODE %q; supported values: local, rpc", config.ServiceClients.IdentityMode)
 	}
+	if mode := normalizeServiceMode(config.ServiceClients.RoomMode); mode != "local" && mode != "rpc" {
+		return fmt.Errorf("unsupported ROOM_SERVICE_MODE %q; supported values: local, rpc", config.ServiceClients.RoomMode)
+	}
 	if mode := normalizeServiceMode(config.ServiceClients.TimelineMode); mode != "local" && mode != "rpc" {
 		return fmt.Errorf("unsupported TIMELINE_SERVICE_MODE %q; supported values: local, rpc", config.ServiceClients.TimelineMode)
 	}
@@ -540,6 +551,9 @@ func validateServiceConfig(config ServerRuntimeConfig) error {
 	}
 	if normalizeServiceMode(config.ServiceClients.IdentityMode) == "rpc" && strings.TrimSpace(config.ServiceClients.IdentityAddr) == "" {
 		return fmt.Errorf("IDENTITY_SERVICE_ADDR is required when IDENTITY_SERVICE_MODE=rpc")
+	}
+	if normalizeServiceMode(config.ServiceClients.RoomMode) == "rpc" && strings.TrimSpace(config.ServiceClients.RoomAddr) == "" {
+		return fmt.Errorf("ROOM_SERVICE_ADDR is required when ROOM_SERVICE_MODE=rpc")
 	}
 	if normalizeServiceMode(config.ServiceClients.TimelineMode) == "rpc" && strings.TrimSpace(config.ServiceClients.TimelineAddr) == "" {
 		return fmt.Errorf("TIMELINE_SERVICE_ADDR is required when TIMELINE_SERVICE_MODE=rpc")

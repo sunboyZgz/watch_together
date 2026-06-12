@@ -2,7 +2,7 @@
 
 Phase 7 keeps one PostgreSQL database and adds logical ownership boundaries. Phase 8 makes the boundary enforceable with the machine-readable registry at `server/internal/store/db_ownership.yaml` and architecture tests that scan store SQL and migrations.
 
-Phase 9 adds the first independent media database boundary. Phase 10 adds the timeline database boundary for `room_timeline_outbox`. Phase 11 makes timeline a default service-family boundary in compose: `roomserver` calls `cmd/timelineservice` over RPC, while `cmd/outboxworker` and `cmd/derivedworker` remain separate timeline-owned workers. Phase 16 makes local compose `app` use media, timeline, and authority RPC by default; it does not add new table owners, but it makes the local development path exercise the same service boundaries that the ownership registry protects. In these database phases, "split database" means a separate PostgreSQL database such as `anime_watch_media_dev` or `anime_watch_timeline_dev`, usually inside the same PostgreSQL server/container as the main database. It is not a requirement to deploy a second PostgreSQL software system.
+Phase 9 adds the first independent media database boundary. Phase 10 adds the timeline database boundary for `room_timeline_outbox`. Phase 11 makes timeline a default service-family boundary in compose: `roomserver` calls `cmd/timelineservice` over RPC, while `cmd/outboxworker` and `cmd/derivedworker` remain separate timeline-owned workers. Phase 16 makes local compose `app` use media, timeline, and authority RPC by default; Phase 17/18 adds identity RPC; Phase 19 adds room metadata and membership RPC through `cmd/roomservice`. These service phases do not add new table owners, but they make the local development path exercise the same service boundaries that the ownership registry protects. In these database phases, "split database" means a separate PostgreSQL database such as `anime_watch_media_dev` or `anime_watch_timeline_dev`, usually inside the same PostgreSQL server/container as the main database. It is not a requirement to deploy a second PostgreSQL software system.
 
 When `MEDIA_DATABASE_URL` or `TIMELINE_DATABASE_URL` is empty, the matching owner keeps the previous single-database fallback. When either URL is configured, that owner uses the configured database. Timeline is fail-closed: if `TIMELINE_DATABASE_URL` is set but cannot be opened, timeline writes/readers must be unavailable rather than silently falling back to the main database.
 
@@ -89,6 +89,17 @@ Phase 12 moves canonical result event semantics into the timeline owner:
 - `cmd/timelineservice` generates event ids, event version, occurrence time, payload JSON, and outbox rows.
 - Recovery uses one timeline-owned feed that merges Kafka canonical events with same-room unpublished outbox gaps.
 - Kafka remains a result log, not a command ingress log, and `room authority` remains in `roomserver`.
+
+## Phase 19 Room Service Boundary
+
+Phase 19 makes room metadata and membership a real serviceized business slice:
+
+- `cmd/roomservice` exposes `RoomInternalService` for create, join, leave, detail, and active-member checks.
+- Local compose `app` and production compose default `roomserver` to `ROOM_SERVICE_MODE=rpc`.
+- `roomserver` still owns WebSocket connections, local room runtime state, and client-visible envelopes.
+- `cmd/roomservice` currently uses the main database `rooms` and `room_members` tables; no room database split is introduced in this phase.
+- `cmd/roomservice` calls the media port/RPC for episode details, so it does not read media tables directly in the serviceized compose path.
+- Lifecycle cleanup and recovery scanner hooks can still use the local room store as a rollback/parity path. A later lifecycle RPC phase can move grace-period, destroy, and recoverable-room scanning behind `cmd/roomservice` if the team wants all room-table writes to be service-owned at runtime.
 
 Operational rules:
 

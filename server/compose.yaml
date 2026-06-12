@@ -134,6 +134,7 @@ services:
       - kafka
       - minio-init
       - identityservice
+      - roomservice
       - mediaservice
       - timelineservice
       - roomauthorityservice
@@ -179,6 +180,8 @@ services:
       IDENTITY_SERVICE_MODE: ${ROOMSERVER_IDENTITY_SERVICE_MODE:-rpc}
       IDENTITY_SERVICE_ADDR: ${ROOMSERVER_IDENTITY_SERVICE_ADDR:-http://identityservice:8090}
       IDENTITY_DATABASE_URL: ${ROOMSERVER_IDENTITY_DATABASE_URL:-}
+      ROOM_SERVICE_MODE: ${ROOMSERVER_ROOM_SERVICE_MODE:-rpc}
+      ROOM_SERVICE_ADDR: ${ROOMSERVER_ROOM_SERVICE_ADDR:-http://roomservice:8090}
       MEDIA_SERVICE_MODE: ${ROOMSERVER_MEDIA_SERVICE_MODE:-rpc}
       MEDIA_SERVICE_ADDR: ${ROOMSERVER_MEDIA_SERVICE_ADDR:-http://mediaservice:8090}
       MEDIA_DATABASE_URL: ${ROOMSERVER_MEDIA_DATABASE_URL:-}
@@ -219,6 +222,7 @@ services:
       - kafka
       - minio-init
       - identityservice
+      - roomservice
       - mediaservice
       - timelineservice
       - roomauthorityservice
@@ -262,6 +266,38 @@ services:
     ports:
       - "8093:8090"
     command: ["/app/identityservice"]
+
+  roomservice:
+    profiles: ["app", "services", "rpc-pilot"]
+    image: watch-together-roomserver:dev
+    container_name: anime-watch-roomservice
+    restart: unless-stopped
+    depends_on:
+      - postgres
+      - mediaservice
+    env_file:
+      - .env
+    environment:
+      APP_ENV: local
+      SERVICE_NAME: watch-together-roomservice
+      SERVICE_VERSION: ${SERVICE_VERSION:-dev}
+      INTERNAL_RPC_ADDR: :8090
+      INTERNAL_RPC_PATH_PREFIX: ${INTERNAL_RPC_PATH_PREFIX:-/internal.rpc}
+      INTERNAL_RPC_TIMEOUT_MS: ${INTERNAL_RPC_TIMEOUT_MS:-1000}
+      INTERNAL_RPC_AUTH_TOKEN: ${INTERNAL_RPC_AUTH_TOKEN:-}
+      METRICS_ENABLED: ${METRICS_ENABLED:-true}
+      METRICS_PATH: ${METRICS_PATH:-/metrics}
+      READINESS_PATH: ${READINESS_PATH:-/readyz}
+      DATABASE_URL: postgres://app:app@postgres:5432/anime_watch_dev?sslmode=disable
+      MEDIA_SERVICE_MODE: rpc
+      MEDIA_SERVICE_ADDR: http://mediaservice:8090
+      OTEL_TRACING_ENABLED: ${OTEL_TRACING_ENABLED:-false}
+      OTEL_SERVICE_NAME: ${OTEL_SERVICE_NAME:-watch-together-roomservice}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+      OTEL_TRACE_SAMPLE_RATIO: ${OTEL_TRACE_SAMPLE_RATIO:-0.1}
+    ports:
+      - "8094:8090"
+    command: ["/app/roomservice"]
 
   outboxworker:
     profiles: ["app"]

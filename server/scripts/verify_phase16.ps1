@@ -56,8 +56,10 @@ Invoke-Step 'Go Phase 16 target tests' {
             ./internal/store `
             ./internal/config `
             ./internal/transport `
+            ./internal/roomapi `
             ./internal/auth `
-            ./internal/authority
+            ./internal/authority `
+            ./cmd/roomservice
     } finally {
         Pop-Location
     }

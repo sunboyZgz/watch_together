@@ -1,0 +1,95 @@
+syntax = "proto3";
+
+package watch_together.internal.v1;
+
+import "server/api/internal/v1/common.proto";
+
+option go_package = "watch_together/server/internal/rpcgen/v1;internalv1";
+
+service RoomInternalService {
+  rpc CreateRoom(CreateRoomRequest) returns (CreateRoomResponse);
+  rpc JoinRoom(JoinRoomRequest) returns (JoinRoomResponse);
+  rpc LeaveRoom(LeaveRoomRequest) returns (LeaveRoomResponse);
+  rpc GetRoomDetail(GetRoomDetailRequest) returns (GetRoomDetailResponse);
+  rpc IsActiveMember(IsActiveMemberRequest) returns (IsActiveMemberResponse);
+}
+
+message CreateRoomRequest {
+  RequestMetadata metadata = 1;
+  string host_user_id = 2;
+  string media_item_id = 3;
+}
+
+message CreateRoomResponse {
+  RoomBusinessRoom room = 1;
+  RoomBusinessMedia media = 2;
+}
+
+message JoinRoomRequest {
+  RequestMetadata metadata = 1;
+  string room_code = 2;
+  string user_id = 3;
+}
+
+message JoinRoomResponse {
+  RoomBusinessRoom room = 1;
+  RoomBusinessMedia media = 2;
+  RoomBusinessMember member = 3;
+}
+
+message LeaveRoomRequest {
+  RequestMetadata metadata = 1;
+  string room_code = 2;
+  string user_id = 3;
+}
+
+message LeaveRoomResponse {
+  bool left = 1;
+}
+
+message GetRoomDetailRequest {
+  RequestMetadata metadata = 1;
+  string room_code = 2;
+}
+
+message GetRoomDetailResponse {
+  RoomBusinessRoom room = 1;
+  RoomBusinessMedia media = 2;
+  repeated RoomBusinessMember members = 3;
+}
+
+message IsActiveMemberRequest {
+  RequestMetadata metadata = 1;
+  string room_code = 2;
+  string user_id = 3;
+}
+
+message IsActiveMemberResponse {
+  bool active = 1;
+}
+
+message RoomBusinessRoom {
+  string id = 1;
+  string room_code = 2;
+  string host_user_id = 3;
+  string media_item_id = 4;
+  string status = 5;
+}
+
+message RoomBusinessMedia {
+  string id = 1;
+  string title = 2;
+  optional string subtitle = 3;
+  string media_url = 4;
+  optional int64 duration_ms = 5;
+  optional string season_label = 6;
+  optional string episode_label = 7;
+}
+
+message RoomBusinessMember {
+  string user_id = 1;
+  string nickname = 2;
+  string avatar_seed = 3;
+  optional string avatar_url = 4;
+  string role = 5;
+}

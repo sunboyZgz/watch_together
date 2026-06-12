@@ -143,10 +143,11 @@ func TestComposeAppUsesFullRPCBoundaryAndProdKeepsAuthorityLocal(t *testing.T) {
 	localCompose := readCompose(t, "../../compose.yaml")
 	localRoomserver := requireComposeService(t, localCompose, "roomserver")
 	localIdentity := requireComposeService(t, localCompose, "identityservice")
+	localRoom := requireComposeService(t, localCompose, "roomservice")
 	localMedia := requireComposeService(t, localCompose, "mediaservice")
 	localAuthority := requireComposeService(t, localCompose, "roomauthorityservice")
 
-	for _, serviceName := range []string{"identityservice", "mediaservice", "timelineservice", "roomauthorityservice"} {
+	for _, serviceName := range []string{"identityservice", "roomservice", "mediaservice", "timelineservice", "roomauthorityservice"} {
 		if !dependsOnService(localRoomserver.DependsOn, serviceName) {
 			t.Fatalf("app roomserver must depend on %s by default", serviceName)
 		}
@@ -162,6 +163,12 @@ func TestComposeAppUsesFullRPCBoundaryAndProdKeepsAuthorityLocal(t *testing.T) {
 	}
 	if addr := envString(localRoomserver.Environment, "IDENTITY_SERVICE_ADDR"); !strings.Contains(addr, "http://identityservice:8090") {
 		t.Fatalf("app roomserver IDENTITY_SERVICE_ADDR = %q, want identityservice URL", addr)
+	}
+	if mode := envString(localRoomserver.Environment, "ROOM_SERVICE_MODE"); !strings.Contains(mode, "rpc") {
+		t.Fatalf("app roomserver ROOM_SERVICE_MODE = %q, want rpc default", mode)
+	}
+	if addr := envString(localRoomserver.Environment, "ROOM_SERVICE_ADDR"); !strings.Contains(addr, "http://roomservice:8090") {
+		t.Fatalf("app roomserver ROOM_SERVICE_ADDR = %q, want roomservice URL", addr)
 	}
 	identityDatabaseURL := envString(localRoomserver.Environment, "IDENTITY_DATABASE_URL")
 	if strings.Contains(identityDatabaseURL, "${IDENTITY_DATABASE_URL") {
@@ -195,6 +202,9 @@ func TestComposeAppUsesFullRPCBoundaryAndProdKeepsAuthorityLocal(t *testing.T) {
 	if !containsContext(localIdentity.Profiles, "app") {
 		t.Fatalf("identityservice profiles = %v, want app profile", localIdentity.Profiles)
 	}
+	if !containsContext(localRoom.Profiles, "app") {
+		t.Fatalf("roomservice profiles = %v, want app profile", localRoom.Profiles)
+	}
 	if !containsContext(localMedia.Profiles, "app") {
 		t.Fatalf("mediaservice profiles = %v, want app profile", localMedia.Profiles)
 	}
@@ -209,6 +219,9 @@ func TestComposeAppUsesFullRPCBoundaryAndProdKeepsAuthorityLocal(t *testing.T) {
 	pilotAuthority := requireComposeService(t, localCompose, "roomauthorityservice")
 	if !dependsOnService(pilotRoomserver.DependsOn, "identityservice") {
 		t.Fatalf("rpc-pilot roomserver must depend on identityservice")
+	}
+	if !dependsOnService(pilotRoomserver.DependsOn, "roomservice") {
+		t.Fatalf("rpc-pilot roomserver must depend on roomservice")
 	}
 	if !dependsOnService(pilotRoomserver.DependsOn, "mediaservice") {
 		t.Fatalf("rpc-pilot roomserver must depend on mediaservice")
@@ -237,12 +250,19 @@ func TestComposeAppUsesFullRPCBoundaryAndProdKeepsAuthorityLocal(t *testing.T) {
 
 	prodCompose := readCompose(t, "../../compose.prod.yaml")
 	prodRoomserver := requireComposeService(t, prodCompose, "roomserver")
+	prodRoom := requireComposeService(t, prodCompose, "roomservice")
 	prodMedia := requireComposeService(t, prodCompose, "mediaservice")
 	if _, ok := prodCompose.Services["roomauthorityservice"]; ok {
 		t.Fatalf("prod compose must not start roomauthorityservice by default")
 	}
 	if !dependsOnService(prodRoomserver.DependsOn, "mediaservice") {
 		t.Fatalf("prod roomserver must depend on mediaservice by default")
+	}
+	if !dependsOnService(prodRoomserver.DependsOn, "roomservice") {
+		t.Fatalf("prod roomserver must depend on roomservice by default")
+	}
+	if mode := envString(prodRoomserver.Environment, "ROOM_SERVICE_MODE"); !strings.Contains(mode, "rpc") {
+		t.Fatalf("prod roomserver ROOM_SERVICE_MODE = %q, want rpc default", mode)
 	}
 	if mode := envString(prodRoomserver.Environment, "MEDIA_SERVICE_MODE"); !strings.Contains(mode, "rpc") {
 		t.Fatalf("prod roomserver MEDIA_SERVICE_MODE = %q, want rpc default", mode)
@@ -252,6 +272,9 @@ func TestComposeAppUsesFullRPCBoundaryAndProdKeepsAuthorityLocal(t *testing.T) {
 	}
 	if len(prodMedia.Profiles) != 0 {
 		t.Fatalf("prod mediaservice should be a default service, got profiles %v", prodMedia.Profiles)
+	}
+	if len(prodRoom.Profiles) != 0 {
+		t.Fatalf("prod roomservice should be a default service, got profiles %v", prodRoom.Profiles)
 	}
 	if mode := envString(prodRoomserver.Environment, "AUTHORITY_SERVICE_MODE"); !strings.Contains(mode, "local") {
 		t.Fatalf("prod roomserver AUTHORITY_SERVICE_MODE = %q, want local default", mode)

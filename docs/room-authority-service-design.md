@@ -1,6 +1,6 @@
 # Room Authority Service Design
 
-Phase 13 defines the target `room-authority-service` boundary. Phase 14 implements a non-default RPC pilot under `rpc-pilot`. Phase 15 hardens that pilot with dynamic readiness, metrics, stable failure tests, and explicit lease-owner identity. Phase 16 promotes authority RPC into the local compose `app` development path, while production compose still keeps room authority inside `roomserver` by default. Phase 17/18 adds identity RPC to the same local app baseline; this does not change the authority contract. Android HTTP/WebSocket contracts remain unchanged.
+Phase 13 defines the target `room-authority-service` boundary. Phase 14 implements a non-default RPC pilot under `rpc-pilot`. Phase 15 hardens that pilot with dynamic readiness, metrics, stable failure tests, and explicit lease-owner identity. Phase 16 promotes authority RPC into the local compose `app` development path, while production compose still keeps room authority inside `roomserver` by default. Phase 17/18 adds identity RPC to the same local app baseline; Phase 19 adds room metadata and membership RPC through `cmd/roomservice`. These changes do not change the authority contract. Android HTTP/WebSocket contracts remain unchanged.
 
 ## Goals
 
@@ -46,6 +46,7 @@ Phase 16 makes local compose `app` the default full-RPC serviceized development 
 - `server/compose.yaml --profile app` starts `mediaservice`, `timelineservice`, and `roomauthorityservice`.
 - App `roomserver` sets `ROOM_RUNTIME_MODE=distributed_authority`, `MEDIA_SERVICE_MODE=rpc`, `TIMELINE_SERVICE_MODE=rpc`, and `AUTHORITY_SERVICE_MODE=rpc`.
 - App `roomserver` also sets `IDENTITY_SERVICE_MODE=rpc`, so register/login/token verification can cross the identity service boundary.
+- App `roomserver` sets `ROOM_SERVICE_MODE=rpc`, so room create/join/detail and WebSocket membership checks can cross the room service boundary.
 - App `roomserver` uses `AUTHORITY_LEASE_INSTANCE_ID=roomauthorityservice-1` by default so HTTP bootstrap claims Redis authority leases for the service identity.
 - App `roomserver /readyz` actively probes `authority_rpc` through `roomauthorityservice /readyz`; unavailable authority RPC makes roomserver readiness `not_ready`.
 - `server/compose.prod.yaml` still does not start `roomauthorityservice` by default and keeps `AUTHORITY_SERVICE_MODE=local`.
@@ -56,6 +57,7 @@ Phase 16 makes local compose `app` the default full-RPC serviceized development 
 Today, `distributed_authority` uses these ownership boundaries:
 
 - `roomserver` owns WebSocket ingress/egress, HTTP room bootstrap, the local connection table, accepted envelope broadcast, NATS control forwarding, and the authoritative `room.Manager` instance for rooms whose Redis lease points to the local instance.
+- `roomservice` owns room metadata and membership RPC in compose app/prod paths, while realtime room runtime stays in `roomserver`.
 - Redis stores authority leases, active-device leases, control request idempotency, seek rate limits, latest room snapshots, and user-level presence.
 - NATS Core handles realtime WebSocket fan-out and non-authority control request/reply between roomserver instances.
 - `timelineservice` owns canonical timeline result event construction and recovery-ready event feeds.

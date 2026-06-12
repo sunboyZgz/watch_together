@@ -112,6 +112,8 @@ func main() {
 			DiscoveryMode:    runtimeConfig.ServiceClients.DiscoveryMode,
 			IdentityMode:     runtimeConfig.ServiceClients.IdentityMode,
 			IdentityAddr:     runtimeConfig.ServiceClients.IdentityAddr,
+			RoomMode:         runtimeConfig.ServiceClients.RoomMode,
+			RoomAddr:         runtimeConfig.ServiceClients.RoomAddr,
 			MediaMode:        runtimeConfig.ServiceClients.MediaMode,
 			MediaAddr:        runtimeConfig.ServiceClients.MediaAddr,
 			TimelineMode:     runtimeConfig.ServiceClients.TimelineMode,
