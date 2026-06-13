@@ -299,11 +299,18 @@ cd server
 .\scripts\verify_phase16.ps1
 ```
 
-Add `-RunSmoke` to start the local full-RPC compose app path and exercise HTTP, WebSocket control, authority RPC, timeline RPC, and timeline DB outbox writes:
+Run the Phase 23 verification loop on Windows. This is the recommended full-RPC, multi-database baseline gate:
 
 ```powershell
 cd server
-.\scripts\verify_phase16.ps1 -RunSmoke -ResetVolumes -DownAfterRun
+.\scripts\verify_phase23.ps1
+```
+
+Add `-RunSmoke` to start the local full-RPC compose app path, apply all owner database migrations, seed deterministic media, and prove HTTP, WebSocket control, authority RPC, timeline RPC, and owner database writes:
+
+```powershell
+cd server
+.\scripts\verify_phase23.ps1 -RunSmoke -ResetVolumes -DownAfterRun
 ```
 
 Media database sync:
@@ -334,13 +341,15 @@ cd server
 docker compose --profile app up -d --build
 ```
 
-The `app` profile starts `roomserver`, `identityservice`, `roomservice`, `mediaservice`, `timelineservice`, `roomauthorityservice`, the timeline workers, and the local infrastructure. `roomserver` uses compose-only override variables so `.env` files copied for bare `go run` do not silently change the compose default:
+The `app` profile starts `roomserver`, `identityservice`, `roomservice`, `mediaservice`, `progressservice`, `homecompositionservice`, `timelineservice`, `roomauthorityservice`, the timeline workers, and the local infrastructure. `roomserver` uses compose-only override variables so `.env` files copied for bare `go run` do not silently change the compose default:
 
 ```text
 ROOMSERVER_RUNTIME_MODE=distributed_authority
 ROOMSERVER_IDENTITY_SERVICE_MODE=rpc
 ROOMSERVER_ROOM_SERVICE_MODE=rpc
 ROOMSERVER_MEDIA_SERVICE_MODE=rpc
+ROOMSERVER_PROGRESS_SERVICE_MODE=rpc
+ROOMSERVER_HOME_SERVICE_MODE=rpc
 ROOMSERVER_TIMELINE_SERVICE_MODE=rpc
 ROOMSERVER_AUTHORITY_SERVICE_MODE=rpc
 ROOMSERVER_AUTHORITY_LEASE_INSTANCE_ID=roomauthorityservice-1
@@ -355,6 +364,8 @@ http://127.0.0.1:8091/readyz  timelineservice
 http://127.0.0.1:8092/readyz  roomauthorityservice
 http://127.0.0.1:8093/readyz  identityservice
 http://127.0.0.1:8094/readyz  roomservice
+http://127.0.0.1:8095/readyz  progressservice
+http://127.0.0.1:8096/readyz  homecompositionservice
 ```
 
 Explicit compose rollback:
@@ -372,6 +383,8 @@ docker compose --profile app up -d --build
 
 Existing main-database media data is not copied into the media database automatically. Use `go run ./cmd/mediadbsync`, or use the Phase 16 smoke script which seeds a deterministic local episode into `anime_watch_media_dev`.
 
+Phase 23's smoke script is the preferred end-to-end local validation. It applies main, identity, room, media, progress, and timeline migrations, writes users/rooms/progress/timeline data through the public Android-facing routes, and asserts those writes landed in the owning databases rather than the main shadow tables.
+
 Run the optional RPC pilot stack through compose for observability, load, and service experiments:
 
 ```bash
@@ -383,7 +396,7 @@ OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4318 \
 docker compose --profile rpc-pilot up -d --build
 ```
 
-`rpc-pilot` starts `roomserver-rpc-pilot`, `identityservice`, `roomservice`, `mediaservice`, `timelineservice`, `roomauthorityservice`, an OTLP collector, and the identity/media/timeline database init jobs. In this profile `roomserver-rpc-pilot` sets `ROOM_RUNTIME_MODE=distributed_authority`, `AUTHORITY_SERVICE_MODE=rpc`, `AUTHORITY_SERVICE_ADDR=http://roomauthorityservice:8090`, and `AUTHORITY_LEASE_INSTANCE_ID=roomauthorityservice-1`. `identityservice` uses `IDENTITY_DATABASE_URL=postgres://app:app@postgres:5432/anime_watch_identity_dev?sslmode=disable` in compose. `roomservice` calls identity and media through RPC and uses `ROOM_DATABASE_URL=postgres://app:app@postgres:5432/anime_watch_room_dev?sslmode=disable`. `mediaservice` uses `MEDIA_DATABASE_URL=postgres://app:app@postgres:5432/anime_watch_media_dev?sslmode=disable` in compose. `timelineservice` and `outboxworker` use `TIMELINE_DATABASE_URL=postgres://app:app@postgres:5432/anime_watch_timeline_dev?sslmode=disable`. The normal local compose `app` path uses the same identity, room, media, timeline, and authority RPC boundaries, while `rpc-pilot` remains useful for observability and load experiments. The code still supports local service modes for explicit rollback or bare single-process debugging.
+`rpc-pilot` starts `roomserver-rpc-pilot`, `identityservice`, `roomservice`, `mediaservice`, `progressservice`, `homecompositionservice`, `timelineservice`, `roomauthorityservice`, an OTLP collector, and the owner database init jobs. In this profile `roomserver-rpc-pilot` sets `ROOM_RUNTIME_MODE=distributed_authority`, `AUTHORITY_SERVICE_MODE=rpc`, `AUTHORITY_SERVICE_ADDR=http://roomauthorityservice:8090`, and `AUTHORITY_LEASE_INSTANCE_ID=roomauthorityservice-1`. `identityservice` uses `IDENTITY_DATABASE_URL=postgres://app:app@postgres:5432/anime_watch_identity_dev?sslmode=disable` in compose. `roomservice` calls identity and media through RPC and uses `ROOM_DATABASE_URL=postgres://app:app@postgres:5432/anime_watch_room_dev?sslmode=disable`. `mediaservice` uses `MEDIA_DATABASE_URL=postgres://app:app@postgres:5432/anime_watch_media_dev?sslmode=disable` in compose. `progressservice` uses `PROGRESS_DATABASE_URL=postgres://app:app@postgres:5432/anime_watch_progress_dev?sslmode=disable`, and `homecompositionservice` composes identity, progress, and media only through RPC. `timelineservice` and `outboxworker` use `TIMELINE_DATABASE_URL=postgres://app:app@postgres:5432/anime_watch_timeline_dev?sslmode=disable`. The normal local compose `app` path uses the same identity, room, media, progress, home, timeline, and authority RPC boundaries, while `rpc-pilot` remains useful for observability and load experiments. The code still supports local service modes for explicit rollback or bare single-process debugging.
 
 Local app RPC smoke checks:
 
@@ -487,6 +500,6 @@ Production deployment uses `server/compose.prod.yaml`. Its intended boundary is:
 - Kafka stays on the Docker network and stores durable timeline result events.
 - `/metrics` should be scraped from an internal network or blocked at the public reverse proxy.
 - Media delivery defaults to `MEDIA_DELIVERY_MODE=nginx_auth_request`.
-- Production compose defaults media and timeline to RPC services, but keeps `AUTHORITY_SERVICE_MODE=local` and does not start `roomauthorityservice` by default.
+- Production compose defaults identity, room, media, progress, home, and timeline to RPC services, but keeps `AUTHORITY_SERVICE_MODE=local` and does not start `roomauthorityservice` by default.
 
 See [server/deploy/README.md](../server/deploy/README.md) for deployment-specific commands and Nginx details.

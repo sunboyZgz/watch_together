@@ -147,6 +147,7 @@ func TestComposeAppUsesFullRPCBoundaryAndProdKeepsAuthorityLocal(t *testing.T) {
 	localMedia := requireComposeService(t, localCompose, "mediaservice")
 	localProgress := requireComposeService(t, localCompose, "progressservice")
 	localHome := requireComposeService(t, localCompose, "homecompositionservice")
+	localTimeline := requireComposeService(t, localCompose, "timelineservice")
 	localAuthority := requireComposeService(t, localCompose, "roomauthorityservice")
 
 	for _, serviceName := range []string{"identityservice", "roomservice", "mediaservice", "progressservice", "homecompositionservice", "timelineservice", "roomauthorityservice"} {
@@ -251,11 +252,47 @@ func TestComposeAppUsesFullRPCBoundaryAndProdKeepsAuthorityLocal(t *testing.T) {
 	if !containsContext(localMedia.Profiles, "app") {
 		t.Fatalf("mediaservice profiles = %v, want app profile", localMedia.Profiles)
 	}
+	if !dependsOnService(localMedia.DependsOn, "media-postgres-init") {
+		t.Fatalf("mediaservice must depend on media-postgres-init")
+	}
+	if mediaDatabaseURL := envString(localMedia.Environment, "MEDIA_DATABASE_URL"); !strings.Contains(mediaDatabaseURL, "anime_watch_media_dev") {
+		t.Fatalf("mediaservice MEDIA_DATABASE_URL = %q, want local media database", mediaDatabaseURL)
+	}
 	if !containsContext(localProgress.Profiles, "app") {
 		t.Fatalf("progressservice profiles = %v, want app profile", localProgress.Profiles)
 	}
+	if !dependsOnService(localProgress.DependsOn, "progress-postgres-init") {
+		t.Fatalf("progressservice must depend on progress-postgres-init")
+	}
+	if !dependsOnService(localProgress.DependsOn, "identityservice") {
+		t.Fatalf("progressservice must depend on identityservice")
+	}
+	if !dependsOnService(localProgress.DependsOn, "mediaservice") {
+		t.Fatalf("progressservice must depend on mediaservice")
+	}
+	if progressDatabaseURL := envString(localProgress.Environment, "PROGRESS_DATABASE_URL"); !strings.Contains(progressDatabaseURL, "anime_watch_progress_dev") {
+		t.Fatalf("progressservice PROGRESS_DATABASE_URL = %q, want local progress database", progressDatabaseURL)
+	}
 	if !containsContext(localHome.Profiles, "app") {
 		t.Fatalf("homecompositionservice profiles = %v, want app profile", localHome.Profiles)
+	}
+	if !dependsOnService(localHome.DependsOn, "identityservice") {
+		t.Fatalf("homecompositionservice must depend on identityservice")
+	}
+	if !dependsOnService(localHome.DependsOn, "progressservice") {
+		t.Fatalf("homecompositionservice must depend on progressservice")
+	}
+	if !dependsOnService(localHome.DependsOn, "mediaservice") {
+		t.Fatalf("homecompositionservice must depend on mediaservice")
+	}
+	if !containsContext(localTimeline.Profiles, "app") {
+		t.Fatalf("timelineservice profiles = %v, want app profile", localTimeline.Profiles)
+	}
+	if !dependsOnService(localTimeline.DependsOn, "timeline-postgres-init") {
+		t.Fatalf("timelineservice must depend on timeline-postgres-init")
+	}
+	if timelineDatabaseURL := envString(localTimeline.Environment, "TIMELINE_DATABASE_URL"); !strings.Contains(timelineDatabaseURL, "anime_watch_timeline_dev") {
+		t.Fatalf("timelineservice TIMELINE_DATABASE_URL = %q, want local timeline database", timelineDatabaseURL)
 	}
 	if !containsContext(localAuthority.Profiles, "app") {
 		t.Fatalf("roomauthorityservice profiles = %v, want app profile", localAuthority.Profiles)
@@ -316,6 +353,7 @@ func TestComposeAppUsesFullRPCBoundaryAndProdKeepsAuthorityLocal(t *testing.T) {
 	prodMedia := requireComposeService(t, prodCompose, "mediaservice")
 	prodProgress := requireComposeService(t, prodCompose, "progressservice")
 	prodHome := requireComposeService(t, prodCompose, "homecompositionservice")
+	prodTimeline := requireComposeService(t, prodCompose, "timelineservice")
 	if _, ok := prodCompose.Services["roomauthorityservice"]; ok {
 		t.Fatalf("prod compose must not start roomauthorityservice by default")
 	}
@@ -330,6 +368,9 @@ func TestComposeAppUsesFullRPCBoundaryAndProdKeepsAuthorityLocal(t *testing.T) {
 	}
 	if !dependsOnService(prodRoomserver.DependsOn, "homecompositionservice") {
 		t.Fatalf("prod roomserver must depend on homecompositionservice by default")
+	}
+	if !dependsOnService(prodRoomserver.DependsOn, "identityservice") {
+		t.Fatalf("prod roomserver must depend on identityservice by default")
 	}
 	if mode := envString(prodRoomserver.Environment, "ROOM_SERVICE_MODE"); !strings.Contains(mode, "rpc") {
 		t.Fatalf("prod roomserver ROOM_SERVICE_MODE = %q, want rpc default", mode)
@@ -364,6 +405,42 @@ func TestComposeAppUsesFullRPCBoundaryAndProdKeepsAuthorityLocal(t *testing.T) {
 	if roomDatabaseURL := envString(prodRoom.Environment, "ROOM_DATABASE_URL"); !strings.Contains(roomDatabaseURL, "watch_together_room_prod") {
 		t.Fatalf("prod roomservice ROOM_DATABASE_URL = %q, want prod room database", roomDatabaseURL)
 	}
+	if !dependsOnService(prodRoom.DependsOn, "room-postgres-init") {
+		t.Fatalf("prod roomservice must depend on room-postgres-init")
+	}
+	if !dependsOnService(prodMedia.DependsOn, "media-postgres-init") {
+		t.Fatalf("prod mediaservice must depend on media-postgres-init")
+	}
+	if mediaDatabaseURL := envString(prodMedia.Environment, "MEDIA_DATABASE_URL"); !strings.Contains(mediaDatabaseURL, "watch_together_media_prod") {
+		t.Fatalf("prod mediaservice MEDIA_DATABASE_URL = %q, want prod media database", mediaDatabaseURL)
+	}
+	if !dependsOnService(prodProgress.DependsOn, "progress-postgres-init") {
+		t.Fatalf("prod progressservice must depend on progress-postgres-init")
+	}
+	if !dependsOnService(prodProgress.DependsOn, "identityservice") {
+		t.Fatalf("prod progressservice must depend on identityservice")
+	}
+	if !dependsOnService(prodProgress.DependsOn, "mediaservice") {
+		t.Fatalf("prod progressservice must depend on mediaservice")
+	}
+	if progressDatabaseURL := envString(prodProgress.Environment, "PROGRESS_DATABASE_URL"); !strings.Contains(progressDatabaseURL, "watch_together_progress_prod") {
+		t.Fatalf("prod progressservice PROGRESS_DATABASE_URL = %q, want prod progress database", progressDatabaseURL)
+	}
+	if !dependsOnService(prodHome.DependsOn, "identityservice") {
+		t.Fatalf("prod homecompositionservice must depend on identityservice")
+	}
+	if !dependsOnService(prodHome.DependsOn, "progressservice") {
+		t.Fatalf("prod homecompositionservice must depend on progressservice")
+	}
+	if !dependsOnService(prodHome.DependsOn, "mediaservice") {
+		t.Fatalf("prod homecompositionservice must depend on mediaservice")
+	}
+	if !dependsOnService(prodTimeline.DependsOn, "timeline-postgres-init") {
+		t.Fatalf("prod timelineservice must depend on timeline-postgres-init")
+	}
+	if timelineDatabaseURL := envString(prodTimeline.Environment, "TIMELINE_DATABASE_URL"); !strings.Contains(timelineDatabaseURL, "watch_together_timeline_prod") {
+		t.Fatalf("prod timelineservice TIMELINE_DATABASE_URL = %q, want prod timeline database", timelineDatabaseURL)
+	}
 	if len(prodIdentity.Profiles) != 0 {
 		t.Fatalf("prod identityservice should be a default service, got profiles %v", prodIdentity.Profiles)
 	}
@@ -378,6 +455,9 @@ func TestComposeAppUsesFullRPCBoundaryAndProdKeepsAuthorityLocal(t *testing.T) {
 	}
 	if len(prodHome.Profiles) != 0 {
 		t.Fatalf("prod homecompositionservice should be a default service, got profiles %v", prodHome.Profiles)
+	}
+	if len(prodTimeline.Profiles) != 0 {
+		t.Fatalf("prod timelineservice should be a default service, got profiles %v", prodTimeline.Profiles)
 	}
 	if mode := envString(prodRoomserver.Environment, "AUTHORITY_SERVICE_MODE"); !strings.Contains(mode, "local") {
 		t.Fatalf("prod roomserver AUTHORITY_SERVICE_MODE = %q, want local default", mode)
