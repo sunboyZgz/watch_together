@@ -354,8 +354,12 @@ func TestComposeAppUsesFullRPCBoundaryAndProdKeepsAuthorityLocal(t *testing.T) {
 	prodProgress := requireComposeService(t, prodCompose, "progressservice")
 	prodHome := requireComposeService(t, prodCompose, "homecompositionservice")
 	prodTimeline := requireComposeService(t, prodCompose, "timelineservice")
-	if _, ok := prodCompose.Services["roomauthorityservice"]; ok {
-		t.Fatalf("prod compose must not start roomauthorityservice by default")
+	prodAuthority := requireComposeService(t, prodCompose, "roomauthorityservice")
+	if !containsContext(prodAuthority.Profiles, "authority-rpc-canary") {
+		t.Fatalf("prod roomauthorityservice profiles = %v, want authority-rpc-canary only", prodAuthority.Profiles)
+	}
+	if len(prodAuthority.Profiles) == 0 {
+		t.Fatalf("prod roomauthorityservice must stay behind an explicit canary profile")
 	}
 	if !dependsOnService(prodRoomserver.DependsOn, "mediaservice") {
 		t.Fatalf("prod roomserver must depend on mediaservice by default")
@@ -462,8 +466,37 @@ func TestComposeAppUsesFullRPCBoundaryAndProdKeepsAuthorityLocal(t *testing.T) {
 	if mode := envString(prodRoomserver.Environment, "AUTHORITY_SERVICE_MODE"); !strings.Contains(mode, "local") {
 		t.Fatalf("prod roomserver AUTHORITY_SERVICE_MODE = %q, want local default", mode)
 	}
+	if addr := envString(prodRoomserver.Environment, "AUTHORITY_SERVICE_ADDR"); !strings.Contains(addr, "AUTHORITY_SERVICE_ADDR") {
+		t.Fatalf("prod roomserver AUTHORITY_SERVICE_ADDR = %q, want explicit env-driven canary override", addr)
+	}
+	if leaseID := envString(prodRoomserver.Environment, "AUTHORITY_LEASE_INSTANCE_ID"); !strings.Contains(leaseID, "AUTHORITY_LEASE_INSTANCE_ID") {
+		t.Fatalf("prod roomserver AUTHORITY_LEASE_INSTANCE_ID = %q, want explicit env-driven canary override", leaseID)
+	}
 	if old := envString(prodRoomserver.Environment, "AUTHORITY_SERVICE_INSTANCE_ID"); old != "" {
 		t.Fatalf("prod roomserver must not use deprecated AUTHORITY_SERVICE_INSTANCE_ID, got %q", old)
+	}
+	for _, serviceName := range []string{"redis", "nats", "roomservice", "timelineservice"} {
+		if !dependsOnService(prodAuthority.DependsOn, serviceName) {
+			t.Fatalf("prod authority canary must depend on %s", serviceName)
+		}
+	}
+	if mode := envString(prodAuthority.Environment, "ROOM_SERVICE_MODE"); mode != "rpc" {
+		t.Fatalf("prod authority canary ROOM_SERVICE_MODE = %q, want rpc", mode)
+	}
+	if addr := envString(prodAuthority.Environment, "ROOM_SERVICE_ADDR"); !strings.Contains(addr, "http://roomservice:8090") {
+		t.Fatalf("prod authority canary ROOM_SERVICE_ADDR = %q, want roomservice URL", addr)
+	}
+	if mode := envString(prodAuthority.Environment, "TIMELINE_SERVICE_MODE"); mode != "rpc" {
+		t.Fatalf("prod authority canary TIMELINE_SERVICE_MODE = %q, want rpc", mode)
+	}
+	if addr := envString(prodAuthority.Environment, "TIMELINE_SERVICE_ADDR"); !strings.Contains(addr, "http://timelineservice:8090") {
+		t.Fatalf("prod authority canary TIMELINE_SERVICE_ADDR = %q, want timelineservice URL", addr)
+	}
+	if databaseURL := envString(prodAuthority.Environment, "ROOM_DATABASE_URL"); databaseURL != "" {
+		t.Fatalf("prod authority canary must not receive direct ROOM_DATABASE_URL, got %q", databaseURL)
+	}
+	if databaseURL := envString(prodAuthority.Environment, "DATABASE_URL"); databaseURL != "" {
+		t.Fatalf("prod authority canary must not receive direct DATABASE_URL, got %q", databaseURL)
 	}
 }
 

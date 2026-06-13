@@ -313,6 +313,20 @@ cd server
 .\scripts\verify_phase23.ps1 -RunSmoke -ResetVolumes -DownAfterRun
 ```
 
+Run the Phase 24 authority canary verification before any production authority RPC cutover. The default run keeps the Phase 23 baseline and adds prod canary compose validation plus authority RPC failure-semantics tests:
+
+```powershell
+cd server
+.\scripts\verify_phase24.ps1
+```
+
+Add `-RunSmoke` to run the full-RPC multi-database E2E smoke after the canary checks:
+
+```powershell
+cd server
+.\scripts\verify_phase24.ps1 -RunSmoke -ResetVolumes -DownAfterRun
+```
+
 Media database sync:
 
 ```bash
@@ -383,7 +397,7 @@ docker compose --profile app up -d --build
 
 Existing main-database media data is not copied into the media database automatically. Use `go run ./cmd/mediadbsync`, or use the Phase 16 smoke script which seeds a deterministic local episode into `anime_watch_media_dev`.
 
-Phase 23's smoke script is the preferred end-to-end local validation. It applies main, identity, room, media, progress, and timeline migrations, writes users/rooms/progress/timeline data through the public Android-facing routes, and asserts those writes landed in the owning databases rather than the main shadow tables.
+Phase 23's smoke script is the preferred end-to-end local validation. It applies main, identity, room, media, progress, and timeline migrations, writes users/rooms/progress/timeline data through the public Android-facing routes, and asserts those writes landed in the owning databases rather than the main shadow tables. Phase 24 wraps that baseline with authority canary checks for RPC timeout, unavailable, stale response, timeline failure, and prod canary compose wiring.
 
 Run the optional RPC pilot stack through compose for observability, load, and service experiments:
 
@@ -500,6 +514,8 @@ Production deployment uses `server/compose.prod.yaml`. Its intended boundary is:
 - Kafka stays on the Docker network and stores durable timeline result events.
 - `/metrics` should be scraped from an internal network or blocked at the public reverse proxy.
 - Media delivery defaults to `MEDIA_DELIVERY_MODE=nginx_auth_request`.
-- Production compose defaults identity, room, media, progress, home, and timeline to RPC services, but keeps `AUTHORITY_SERVICE_MODE=local` and does not start `roomauthorityservice` by default.
+- Production compose defaults identity, room, media, progress, home, and timeline to RPC services, but keeps `AUTHORITY_SERVICE_MODE=local`.
+- `roomauthorityservice` is available only behind the explicit `authority-rpc-canary` profile. A canary run must set `AUTHORITY_SERVICE_MODE=rpc`, `AUTHORITY_SERVICE_ADDR=http://roomauthorityservice:8090`, `AUTHORITY_LEASE_INSTANCE_ID=roomauthorityservice-prod-1`, `ROOM_RUNTIME_MODE=distributed_authority`, and `WS_CROSS_INSTANCE_BROADCAST_ENABLED=true`.
+- Rollback is setting `AUTHORITY_SERVICE_MODE=local` and stopping the `authority-rpc-canary` profile. No Android HTTP/WebSocket payload changes are involved.
 
 See [server/deploy/README.md](../server/deploy/README.md) for deployment-specific commands and Nginx details.

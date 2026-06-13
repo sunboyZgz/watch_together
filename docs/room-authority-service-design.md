@@ -1,6 +1,6 @@
 # Room Authority Service Design
 
-Phase 13 defines the target `room-authority-service` boundary. Phase 14 implements a non-default RPC pilot under `rpc-pilot`. Phase 15 hardens that pilot with dynamic readiness, metrics, stable failure tests, and explicit lease-owner identity. Phase 16 promotes authority RPC into the local compose `app` development path, while production compose still keeps room authority inside `roomserver` by default. Phase 17/18 adds identity RPC to the same local app baseline; Phase 19 adds room metadata and membership RPC through `cmd/roomservice`; Phase 21 moves room lifecycle and recovery bootstrap reads behind room RPC. These changes do not change the authority contract. Android HTTP/WebSocket contracts remain unchanged.
+Phase 13 defines the target `room-authority-service` boundary. Phase 14 implements a non-default RPC pilot under `rpc-pilot`. Phase 15 hardens that pilot with dynamic readiness, metrics, stable failure tests, and explicit lease-owner identity. Phase 16 promotes authority RPC into the local compose `app` development path, while production compose still keeps room authority inside `roomserver` by default. Phase 17/18 adds identity RPC to the same local app baseline; Phase 19 adds room metadata and membership RPC through `cmd/roomservice`; Phase 21 moves room lifecycle and recovery bootstrap reads behind room RPC. Phase 24 adds a production `authority-rpc-canary` profile without changing the production default. These changes do not change the authority contract. Android HTTP/WebSocket contracts remain unchanged.
 
 ## Goals
 
@@ -16,6 +16,7 @@ Phase 13 defines the target `room-authority-service` boundary. Phase 14 implemen
 - Do not route production or local compose traffic through a new authority service in Phase 13.
 - Do not route app/prod default traffic through authority RPC in Phase 14.
 - Do not route production default traffic through authority RPC in Phase 16.
+- Do not route production default traffic through authority RPC in Phase 24; only the explicit canary profile may do that.
 - Do not move WebSocket connection objects, send queues, heartbeat state, or local client tables out of `roomserver`.
 - Do not change Android HTTP/WebSocket request or response shapes.
 
@@ -49,8 +50,18 @@ Phase 16 makes local compose `app` the default full-RPC serviceized development 
 - App `roomserver` sets `ROOM_SERVICE_MODE=rpc`, so room create/join/detail and WebSocket membership checks can cross the room service boundary.
 - App `roomserver` uses `AUTHORITY_LEASE_INSTANCE_ID=roomauthorityservice-1` by default so HTTP bootstrap claims Redis authority leases for the service identity.
 - App `roomserver /readyz` actively probes `authority_rpc` through `roomauthorityservice /readyz`; unavailable authority RPC makes roomserver readiness `not_ready`.
-- `server/compose.prod.yaml` still does not start `roomauthorityservice` by default and keeps `AUTHORITY_SERVICE_MODE=local`.
+- `server/compose.prod.yaml` still keeps `AUTHORITY_SERVICE_MODE=local` by default.
 - Bare `go run ./cmd/roomserver` keeps local adapters by default for fast single-process debugging.
+
+## Phase 24 Production Canary Status
+
+Phase 24 adds a production canary path without making authority RPC the production default.
+
+- `server/compose.prod.yaml --profile authority-rpc-canary` can start `roomauthorityservice`.
+- A canary run must explicitly set `AUTHORITY_SERVICE_MODE=rpc`, `AUTHORITY_SERVICE_ADDR=http://roomauthorityservice:8090`, `AUTHORITY_LEASE_INSTANCE_ID=roomauthorityservice-prod-1`, `ROOM_RUNTIME_MODE=distributed_authority`, and `WS_CROSS_INSTANCE_BROADCAST_ENABLED=true`.
+- `roomauthorityservice` depends on Redis, NATS, `roomservice`, and `timelineservice`; it does not receive `DATABASE_URL` or `ROOM_DATABASE_URL`.
+- `server/scripts/verify_phase24.ps1` validates the Phase 23 full-RPC baseline, prod canary compose wiring, and authority failure semantics. `-RunSmoke` also runs the full-RPC multi-database HTTP/WebSocket smoke.
+- Rollback remains explicit and simple: set `AUTHORITY_SERVICE_MODE=local` and stop the canary profile.
 
 ## Current Baseline
 
@@ -214,6 +225,12 @@ Phase 17+:
 
 - Decide whether command inbox or command ingress is necessary.
 - Introduce durable command audit only if product or operations requirements justify it.
+
+Phase 24:
+
+- Keep production authority local by default.
+- Add the `authority-rpc-canary` prod profile and verify it with compose guards.
+- Prove timeout, unavailable, stale response, timeline failure, and stale-epoch semantics before any production default cutover.
 
 ## Acceptance Criteria
 

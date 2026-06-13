@@ -527,6 +527,59 @@ services:
       KAFKA_REPLAY_TIMEOUT_MS: ${KAFKA_REPLAY_TIMEOUT_MS:-1000}
     command: ["/app/timelineservice"]
 
+  roomauthorityservice:
+    image: watch-together-roomserver:${WATCH_TOGETHER_IMAGE_TAG:-prod}
+    restart: unless-stopped
+    profiles: ["authority-rpc-canary"]
+    depends_on:
+      redis:
+        condition: service_healthy
+      nats:
+        condition: service_started
+      roomservice:
+        condition: service_started
+      timelineservice:
+        condition: service_started
+    env_file:
+      - .env.prod
+    environment:
+      APP_ENV: prod
+      SERVICE_NAME: watch-together-roomauthorityservice
+      SERVICE_VERSION: ${SERVICE_VERSION:-prod}
+      SERVER_INSTANCE_ID: ${AUTHORITY_LEASE_INSTANCE_ID:-roomauthorityservice-prod-1}
+      DEBUG_SYNC: "false"
+      INTERNAL_RPC_ADDR: :8090
+      INTERNAL_RPC_PATH_PREFIX: ${INTERNAL_RPC_PATH_PREFIX:-/internal.rpc}
+      INTERNAL_RPC_TIMEOUT_MS: ${INTERNAL_RPC_TIMEOUT_MS:-1000}
+      INTERNAL_RPC_AUTH_TOKEN: ${INTERNAL_RPC_AUTH_TOKEN:-change_me_internal_rpc_token}
+      TIMELINE_SERVICE_MODE: rpc
+      TIMELINE_SERVICE_ADDR: ${TIMELINE_SERVICE_ADDR:-http://timelineservice:8090}
+      ROOM_SERVICE_MODE: rpc
+      ROOM_SERVICE_ADDR: ${ROOM_SERVICE_ADDR:-http://roomservice:8090}
+      WS_CROSS_INSTANCE_BROADCAST_ENABLED: "true"
+      WS_EVENT_BUS: ${WS_EVENT_BUS:-nats_core}
+      NATS_URL: ${NATS_URL:-nats://nats:4222}
+      NATS_NAME: watch-together-roomauthorityservice
+      NATS_SUBJECT_ROOM_BROADCAST: ${NATS_SUBJECT_ROOM_BROADCAST:-wt.room.broadcast.v1}
+      CONTROL_IDEMPOTENCY_TTL_MS: ${CONTROL_IDEMPOTENCY_TTL_MS:-600000}
+      WS_SEEK_MIN_INTERVAL_MS: ${WS_SEEK_MIN_INTERVAL_MS:-250}
+      AUTHORITY_RENEW_INTERVAL_MS: ${AUTHORITY_RENEW_INTERVAL_MS:-10000}
+      AUTHORITY_TAKEOVER_SCAN_INTERVAL_MS: ${AUTHORITY_TAKEOVER_SCAN_INTERVAL_MS:-30000}
+      AUTHORITY_RECOVERY_TIMEOUT_MS: ${AUTHORITY_RECOVERY_TIMEOUT_MS:-5000}
+      METRICS_ENABLED: ${METRICS_ENABLED:-true}
+      METRICS_PATH: ${METRICS_PATH:-/metrics}
+      READINESS_PATH: ${READINESS_PATH:-/readyz}
+      OTEL_TRACING_ENABLED: ${OTEL_TRACING_ENABLED:-false}
+      OTEL_SERVICE_NAME: ${OTEL_SERVICE_NAME:-watch-together-roomauthorityservice}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+      OTEL_TRACE_SAMPLE_RATIO: ${OTEL_TRACE_SAMPLE_RATIO:-0.1}
+      DATABASE_URL: ""
+      REDIS_ADDR: redis:6380
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-change_me_redis_password}
+      REDIS_DB: 0
+      REDIS_REQUIRED: "true"
+    command: ["/app/roomauthorityservice"]
+
   nginx:
     build:
       context: ./deploy/nginx
