@@ -145,9 +145,11 @@ func TestComposeAppUsesFullRPCBoundaryAndProdKeepsAuthorityLocal(t *testing.T) {
 	localIdentity := requireComposeService(t, localCompose, "identityservice")
 	localRoom := requireComposeService(t, localCompose, "roomservice")
 	localMedia := requireComposeService(t, localCompose, "mediaservice")
+	localProgress := requireComposeService(t, localCompose, "progressservice")
+	localHome := requireComposeService(t, localCompose, "homecompositionservice")
 	localAuthority := requireComposeService(t, localCompose, "roomauthorityservice")
 
-	for _, serviceName := range []string{"identityservice", "roomservice", "mediaservice", "timelineservice", "roomauthorityservice"} {
+	for _, serviceName := range []string{"identityservice", "roomservice", "mediaservice", "progressservice", "homecompositionservice", "timelineservice", "roomauthorityservice"} {
 		if !dependsOnService(localRoomserver.DependsOn, serviceName) {
 			t.Fatalf("app roomserver must depend on %s by default", serviceName)
 		}
@@ -180,6 +182,25 @@ func TestComposeAppUsesFullRPCBoundaryAndProdKeepsAuthorityLocal(t *testing.T) {
 	if addr := envString(localRoomserver.Environment, "MEDIA_SERVICE_ADDR"); !strings.Contains(addr, "http://mediaservice:8090") {
 		t.Fatalf("app roomserver MEDIA_SERVICE_ADDR = %q, want mediaservice URL", addr)
 	}
+	if mode := envString(localRoomserver.Environment, "PROGRESS_SERVICE_MODE"); !strings.Contains(mode, "rpc") {
+		t.Fatalf("app roomserver PROGRESS_SERVICE_MODE = %q, want rpc default", mode)
+	}
+	if addr := envString(localRoomserver.Environment, "PROGRESS_SERVICE_ADDR"); !strings.Contains(addr, "http://progressservice:8090") {
+		t.Fatalf("app roomserver PROGRESS_SERVICE_ADDR = %q, want progressservice URL", addr)
+	}
+	progressDatabaseURL := envString(localRoomserver.Environment, "PROGRESS_DATABASE_URL")
+	if strings.Contains(progressDatabaseURL, "${PROGRESS_DATABASE_URL") {
+		t.Fatalf("app roomserver must not receive progress-owned PROGRESS_DATABASE_URL directly, got %q", progressDatabaseURL)
+	}
+	if progressDatabaseURL != "" && !strings.Contains(progressDatabaseURL, "ROOMSERVER_PROGRESS_DATABASE_URL") {
+		t.Fatalf("app roomserver progress DB override must be explicit, got %q", progressDatabaseURL)
+	}
+	if mode := envString(localRoomserver.Environment, "HOME_SERVICE_MODE"); !strings.Contains(mode, "rpc") {
+		t.Fatalf("app roomserver HOME_SERVICE_MODE = %q, want rpc default", mode)
+	}
+	if addr := envString(localRoomserver.Environment, "HOME_SERVICE_ADDR"); !strings.Contains(addr, "http://homecompositionservice:8090") {
+		t.Fatalf("app roomserver HOME_SERVICE_ADDR = %q, want homecompositionservice URL", addr)
+	}
 	mediaDatabaseURL := envString(localRoomserver.Environment, "MEDIA_DATABASE_URL")
 	if strings.Contains(mediaDatabaseURL, "${MEDIA_DATABASE_URL") {
 		t.Fatalf("app roomserver must not receive media-owned MEDIA_DATABASE_URL directly, got %q", mediaDatabaseURL)
@@ -208,6 +229,12 @@ func TestComposeAppUsesFullRPCBoundaryAndProdKeepsAuthorityLocal(t *testing.T) {
 	if !containsContext(localMedia.Profiles, "app") {
 		t.Fatalf("mediaservice profiles = %v, want app profile", localMedia.Profiles)
 	}
+	if !containsContext(localProgress.Profiles, "app") {
+		t.Fatalf("progressservice profiles = %v, want app profile", localProgress.Profiles)
+	}
+	if !containsContext(localHome.Profiles, "app") {
+		t.Fatalf("homecompositionservice profiles = %v, want app profile", localHome.Profiles)
+	}
 	if !containsContext(localAuthority.Profiles, "app") {
 		t.Fatalf("roomauthorityservice profiles = %v, want app profile", localAuthority.Profiles)
 	}
@@ -225,6 +252,12 @@ func TestComposeAppUsesFullRPCBoundaryAndProdKeepsAuthorityLocal(t *testing.T) {
 	}
 	if !dependsOnService(pilotRoomserver.DependsOn, "mediaservice") {
 		t.Fatalf("rpc-pilot roomserver must depend on mediaservice")
+	}
+	if !dependsOnService(pilotRoomserver.DependsOn, "progressservice") {
+		t.Fatalf("rpc-pilot roomserver must depend on progressservice")
+	}
+	if !dependsOnService(pilotRoomserver.DependsOn, "homecompositionservice") {
+		t.Fatalf("rpc-pilot roomserver must depend on homecompositionservice")
 	}
 	if !dependsOnService(pilotRoomserver.DependsOn, "roomauthorityservice") {
 		t.Fatalf("rpc-pilot roomserver must depend on roomauthorityservice")
@@ -252,6 +285,8 @@ func TestComposeAppUsesFullRPCBoundaryAndProdKeepsAuthorityLocal(t *testing.T) {
 	prodRoomserver := requireComposeService(t, prodCompose, "roomserver")
 	prodRoom := requireComposeService(t, prodCompose, "roomservice")
 	prodMedia := requireComposeService(t, prodCompose, "mediaservice")
+	prodProgress := requireComposeService(t, prodCompose, "progressservice")
+	prodHome := requireComposeService(t, prodCompose, "homecompositionservice")
 	if _, ok := prodCompose.Services["roomauthorityservice"]; ok {
 		t.Fatalf("prod compose must not start roomauthorityservice by default")
 	}
@@ -261,20 +296,41 @@ func TestComposeAppUsesFullRPCBoundaryAndProdKeepsAuthorityLocal(t *testing.T) {
 	if !dependsOnService(prodRoomserver.DependsOn, "roomservice") {
 		t.Fatalf("prod roomserver must depend on roomservice by default")
 	}
+	if !dependsOnService(prodRoomserver.DependsOn, "progressservice") {
+		t.Fatalf("prod roomserver must depend on progressservice by default")
+	}
+	if !dependsOnService(prodRoomserver.DependsOn, "homecompositionservice") {
+		t.Fatalf("prod roomserver must depend on homecompositionservice by default")
+	}
 	if mode := envString(prodRoomserver.Environment, "ROOM_SERVICE_MODE"); !strings.Contains(mode, "rpc") {
 		t.Fatalf("prod roomserver ROOM_SERVICE_MODE = %q, want rpc default", mode)
 	}
 	if mode := envString(prodRoomserver.Environment, "MEDIA_SERVICE_MODE"); !strings.Contains(mode, "rpc") {
 		t.Fatalf("prod roomserver MEDIA_SERVICE_MODE = %q, want rpc default", mode)
 	}
+	if mode := envString(prodRoomserver.Environment, "PROGRESS_SERVICE_MODE"); !strings.Contains(mode, "rpc") {
+		t.Fatalf("prod roomserver PROGRESS_SERVICE_MODE = %q, want rpc default", mode)
+	}
+	if mode := envString(prodRoomserver.Environment, "HOME_SERVICE_MODE"); !strings.Contains(mode, "rpc") {
+		t.Fatalf("prod roomserver HOME_SERVICE_MODE = %q, want rpc default", mode)
+	}
 	if mediaDatabaseURL := envString(prodRoomserver.Environment, "MEDIA_DATABASE_URL"); strings.Contains(mediaDatabaseURL, "${MEDIA_DATABASE_URL") {
 		t.Fatalf("prod roomserver must not receive media-owned MEDIA_DATABASE_URL directly, got %q", mediaDatabaseURL)
+	}
+	if progressDatabaseURL := envString(prodRoomserver.Environment, "PROGRESS_DATABASE_URL"); strings.Contains(progressDatabaseURL, "${PROGRESS_DATABASE_URL") {
+		t.Fatalf("prod roomserver must not receive progress-owned PROGRESS_DATABASE_URL directly, got %q", progressDatabaseURL)
 	}
 	if len(prodMedia.Profiles) != 0 {
 		t.Fatalf("prod mediaservice should be a default service, got profiles %v", prodMedia.Profiles)
 	}
 	if len(prodRoom.Profiles) != 0 {
 		t.Fatalf("prod roomservice should be a default service, got profiles %v", prodRoom.Profiles)
+	}
+	if len(prodProgress.Profiles) != 0 {
+		t.Fatalf("prod progressservice should be a default service, got profiles %v", prodProgress.Profiles)
+	}
+	if len(prodHome.Profiles) != 0 {
+		t.Fatalf("prod homecompositionservice should be a default service, got profiles %v", prodHome.Profiles)
 	}
 	if mode := envString(prodRoomserver.Environment, "AUTHORITY_SERVICE_MODE"); !strings.Contains(mode, "local") {
 		t.Fatalf("prod roomserver AUTHORITY_SERVICE_MODE = %q, want local default", mode)
@@ -420,6 +476,32 @@ func TestTimelineMigrationCreatedTablesDeclareTimelineOwner(t *testing.T) {
 			}
 			if ownership.Owner != "timeline" {
 				t.Fatalf("timeline migration %s creates table %s owned by %q, want timeline", filepath.Base(file), table, ownership.Owner)
+			}
+		}
+	}
+}
+
+func TestProgressMigrationCreatedTablesDeclareProgressOwner(t *testing.T) {
+	registry := loadOwnershipRegistry(t)
+	files, err := filepath.Glob("../../progress_migrations/*.up.sql")
+	if err != nil {
+		t.Fatalf("glob progress migrations: %v", err)
+	}
+	if len(files) == 0 {
+		t.Fatalf("expected progress migrations to exist")
+	}
+	for _, file := range files {
+		contentBytes, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatalf("read progress migration %s: %v", file, err)
+		}
+		for _, table := range createdTables(string(contentBytes)) {
+			ownership, ok := registry.Tables[table]
+			if !ok {
+				t.Fatalf("progress migration %s creates table %s without ownership registry entry", filepath.Base(file), table)
+			}
+			if ownership.Owner != "progress" {
+				t.Fatalf("progress migration %s creates table %s owned by %q, want progress", filepath.Base(file), table, ownership.Owner)
 			}
 		}
 	}

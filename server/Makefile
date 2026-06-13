@@ -1,8 +1,9 @@
 MIGRATIONS_DIR := ./migrations
 MEDIA_MIGRATIONS_DIR := ./media_migrations
 TIMELINE_MIGRATIONS_DIR := ./timeline_migrations
+PROGRESS_MIGRATIONS_DIR := ./progress_migrations
 
-.PHONY: migration-create migration-up migration-down migration-version media-migration-up media-migration-down media-migration-version timeline-migration-up timeline-migration-down timeline-migration-version proto-lint proto-generate verify-phase8 verify-phase9 verify-phase10 verify-phase11 verify-phase16
+.PHONY: migration-create migration-up migration-down migration-version media-migration-up media-migration-down media-migration-version timeline-migration-up timeline-migration-down timeline-migration-version progress-migration-up progress-migration-down progress-migration-version proto-lint proto-generate verify-phase8 verify-phase9 verify-phase10 verify-phase11 verify-phase16
 
 migration-create:
 	@test -n "$(name)" || (echo "usage: make migration-create name=create_users_table" && exit 1)
@@ -40,6 +41,18 @@ timeline-migration-down:
 timeline-migration-version:
 	@test -n "$$TIMELINE_DATABASE_URL" || (echo "TIMELINE_DATABASE_URL is required" && exit 1)
 	@MIGRATIONS_DIR=$(TIMELINE_MIGRATIONS_DIR) DATABASE_URL="$$TIMELINE_DATABASE_URL" ./scripts/migrate.sh version
+
+progress-migration-up:
+	@test -n "$$PROGRESS_DATABASE_URL" || (echo "PROGRESS_DATABASE_URL is required" && exit 1)
+	@MIGRATIONS_DIR=$(PROGRESS_MIGRATIONS_DIR) DATABASE_URL="$$PROGRESS_DATABASE_URL" ./scripts/migrate.sh up
+
+progress-migration-down:
+	@test -n "$$PROGRESS_DATABASE_URL" || (echo "PROGRESS_DATABASE_URL is required" && exit 1)
+	@MIGRATIONS_DIR=$(PROGRESS_MIGRATIONS_DIR) DATABASE_URL="$$PROGRESS_DATABASE_URL" ./scripts/migrate.sh down 1
+
+progress-migration-version:
+	@test -n "$$PROGRESS_DATABASE_URL" || (echo "PROGRESS_DATABASE_URL is required" && exit 1)
+	@MIGRATIONS_DIR=$(PROGRESS_MIGRATIONS_DIR) DATABASE_URL="$$PROGRESS_DATABASE_URL" ./scripts/migrate.sh version
 
 proto-lint:
 	@cd .. && buf lint

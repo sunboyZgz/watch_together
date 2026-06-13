@@ -92,6 +92,20 @@ func TestLoadServerRuntimeConfigLoadsTimelineDatabaseURL(t *testing.T) {
 	}
 }
 
+func TestLoadServerRuntimeConfigLoadsProgressDatabaseURL(t *testing.T) {
+	configDir := t.TempDir()
+	mustWriteConfigFile(t, filepath.Join(configDir, ".env"), "PROGRESS_DATABASE_URL=postgres://progress-db\n")
+
+	cfg, err := LoadServerRuntimeConfig(configDir)
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+
+	if cfg.ProgressDatabaseURL != "postgres://progress-db" {
+		t.Fatalf("expected progress database url, got %q", cfg.ProgressDatabaseURL)
+	}
+}
+
 func TestLoadRoomserverRuntimeConfigRejectsOwnedDatabaseURLInRPCMode(t *testing.T) {
 	cases := []struct {
 		name        string
@@ -112,6 +126,11 @@ func TestLoadRoomserverRuntimeConfigRejectsOwnedDatabaseURLInRPCMode(t *testing.
 			name:        "timeline",
 			content:     "TIMELINE_SERVICE_MODE=rpc\nTIMELINE_SERVICE_ADDR=http://timelineservice:8090\nTIMELINE_DATABASE_URL=postgres://timeline-db\n",
 			wantMessage: "TIMELINE_DATABASE_URL",
+		},
+		{
+			name:        "progress",
+			content:     "PROGRESS_SERVICE_MODE=rpc\nPROGRESS_SERVICE_ADDR=http://progressservice:8090\nPROGRESS_DATABASE_URL=postgres://progress-db\n",
+			wantMessage: "PROGRESS_DATABASE_URL",
 		},
 	}
 	for _, tc := range cases {
@@ -228,6 +247,8 @@ func TestLoadServerRuntimeConfigRejectsInvalidServiceFoundationSettings(t *testi
 		content string
 	}{
 		{name: "media rpc missing addr", content: "MEDIA_SERVICE_MODE=rpc\n"},
+		{name: "progress rpc missing addr", content: "PROGRESS_SERVICE_MODE=rpc\n"},
+		{name: "home rpc missing addr", content: "HOME_SERVICE_MODE=rpc\n"},
 		{name: "identity rpc missing addr", content: "IDENTITY_SERVICE_MODE=rpc\n"},
 		{name: "room rpc missing addr", content: "ROOM_SERVICE_MODE=rpc\n"},
 		{name: "timeline rpc missing addr", content: "TIMELINE_SERVICE_MODE=rpc\n"},

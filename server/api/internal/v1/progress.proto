@@ -1,0 +1,68 @@
+syntax = "proto3";
+
+package watch_together.internal.v1;
+
+import "server/api/internal/v1/common.proto";
+
+option go_package = "watch_together/server/internal/rpcgen/v1;internalv1";
+
+service ProgressInternalService {
+  rpc UpdateProgress(UpdateProgressRequest) returns (UpdateProgressResponse);
+  rpc GetUserProgress(GetUserProgressRequest) returns (GetUserProgressResponse);
+  rpc BatchGetUserProgress(BatchGetUserProgressRequest) returns (BatchGetUserProgressResponse);
+  rpc ListRecentUserProgress(ListRecentUserProgressRequest) returns (ListRecentUserProgressResponse);
+}
+
+message UpdateProgressRequest {
+  RequestMetadata metadata = 1;
+  string user_id = 2;
+  string media_item_id = 3;
+  int32 last_position_seconds = 4;
+  int32 duration_seconds = 5;
+  bool completed = 6;
+  optional string completion_source = 7;
+}
+
+message UpdateProgressResponse {
+  UserMediaProgress progress = 1;
+}
+
+message GetUserProgressRequest {
+  RequestMetadata metadata = 1;
+  string user_id = 2;
+  string media_item_id = 3;
+}
+
+message GetUserProgressResponse {
+  bool found = 1;
+  UserMediaProgress progress = 2;
+}
+
+message BatchGetUserProgressRequest {
+  RequestMetadata metadata = 1;
+  string user_id = 2;
+  repeated string media_item_ids = 3;
+}
+
+message BatchGetUserProgressResponse {
+  repeated UserMediaProgress progress = 1;
+}
+
+message ListRecentUserProgressRequest {
+  RequestMetadata metadata = 1;
+  string user_id = 2;
+  int32 limit = 3;
+  bool incomplete_only = 4;
+}
+
+message ListRecentUserProgressResponse {
+  repeated UserMediaProgress progress = 1;
+}
+
+message UserMediaProgress {
+  string media_item_id = 1;
+  int32 last_position_seconds = 2;
+  int32 duration_seconds = 3;
+  bool completed = 4;
+  int64 last_watched_at_ms = 5;
+}

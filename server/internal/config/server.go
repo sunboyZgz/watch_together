@@ -23,6 +23,7 @@ type ServerRuntimeConfig struct {
 	DatabaseURL         string
 	IdentityDatabaseURL string
 	MediaDatabaseURL    string
+	ProgressDatabaseURL string
 	TimelineDatabaseURL string
 	DebugSync           bool
 	Auth                AuthConfig
@@ -126,6 +127,10 @@ type ServiceClientsConfig struct {
 	RoomAddr         string
 	MediaMode        string
 	MediaAddr        string
+	ProgressMode     string
+	ProgressAddr     string
+	HomeMode         string
+	HomeAddr         string
 	TimelineMode     string
 	TimelineAddr     string
 	AuthorityMode    string
@@ -212,6 +217,10 @@ func LoadServerRuntimeConfig(configDir string) (ServerRuntimeConfig, error) {
 		"ROOM_SERVICE_ADDR":                     "",
 		"MEDIA_SERVICE_MODE":                    "local",
 		"MEDIA_SERVICE_ADDR":                    "",
+		"PROGRESS_SERVICE_MODE":                 "local",
+		"PROGRESS_SERVICE_ADDR":                 "",
+		"HOME_SERVICE_MODE":                     "local",
+		"HOME_SERVICE_ADDR":                     "",
 		"TIMELINE_SERVICE_MODE":                 "local",
 		"TIMELINE_SERVICE_ADDR":                 "",
 		"AUTHORITY_SERVICE_MODE":                "local",
@@ -235,6 +244,7 @@ func LoadServerRuntimeConfig(configDir string) (ServerRuntimeConfig, error) {
 		"DATABASE_URL",
 		"IDENTITY_DATABASE_URL",
 		"MEDIA_DATABASE_URL",
+		"PROGRESS_DATABASE_URL",
 		"TIMELINE_DATABASE_URL",
 		"DEBUG_SYNC",
 		"AUTH_JWT_SECRET",
@@ -292,6 +302,10 @@ func LoadServerRuntimeConfig(configDir string) (ServerRuntimeConfig, error) {
 		"ROOM_SERVICE_ADDR",
 		"MEDIA_SERVICE_MODE",
 		"MEDIA_SERVICE_ADDR",
+		"PROGRESS_SERVICE_MODE",
+		"PROGRESS_SERVICE_ADDR",
+		"HOME_SERVICE_MODE",
+		"HOME_SERVICE_ADDR",
 		"TIMELINE_SERVICE_MODE",
 		"TIMELINE_SERVICE_ADDR",
 		"AUTHORITY_SERVICE_MODE",
@@ -337,6 +351,7 @@ func LoadServerRuntimeConfig(configDir string) (ServerRuntimeConfig, error) {
 		DatabaseURL:         trimmedString(loader, "DATABASE_URL"),
 		IdentityDatabaseURL: trimmedString(loader, "IDENTITY_DATABASE_URL"),
 		MediaDatabaseURL:    trimmedString(loader, "MEDIA_DATABASE_URL"),
+		ProgressDatabaseURL: trimmedString(loader, "PROGRESS_DATABASE_URL"),
 		TimelineDatabaseURL: trimmedString(loader, "TIMELINE_DATABASE_URL"),
 		DebugSync:           strings.EqualFold(strings.TrimSpace(loader.GetString("DEBUG_SYNC")), "true"),
 		Auth: AuthConfig{
@@ -415,6 +430,10 @@ func LoadServerRuntimeConfig(configDir string) (ServerRuntimeConfig, error) {
 			RoomAddr:         trimmedString(loader, "ROOM_SERVICE_ADDR"),
 			MediaMode:        strings.ToLower(trimmedString(loader, "MEDIA_SERVICE_MODE")),
 			MediaAddr:        trimmedString(loader, "MEDIA_SERVICE_ADDR"),
+			ProgressMode:     strings.ToLower(trimmedString(loader, "PROGRESS_SERVICE_MODE")),
+			ProgressAddr:     trimmedString(loader, "PROGRESS_SERVICE_ADDR"),
+			HomeMode:         strings.ToLower(trimmedString(loader, "HOME_SERVICE_MODE")),
+			HomeAddr:         trimmedString(loader, "HOME_SERVICE_ADDR"),
 			TimelineMode:     strings.ToLower(trimmedString(loader, "TIMELINE_SERVICE_MODE")),
 			TimelineAddr:     trimmedString(loader, "TIMELINE_SERVICE_ADDR"),
 			AuthorityMode:    strings.ToLower(trimmedString(loader, "AUTHORITY_SERVICE_MODE")),
@@ -466,6 +485,10 @@ func validateRoomserverRuntimeConfig(config ServerRuntimeConfig) error {
 	if normalizeServiceMode(config.ServiceClients.MediaMode) == "rpc" &&
 		strings.TrimSpace(config.MediaDatabaseURL) != "" {
 		return fmt.Errorf("MEDIA_DATABASE_URL must be empty for roomserver when MEDIA_SERVICE_MODE=rpc; use ROOMSERVER_MEDIA_DATABASE_URL only with MEDIA_SERVICE_MODE=local")
+	}
+	if normalizeServiceMode(config.ServiceClients.ProgressMode) == "rpc" &&
+		strings.TrimSpace(config.ProgressDatabaseURL) != "" {
+		return fmt.Errorf("PROGRESS_DATABASE_URL must be empty for roomserver when PROGRESS_SERVICE_MODE=rpc; use ROOMSERVER_PROGRESS_DATABASE_URL only with PROGRESS_SERVICE_MODE=local")
 	}
 	if normalizeServiceMode(config.ServiceClients.TimelineMode) == "rpc" &&
 		strings.TrimSpace(config.TimelineDatabaseURL) != "" {
@@ -534,6 +557,12 @@ func validateServiceConfig(config ServerRuntimeConfig) error {
 	if mode := normalizeServiceMode(config.ServiceClients.MediaMode); mode != "local" && mode != "rpc" {
 		return fmt.Errorf("unsupported MEDIA_SERVICE_MODE %q; supported values: local, rpc", config.ServiceClients.MediaMode)
 	}
+	if mode := normalizeServiceMode(config.ServiceClients.ProgressMode); mode != "local" && mode != "rpc" {
+		return fmt.Errorf("unsupported PROGRESS_SERVICE_MODE %q; supported values: local, rpc", config.ServiceClients.ProgressMode)
+	}
+	if mode := normalizeServiceMode(config.ServiceClients.HomeMode); mode != "local" && mode != "rpc" {
+		return fmt.Errorf("unsupported HOME_SERVICE_MODE %q; supported values: local, rpc", config.ServiceClients.HomeMode)
+	}
 	if mode := normalizeServiceMode(config.ServiceClients.IdentityMode); mode != "local" && mode != "rpc" {
 		return fmt.Errorf("unsupported IDENTITY_SERVICE_MODE %q; supported values: local, rpc", config.ServiceClients.IdentityMode)
 	}
@@ -548,6 +577,12 @@ func validateServiceConfig(config ServerRuntimeConfig) error {
 	}
 	if normalizeServiceMode(config.ServiceClients.MediaMode) == "rpc" && strings.TrimSpace(config.ServiceClients.MediaAddr) == "" {
 		return fmt.Errorf("MEDIA_SERVICE_ADDR is required when MEDIA_SERVICE_MODE=rpc")
+	}
+	if normalizeServiceMode(config.ServiceClients.ProgressMode) == "rpc" && strings.TrimSpace(config.ServiceClients.ProgressAddr) == "" {
+		return fmt.Errorf("PROGRESS_SERVICE_ADDR is required when PROGRESS_SERVICE_MODE=rpc")
+	}
+	if normalizeServiceMode(config.ServiceClients.HomeMode) == "rpc" && strings.TrimSpace(config.ServiceClients.HomeAddr) == "" {
+		return fmt.Errorf("HOME_SERVICE_ADDR is required when HOME_SERVICE_MODE=rpc")
 	}
 	if normalizeServiceMode(config.ServiceClients.IdentityMode) == "rpc" && strings.TrimSpace(config.ServiceClients.IdentityAddr) == "" {
 		return fmt.Errorf("IDENTITY_SERVICE_ADDR is required when IDENTITY_SERVICE_MODE=rpc")

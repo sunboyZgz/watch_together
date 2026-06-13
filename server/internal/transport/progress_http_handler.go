@@ -11,7 +11,7 @@ import (
 )
 
 type ProgressHTTPHandler struct {
-	progressService *progress.Service
+	progressService progress.BusinessService
 	tokenVerifier   accessTokenVerifier
 }
 
@@ -31,12 +31,12 @@ type progressResponse struct {
 }
 
 // NewProgressHTTPHandler builds the HTTP entrypoint for user media progress writes.
-func NewProgressHTTPHandler(progressService *progress.Service) *ProgressHTTPHandler {
+func NewProgressHTTPHandler(progressService progress.BusinessService) *ProgressHTTPHandler {
 	return NewProgressHTTPHandlerWithTokenVerifier(progressService, nil)
 }
 
 func NewProgressHTTPHandlerWithTokenVerifier(
-	progressService *progress.Service,
+	progressService progress.BusinessService,
 	tokenVerifier accessTokenVerifier,
 ) *ProgressHTTPHandler {
 	return &ProgressHTTPHandler{

@@ -42,6 +42,7 @@ func main() {
 		DatabaseURL:         runtimeConfig.DatabaseURL,
 		IdentityDatabaseURL: runtimeConfig.IdentityDatabaseURL,
 		MediaDatabaseURL:    runtimeConfig.MediaDatabaseURL,
+		ProgressDatabaseURL: runtimeConfig.ProgressDatabaseURL,
 		TimelineDatabaseURL: runtimeConfig.TimelineDatabaseURL,
 		DebugSync:           runtimeConfig.DebugSync,
 		Auth: app.AuthTokenConfig{
@@ -116,6 +117,10 @@ func main() {
 			RoomAddr:         runtimeConfig.ServiceClients.RoomAddr,
 			MediaMode:        runtimeConfig.ServiceClients.MediaMode,
 			MediaAddr:        runtimeConfig.ServiceClients.MediaAddr,
+			ProgressMode:     runtimeConfig.ServiceClients.ProgressMode,
+			ProgressAddr:     runtimeConfig.ServiceClients.ProgressAddr,
+			HomeMode:         runtimeConfig.ServiceClients.HomeMode,
+			HomeAddr:         runtimeConfig.ServiceClients.HomeAddr,
 			TimelineMode:     runtimeConfig.ServiceClients.TimelineMode,
 			TimelineAddr:     runtimeConfig.ServiceClients.TimelineAddr,
 			AuthorityMode:    runtimeConfig.ServiceClients.AuthorityMode,

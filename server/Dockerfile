@@ -51,6 +51,21 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
     CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
     -trimpath \
     -ldflags="-s -w" \
+    -o /out/progressservice \
+    ./cmd/progressservice && \
+    CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
+    -trimpath \
+    -ldflags="-s -w" \
+    -o /out/homecompositionservice \
+    ./cmd/homecompositionservice && \
+    CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
+    -trimpath \
+    -ldflags="-s -w" \
+    -o /out/progressdbsync \
+    ./cmd/progressdbsync && \
+    CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
+    -trimpath \
+    -ldflags="-s -w" \
     -o /out/roomauthorityservice \
     ./cmd/roomauthorityservice
 
@@ -64,6 +79,9 @@ COPY --from=builder /out/identityservice /app/identityservice
 COPY --from=builder /out/roomservice /app/roomservice
 COPY --from=builder /out/mediaservice /app/mediaservice
 COPY --from=builder /out/timelineservice /app/timelineservice
+COPY --from=builder /out/progressservice /app/progressservice
+COPY --from=builder /out/homecompositionservice /app/homecompositionservice
+COPY --from=builder /out/progressdbsync /app/progressdbsync
 COPY --from=builder /out/roomauthorityservice /app/roomauthorityservice
 
 EXPOSE 8080

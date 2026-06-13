@@ -43,6 +43,7 @@ type Config struct {
 	DatabaseURL         string
 	IdentityDatabaseURL string
 	MediaDatabaseURL    string
+	ProgressDatabaseURL string
 	TimelineDatabaseURL string
 	DebugSync           bool
 	Auth                auth.TokenConfig
@@ -86,6 +87,10 @@ type ServiceClientsConfig struct {
 	RoomAddr         string
 	TimelineMode     string
 	TimelineAddr     string
+	ProgressMode     string
+	ProgressAddr     string
+	HomeMode         string
+	HomeAddr         string
 	AuthorityMode    string
 	AuthorityAddr    string
 	AuthorityLeaseID string
@@ -115,6 +120,7 @@ type Server struct {
 	db                *gorm.DB
 	identityDB        *gorm.DB
 	mediaDB           *gorm.DB
+	progressDB        *gorm.DB
 	timelineDB        *gorm.DB
 	cancel            context.CancelFunc
 	eventBus          eventbus.RoomBroadcastBus
@@ -186,12 +192,18 @@ func NewServer(config Config) *Server {
 	if !isRPCMode(config.ServiceClients.MediaMode) && strings.TrimSpace(config.MediaDatabaseURL) != "" {
 		mediaDB = newPostgresDB("media_postgres", config.MediaDatabaseURL)
 	}
+	var progressDB *gorm.DB
+	if !isRPCMode(config.ServiceClients.ProgressMode) && strings.TrimSpace(config.ProgressDatabaseURL) != "" {
+		progressDB = newPostgresDB("progress_postgres", config.ProgressDatabaseURL)
+	}
 	var timelineDB *gorm.DB
 	if !isRPCMode(config.ServiceClients.TimelineMode) && strings.TrimSpace(config.TimelineDatabaseURL) != "" {
 		timelineDB = newPostgresDB("timeline_postgres", config.TimelineDatabaseURL)
 	}
 	mediaService := newMediaService(db, mediaDB, config, serviceConfig)
 	identityService := newIdentityService(db, identityDB, config, serviceConfig, tokenManager)
+	progressService := newProgressService(db, progressDB, identityService, mediaService, config, serviceConfig)
+	homeService := newHomeService(db, identityService, progressService, mediaService, config, serviceConfig)
 	roomService, roomStore := newRoomService(db, mediaService, config, serviceConfig)
 	var timelineRecorder timeline.ResultRecorder = timeline.NoopRecorder{}
 	var timelineRecoveryReader timeline.RecoveryReader
@@ -289,9 +301,9 @@ func NewServer(config Config) *Server {
 		authorityControl = authority.NewRPCClient(config.ServiceClients.AuthorityAddr, internalRPCClientConfig(config, serviceConfig))
 	}
 	authHTTPHandler := transport.NewAuthHTTPHandler(identityService)
-	homeHTTPHandler := transport.NewHomeHTTPHandlerWithTokenVerifier(newHomeService(db, mediaService), identityService)
+	homeHTTPHandler := transport.NewHomeHTTPHandlerWithTokenVerifier(homeService, identityService)
 	mediaHTTPHandler := transport.NewMediaHTTPHandlerWithTokenVerifier(mediaService, identityService, config.Media)
-	progressHTTPHandler := transport.NewProgressHTTPHandlerWithTokenVerifier(newProgressService(db, mediaService), identityService)
+	progressHTTPHandler := transport.NewProgressHTTPHandlerWithTokenVerifier(progressService, identityService)
 	router := newGinRouter(
 		serverCtx,
 		roomManager,
@@ -306,7 +318,7 @@ func NewServer(config Config) *Server {
 		progressHTTPHandler,
 		runtimeBoundaryFromConfig(config),
 		func(ctx context.Context) observability.ReadinessSnapshot {
-			return readinessSnapshotFromConfig(ctx, config, db, identityDB, mediaDB, timelineDB, redisClient, roomBroadcastBus, roomControlBus, timelineOutboxStore, authorityRecovery)
+			return readinessSnapshotFromConfig(ctx, config, db, identityDB, mediaDB, progressDB, timelineDB, redisClient, roomBroadcastBus, roomControlBus, timelineOutboxStore, authorityRecovery)
 		},
 		observabilityConfig,
 		metrics,
@@ -336,6 +348,7 @@ func NewServer(config Config) *Server {
 		db:                db,
 		identityDB:        identityDB,
 		mediaDB:           mediaDB,
+		progressDB:        progressDB,
 		timelineDB:        timelineDB,
 		cancel:            cancel,
 		eventBus:          roomBroadcastBus,
@@ -385,6 +398,7 @@ func readinessSnapshotFromConfig(
 	db *gorm.DB,
 	identityDB *gorm.DB,
 	mediaDB *gorm.DB,
+	progressDB *gorm.DB,
 	timelineDB *gorm.DB,
 	redisClient *cache.RedisClient,
 	roomBroadcastBus eventbus.RoomBroadcastBus,
@@ -401,6 +415,7 @@ func readinessSnapshotFromConfig(
 			dependencyStatus("postgres", db != nil, distributedAuthority || strings.TrimSpace(config.DatabaseURL) != ""),
 			dependencyStatus("identity_postgres", identityDB != nil, !isRPCMode(config.ServiceClients.IdentityMode) && strings.TrimSpace(config.IdentityDatabaseURL) != ""),
 			dependencyStatus("media_postgres", mediaDB != nil, !isRPCMode(config.ServiceClients.MediaMode) && strings.TrimSpace(config.MediaDatabaseURL) != ""),
+			dependencyStatus("progress_postgres", progressDB != nil, !isRPCMode(config.ServiceClients.ProgressMode) && strings.TrimSpace(config.ProgressDatabaseURL) != ""),
 			dependencyStatus("timeline_postgres", timelineDB != nil, !isRPCMode(config.ServiceClients.TimelineMode) && strings.TrimSpace(config.TimelineDatabaseURL) != ""),
 			dependencyStatus("redis", redisClient != nil, distributedAuthority || config.Redis.Enabled()),
 			dependencyStatus("nats_broadcast", !isDisabledRoomBroadcastBus(roomBroadcastBus), distributedAuthority || config.WebSocket.CrossInstanceBroadcast),
@@ -411,6 +426,8 @@ func readinessSnapshotFromConfig(
 			rpcDependencyStatus(ctx, "identity_rpc", config.ServiceClients.IdentityAddr, config.Observability, isRPCMode(config.ServiceClients.IdentityMode)),
 			rpcDependencyStatus(ctx, "room_rpc", config.ServiceClients.RoomAddr, config.Observability, isRPCMode(config.ServiceClients.RoomMode)),
 			rpcDependencyStatus(ctx, "media_rpc", config.ServiceClients.MediaAddr, config.Observability, isRPCMode(config.ServiceClients.MediaMode)),
+			rpcDependencyStatus(ctx, "progress_rpc", config.ServiceClients.ProgressAddr, config.Observability, isRPCMode(config.ServiceClients.ProgressMode)),
+			rpcDependencyStatus(ctx, "home_rpc", config.ServiceClients.HomeAddr, config.Observability, isRPCMode(config.ServiceClients.HomeMode)),
 			rpcDependencyStatus(ctx, "timeline_rpc", config.ServiceClients.TimelineAddr, config.Observability, isRPCMode(config.ServiceClients.TimelineMode)),
 			rpcDependencyStatus(ctx, "authority_rpc", config.ServiceClients.AuthorityAddr, config.Observability, isRPCMode(config.ServiceClients.AuthorityMode)),
 		},
@@ -700,8 +717,21 @@ func newIdentityService(
 	return auth.NewServiceWithTokenManager(store.NewPostgresUserStore(storeDB), tokenManager)
 }
 
-// newHomeService connects home summary reads to the shared PostgreSQL handle when available.
-func newHomeService(db *gorm.DB, mediaService *media.Service) *home.Service {
+// newHomeService connects home summary reads to local composition or the home RPC boundary.
+func newHomeService(
+	db *gorm.DB,
+	identityService auth.IdentityService,
+	progressService progress.BusinessService,
+	mediaService *media.Service,
+	config Config,
+	service servicekit.Config,
+) home.BusinessService {
+	if isRPCMode(config.ServiceClients.HomeMode) {
+		return home.NewRPCClient(config.ServiceClients.HomeAddr, internalRPCClientConfig(config, service))
+	}
+	if identityService != nil && progressService != nil && mediaService != nil {
+		return home.NewServiceWithComposition(identityService, progressService, mediaService)
+	}
 	if db == nil || mediaService == nil {
 		return nil
 	}
@@ -767,14 +797,30 @@ func newRoomService(
 	return roomapi.NewServiceWithMediaLookup(roomStore, mediaLookup), roomStore
 }
 
-// newProgressService connects media progress writes to the shared PostgreSQL handle when available.
-func newProgressService(db *gorm.DB, mediaService *media.Service) *progress.Service {
-	if db == nil || mediaService == nil {
+// newProgressService connects progress APIs to local storage or the progress RPC boundary.
+func newProgressService(
+	db *gorm.DB,
+	progressDB *gorm.DB,
+	identityService auth.IdentityService,
+	mediaService *media.Service,
+	config Config,
+	service servicekit.Config,
+) progress.BusinessService {
+	if isRPCMode(config.ServiceClients.ProgressMode) {
+		return progress.NewRPCClient(config.ServiceClients.ProgressAddr, internalRPCClientConfig(config, service))
+	}
+	var storeDB *gorm.DB
+	if strings.TrimSpace(config.ProgressDatabaseURL) != "" {
+		storeDB = progressDB
+	} else {
+		storeDB = db
+	}
+	if storeDB == nil || mediaService == nil {
 		return nil
 	}
 	var mediaValidator progress.MediaValidator
 	mediaValidator = mediaService
-	return progress.NewServiceWithMediaValidator(store.NewPostgresProgressStore(db), mediaValidator)
+	return progress.NewServiceWithBoundaries(store.NewPostgresProgressStore(storeDB), identityService, mediaValidator)
 }
 
 func startPersistentRoomCleanupLoop(
@@ -966,7 +1012,17 @@ func (s *Server) Close() error {
 			closeErr = err
 		}
 	}
-	if s.timelineDB != nil && s.timelineDB != s.db && s.timelineDB != s.identityDB && s.timelineDB != s.mediaDB {
+	if s.progressDB != nil && s.progressDB != s.db && s.progressDB != s.identityDB && s.progressDB != s.mediaDB {
+		sqlDB, err := s.progressDB.DB()
+		if err != nil {
+			if closeErr == nil {
+				closeErr = err
+			}
+		} else if err := sqlDB.Close(); err != nil && closeErr == nil {
+			closeErr = err
+		}
+	}
+	if s.timelineDB != nil && s.timelineDB != s.db && s.timelineDB != s.identityDB && s.timelineDB != s.mediaDB && s.timelineDB != s.progressDB {
 		sqlDB, err := s.timelineDB.DB()
 		if err != nil {
 			if closeErr == nil {

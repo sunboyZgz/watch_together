@@ -48,6 +48,25 @@ services:
         createdb -h postgres -U app \"$${TIMELINE_POSTGRES_DB:-anime_watch_timeline_dev}\";
       fi;
       "
+  progress-postgres-init:
+    profiles: ["app", "services", "rpc-pilot"]
+    image: postgres:16
+    container_name: anime-watch-progress-postgres-init
+    depends_on:
+      - postgres
+    restart: "no"
+    environment:
+      PGPASSWORD: app
+      PROGRESS_POSTGRES_DB: ${PROGRESS_POSTGRES_DB:-anime_watch_progress_dev}
+    entrypoint: >
+      /bin/sh -c "
+      until pg_isready -h postgres -U app -d anime_watch_dev; do
+        sleep 1;
+      done;
+      if ! psql -h postgres -U app -d postgres -tAc \"SELECT 1 FROM pg_database WHERE datname = '$${PROGRESS_POSTGRES_DB:-anime_watch_progress_dev}'\" | grep -q 1; then
+        createdb -h postgres -U app \"$${PROGRESS_POSTGRES_DB:-anime_watch_progress_dev}\";
+      fi;
+      "
   redis:
     image: redis:7.2-alpine
     container_name: anime-watch-redis
@@ -136,6 +155,8 @@ services:
       - identityservice
       - roomservice
       - mediaservice
+      - progressservice
+      - homecompositionservice
       - timelineservice
       - roomauthorityservice
     env_file:
@@ -185,6 +206,11 @@ services:
       MEDIA_SERVICE_MODE: ${ROOMSERVER_MEDIA_SERVICE_MODE:-rpc}
       MEDIA_SERVICE_ADDR: ${ROOMSERVER_MEDIA_SERVICE_ADDR:-http://mediaservice:8090}
       MEDIA_DATABASE_URL: ${ROOMSERVER_MEDIA_DATABASE_URL:-}
+      PROGRESS_SERVICE_MODE: ${ROOMSERVER_PROGRESS_SERVICE_MODE:-rpc}
+      PROGRESS_SERVICE_ADDR: ${ROOMSERVER_PROGRESS_SERVICE_ADDR:-http://progressservice:8090}
+      PROGRESS_DATABASE_URL: ${ROOMSERVER_PROGRESS_DATABASE_URL:-}
+      HOME_SERVICE_MODE: ${ROOMSERVER_HOME_SERVICE_MODE:-rpc}
+      HOME_SERVICE_ADDR: ${ROOMSERVER_HOME_SERVICE_ADDR:-http://homecompositionservice:8090}
       TIMELINE_SERVICE_MODE: ${ROOMSERVER_TIMELINE_SERVICE_MODE:-rpc}
       TIMELINE_SERVICE_ADDR: ${ROOMSERVER_TIMELINE_SERVICE_ADDR:-http://timelineservice:8090}
       TIMELINE_DATABASE_URL: ${ROOMSERVER_TIMELINE_DATABASE_URL:-}
@@ -224,6 +250,8 @@ services:
       - identityservice
       - roomservice
       - mediaservice
+      - progressservice
+      - homecompositionservice
       - timelineservice
       - roomauthorityservice
     environment:
@@ -413,6 +441,80 @@ services:
     ports:
       - "8091:8090"
     command: ["/app/timelineservice"]
+
+  progressservice:
+    profiles: ["app", "services", "rpc-pilot"]
+    image: watch-together-roomserver:dev
+    container_name: anime-watch-progressservice
+    restart: unless-stopped
+    depends_on:
+      - postgres
+      - progress-postgres-init
+      - identityservice
+      - mediaservice
+    env_file:
+      - .env
+    environment:
+      APP_ENV: local
+      SERVICE_NAME: watch-together-progressservice
+      SERVICE_VERSION: ${SERVICE_VERSION:-dev}
+      INTERNAL_RPC_ADDR: :8090
+      INTERNAL_RPC_PATH_PREFIX: ${INTERNAL_RPC_PATH_PREFIX:-/internal.rpc}
+      INTERNAL_RPC_TIMEOUT_MS: ${INTERNAL_RPC_TIMEOUT_MS:-1000}
+      INTERNAL_RPC_AUTH_TOKEN: ${INTERNAL_RPC_AUTH_TOKEN:-}
+      METRICS_ENABLED: ${METRICS_ENABLED:-true}
+      METRICS_PATH: ${METRICS_PATH:-/metrics}
+      READINESS_PATH: ${READINESS_PATH:-/readyz}
+      DATABASE_URL: postgres://app:app@postgres:5432/anime_watch_dev?sslmode=disable
+      PROGRESS_DATABASE_URL: postgres://app:app@postgres:5432/${PROGRESS_POSTGRES_DB:-anime_watch_progress_dev}?sslmode=disable
+      IDENTITY_SERVICE_MODE: rpc
+      IDENTITY_SERVICE_ADDR: http://identityservice:8090
+      MEDIA_SERVICE_MODE: rpc
+      MEDIA_SERVICE_ADDR: http://mediaservice:8090
+      OTEL_TRACING_ENABLED: ${OTEL_TRACING_ENABLED:-false}
+      OTEL_SERVICE_NAME: ${OTEL_SERVICE_NAME:-watch-together-progressservice}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+      OTEL_TRACE_SAMPLE_RATIO: ${OTEL_TRACE_SAMPLE_RATIO:-0.1}
+    ports:
+      - "8095:8090"
+    command: ["/app/progressservice"]
+
+  homecompositionservice:
+    profiles: ["app", "services", "rpc-pilot"]
+    image: watch-together-roomserver:dev
+    container_name: anime-watch-homecompositionservice
+    restart: unless-stopped
+    depends_on:
+      - identityservice
+      - progressservice
+      - mediaservice
+    env_file:
+      - .env
+    environment:
+      APP_ENV: local
+      SERVICE_NAME: watch-together-homecompositionservice
+      SERVICE_VERSION: ${SERVICE_VERSION:-dev}
+      INTERNAL_RPC_ADDR: :8090
+      INTERNAL_RPC_PATH_PREFIX: ${INTERNAL_RPC_PATH_PREFIX:-/internal.rpc}
+      INTERNAL_RPC_TIMEOUT_MS: ${INTERNAL_RPC_TIMEOUT_MS:-1000}
+      INTERNAL_RPC_AUTH_TOKEN: ${INTERNAL_RPC_AUTH_TOKEN:-}
+      METRICS_ENABLED: ${METRICS_ENABLED:-true}
+      METRICS_PATH: ${METRICS_PATH:-/metrics}
+      READINESS_PATH: ${READINESS_PATH:-/readyz}
+      DATABASE_URL: postgres://app:app@postgres:5432/anime_watch_dev?sslmode=disable
+      IDENTITY_SERVICE_MODE: rpc
+      IDENTITY_SERVICE_ADDR: http://identityservice:8090
+      PROGRESS_SERVICE_MODE: rpc
+      PROGRESS_SERVICE_ADDR: http://progressservice:8090
+      MEDIA_SERVICE_MODE: rpc
+      MEDIA_SERVICE_ADDR: http://mediaservice:8090
+      OTEL_TRACING_ENABLED: ${OTEL_TRACING_ENABLED:-false}
+      OTEL_SERVICE_NAME: ${OTEL_SERVICE_NAME:-watch-together-homecompositionservice}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+      OTEL_TRACE_SAMPLE_RATIO: ${OTEL_TRACE_SAMPLE_RATIO:-0.1}
+    ports:
+      - "8096:8090"
+    command: ["/app/homecompositionservice"]
 
   roomauthorityservice:
     profiles: ["app", "rpc-pilot"]

@@ -189,6 +189,7 @@ func TestReadinessSnapshotReportsMediaPostgresBoundary(t *testing.T) {
 				tc.mediaDB,
 				nil,
 				nil,
+				nil,
 				eventbus.NewDisabledRoomBroadcastBus(),
 				eventbus.NewDisabledRoomControlBus(),
 				nil,
@@ -201,6 +202,85 @@ func TestReadinessSnapshotReportsMediaPostgresBoundary(t *testing.T) {
 			}
 			if dependency.Status != tc.wantStatus || dependency.Required != tc.wantReq {
 				t.Fatalf("media_postgres = status %q required %t, want status %q required %t",
+					dependency.Status,
+					dependency.Required,
+					tc.wantStatus,
+					tc.wantReq,
+				)
+			}
+		})
+	}
+}
+
+func TestReadinessSnapshotReportsProgressPostgresBoundary(t *testing.T) {
+	cases := []struct {
+		name       string
+		config     Config
+		progressDB *gorm.DB
+		wantStatus string
+		wantReq    bool
+	}{
+		{
+			name: "local progress database missing",
+			config: Config{
+				AppEnv:              "test",
+				RoomRuntimeMode:     roomRuntimeModeLocalProcess,
+				ProgressDatabaseURL: "postgres://progress-db",
+				ServiceClients:      ServiceClientsConfig{ProgressMode: "local"},
+			},
+			wantStatus: "unavailable",
+			wantReq:    true,
+		},
+		{
+			name: "local progress database connected",
+			config: Config{
+				AppEnv:              "test",
+				RoomRuntimeMode:     roomRuntimeModeLocalProcess,
+				ProgressDatabaseURL: "postgres://progress-db",
+				ServiceClients:      ServiceClientsConfig{ProgressMode: "local"},
+			},
+			progressDB: &gorm.DB{},
+			wantStatus: "ok",
+			wantReq:    true,
+		},
+		{
+			name: "rpc progress mode does not require roomserver progress database",
+			config: Config{
+				AppEnv:              "test",
+				RoomRuntimeMode:     roomRuntimeModeLocalProcess,
+				ProgressDatabaseURL: "postgres://progress-db",
+				ServiceClients: ServiceClientsConfig{
+					ProgressMode: "rpc",
+					ProgressAddr: "http://progressservice:8090",
+				},
+			},
+			wantStatus: "disabled",
+			wantReq:    false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			snapshot := readinessSnapshotFromConfig(
+				context.Background(),
+				tc.config,
+				nil,
+				nil,
+				nil,
+				tc.progressDB,
+				nil,
+				nil,
+				eventbus.NewDisabledRoomBroadcastBus(),
+				eventbus.NewDisabledRoomControlBus(),
+				nil,
+				nil,
+			)
+
+			dependency, ok := dependencyByName(snapshot.Dependencies, "progress_postgres")
+			if !ok {
+				t.Fatalf("expected progress_postgres dependency in readiness snapshot")
+			}
+			if dependency.Status != tc.wantStatus || dependency.Required != tc.wantReq {
+				t.Fatalf("progress_postgres = status %q required %t, want status %q required %t",
 					dependency.Status,
 					dependency.Required,
 					tc.wantStatus,
@@ -265,6 +345,7 @@ func TestReadinessSnapshotReportsTimelinePostgresBoundary(t *testing.T) {
 				nil,
 				nil,
 				nil,
+				nil,
 				tc.timelineDB,
 				nil,
 				eventbus.NewDisabledRoomBroadcastBus(),
@@ -311,6 +392,10 @@ func TestReadinessSnapshotProbesRPCDependencies(t *testing.T) {
 			IdentityAddr:  readyServer.URL,
 			MediaMode:     "rpc",
 			MediaAddr:     readyServer.URL,
+			ProgressMode:  "rpc",
+			ProgressAddr:  readyServer.URL,
+			HomeMode:      "rpc",
+			HomeAddr:      readyServer.URL,
 			TimelineMode:  "rpc",
 			TimelineAddr:  readyServer.URL,
 			AuthorityMode: "rpc",
@@ -325,6 +410,7 @@ func TestReadinessSnapshotProbesRPCDependencies(t *testing.T) {
 		nil,
 		nil,
 		nil,
+		nil,
 		eventbus.NewDisabledRoomBroadcastBus(),
 		eventbus.NewDisabledRoomControlBus(),
 		nil,
@@ -333,7 +419,7 @@ func TestReadinessSnapshotProbesRPCDependencies(t *testing.T) {
 	if snapshot.Status != "ready" {
 		t.Fatalf("expected ready RPC dependencies to make snapshot ready, got %+v", snapshot)
 	}
-	for _, name := range []string{"identity_rpc", "media_rpc", "timeline_rpc", "authority_rpc"} {
+	for _, name := range []string{"identity_rpc", "media_rpc", "progress_rpc", "home_rpc", "timeline_rpc", "authority_rpc"} {
 		dependency, ok := dependencyByName(snapshot.Dependencies, name)
 		if !ok || dependency.Status != "ok" || !dependency.Required {
 			t.Fatalf("expected %s to be required and ok, got %+v", name, dependency)
@@ -344,6 +430,7 @@ func TestReadinessSnapshotProbesRPCDependencies(t *testing.T) {
 	snapshot = readinessSnapshotFromConfig(
 		context.Background(),
 		baseConfig,
+		nil,
 		nil,
 		nil,
 		nil,

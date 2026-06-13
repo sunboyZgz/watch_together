@@ -104,3 +104,24 @@ func (s *fakeProgressServiceStore) UpdateMediaProgress(_ context.Context, params
 	}
 	return s.summary, nil
 }
+
+func (s *fakeProgressServiceStore) GetUserProgress(context.Context, string, string) (Summary, bool, error) {
+	if s.err != nil {
+		return Summary{}, false, s.err
+	}
+	return s.summary, true, nil
+}
+
+func (s *fakeProgressServiceStore) BatchGetUserProgress(context.Context, string, []string) ([]Summary, error) {
+	if s.err != nil {
+		return nil, s.err
+	}
+	return []Summary{s.summary}, nil
+}
+
+func (s *fakeProgressServiceStore) ListRecentUserProgress(context.Context, RecentParams) ([]Summary, error) {
+	if s.err != nil {
+		return nil, s.err
+	}
+	return []Summary{s.summary}, nil
+}

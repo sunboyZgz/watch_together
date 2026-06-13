@@ -8,7 +8,7 @@ import (
 )
 
 type HomeHTTPHandler struct {
-	homeService   *home.Service
+	homeService   home.BusinessService
 	tokenVerifier accessTokenVerifier
 }
 
@@ -33,12 +33,12 @@ type watchProgressResponse struct {
 }
 
 // NewHomeHTTPHandler builds the HTTP entrypoint for the Android home page.
-func NewHomeHTTPHandler(homeService *home.Service) *HomeHTTPHandler {
+func NewHomeHTTPHandler(homeService home.BusinessService) *HomeHTTPHandler {
 	return NewHomeHTTPHandlerWithTokenVerifier(homeService, nil)
 }
 
 func NewHomeHTTPHandlerWithTokenVerifier(
-	homeService *home.Service,
+	homeService home.BusinessService,
 	tokenVerifier accessTokenVerifier,
 ) *HomeHTTPHandler {
 	return &HomeHTTPHandler{
@@ -86,6 +86,8 @@ func (h *HomeHTTPHandler) writeHomeError(w http.ResponseWriter, err error) {
 	case errors.Is(err, home.ErrUserNotFound):
 		writeAPIError(w, http.StatusUnauthorized, "UNAUTHORIZED", "user not found", nil)
 	case errors.Is(err, home.ErrMediaUnavailable):
+		writeAPIError(w, http.StatusServiceUnavailable, "INTERNAL_ERROR", "home service is unavailable", nil)
+	case errors.Is(err, home.ErrIdentityUnavailable), errors.Is(err, home.ErrProgressUnavailable):
 		writeAPIError(w, http.StatusServiceUnavailable, "INTERNAL_ERROR", "home service is unavailable", nil)
 	default:
 		writeAPIError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "home summary request failed", nil)

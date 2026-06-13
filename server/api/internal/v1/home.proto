@@ -1,0 +1,40 @@
+syntax = "proto3";
+
+package watch_together.internal.v1;
+
+import "server/api/internal/v1/common.proto";
+
+option go_package = "watch_together/server/internal/rpcgen/v1;internalv1";
+
+service HomeCompositionInternalService {
+  rpc GetHomeSummary(GetHomeSummaryRequest) returns (GetHomeSummaryResponse);
+}
+
+message GetHomeSummaryRequest {
+  RequestMetadata metadata = 1;
+  string user_id = 2;
+}
+
+message GetHomeSummaryResponse {
+  HomeSummary summary = 1;
+}
+
+message HomeSummary {
+  HomeUserSummary user = 1;
+  optional HomeWatchProgressSummary last_watched = 2;
+  repeated HomeWatchProgressSummary continue_watching = 3;
+}
+
+message HomeUserSummary {
+  string nickname = 1;
+  string avatar_seed = 2;
+  optional string avatar_url = 3;
+}
+
+message HomeWatchProgressSummary {
+  string media_item_id = 1;
+  string title = 2;
+  optional string cover_url = 3;
+  int32 last_position_seconds = 4;
+  int32 duration_seconds = 5;
+}

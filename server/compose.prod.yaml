@@ -52,6 +52,24 @@ services:
       fi;
       "
 
+  progress-postgres-init:
+    image: postgres:16-alpine
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-watch_together}
+      PGPASSWORD: ${POSTGRES_PASSWORD:-change_me_postgres_password}
+      POSTGRES_DB: ${POSTGRES_DB:-watch_together_prod}
+      PROGRESS_POSTGRES_DB: ${PROGRESS_POSTGRES_DB:-watch_together_progress_prod}
+    entrypoint: >
+      /bin/sh -c "
+      if ! psql -h postgres -U \"$${POSTGRES_USER}\" -d postgres -tAc \"SELECT 1 FROM pg_database WHERE datname = '$${PROGRESS_POSTGRES_DB}'\" | grep -q 1; then
+        createdb -h postgres -U \"$${POSTGRES_USER}\" \"$${PROGRESS_POSTGRES_DB}\";
+      fi;
+      "
+
   redis:
     image: redis:7.2-alpine
     restart: unless-stopped
@@ -128,9 +146,15 @@ services:
         condition: service_started
       kafka:
         condition: service_started
+      identityservice:
+        condition: service_started
       roomservice:
         condition: service_started
       mediaservice:
+        condition: service_started
+      progressservice:
+        condition: service_started
+      homecompositionservice:
         condition: service_started
       timelineservice:
         condition: service_started
@@ -175,11 +199,19 @@ services:
       INTERNAL_RPC_TIMEOUT_MS: ${INTERNAL_RPC_TIMEOUT_MS:-1000}
       INTERNAL_RPC_AUTH_TOKEN: ${INTERNAL_RPC_AUTH_TOKEN:-change_me_internal_rpc_token}
       SERVICE_DISCOVERY_MODE: ${SERVICE_DISCOVERY_MODE:-static}
+      IDENTITY_SERVICE_MODE: ${IDENTITY_SERVICE_MODE:-rpc}
+      IDENTITY_SERVICE_ADDR: ${IDENTITY_SERVICE_ADDR:-http://identityservice:8090}
+      IDENTITY_DATABASE_URL: ${ROOMSERVER_IDENTITY_DATABASE_URL:-}
       ROOM_SERVICE_MODE: ${ROOM_SERVICE_MODE:-rpc}
       ROOM_SERVICE_ADDR: ${ROOM_SERVICE_ADDR:-http://roomservice:8090}
       MEDIA_SERVICE_MODE: ${MEDIA_SERVICE_MODE:-rpc}
       MEDIA_SERVICE_ADDR: ${MEDIA_SERVICE_ADDR:-http://mediaservice:8090}
       MEDIA_DATABASE_URL: ${ROOMSERVER_MEDIA_DATABASE_URL:-}
+      PROGRESS_SERVICE_MODE: ${PROGRESS_SERVICE_MODE:-rpc}
+      PROGRESS_SERVICE_ADDR: ${PROGRESS_SERVICE_ADDR:-http://progressservice:8090}
+      PROGRESS_DATABASE_URL: ${ROOMSERVER_PROGRESS_DATABASE_URL:-}
+      HOME_SERVICE_MODE: ${HOME_SERVICE_MODE:-rpc}
+      HOME_SERVICE_ADDR: ${HOME_SERVICE_ADDR:-http://homecompositionservice:8090}
       TIMELINE_SERVICE_MODE: ${TIMELINE_SERVICE_MODE:-rpc}
       TIMELINE_SERVICE_ADDR: ${TIMELINE_SERVICE_ADDR:-http://timelineservice:8090}
       TIMELINE_DATABASE_URL: ${ROOMSERVER_TIMELINE_DATABASE_URL:-}
@@ -288,6 +320,34 @@ services:
       MEDIA_STORAGE_FORCE_PATH_STYLE: "true"
     command: ["/app/mediaservice"]
 
+  identityservice:
+    image: watch-together-roomserver:${WATCH_TOGETHER_IMAGE_TAG:-prod}
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file:
+      - .env.prod
+    environment:
+      APP_ENV: prod
+      SERVICE_NAME: watch-together-identityservice
+      SERVICE_VERSION: ${SERVICE_VERSION:-prod}
+      INTERNAL_RPC_ADDR: :8090
+      INTERNAL_RPC_PATH_PREFIX: ${INTERNAL_RPC_PATH_PREFIX:-/internal.rpc}
+      INTERNAL_RPC_AUTH_TOKEN: ${INTERNAL_RPC_AUTH_TOKEN:-change_me_internal_rpc_token}
+      METRICS_ENABLED: ${METRICS_ENABLED:-true}
+      METRICS_PATH: ${METRICS_PATH:-/metrics}
+      READINESS_PATH: ${READINESS_PATH:-/readyz}
+      AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:-change_me_to_a_long_random_secret}
+      AUTH_ACCESS_TOKEN_TTL_HOURS: ${AUTH_ACCESS_TOKEN_TTL_HOURS:-24}
+      DATABASE_URL: postgres://${POSTGRES_USER:-watch_together}:${POSTGRES_PASSWORD:-change_me_postgres_password}@postgres:5432/${POSTGRES_DB:-watch_together_prod}?sslmode=disable
+      IDENTITY_DATABASE_URL: ${IDENTITY_DATABASE_URL:-}
+      OTEL_TRACING_ENABLED: ${OTEL_TRACING_ENABLED:-false}
+      OTEL_SERVICE_NAME: ${OTEL_SERVICE_NAME:-watch-together-identityservice}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+      OTEL_TRACE_SAMPLE_RATIO: ${OTEL_TRACE_SAMPLE_RATIO:-0.1}
+    command: ["/app/identityservice"]
+
   roomservice:
     image: watch-together-roomserver:${WATCH_TOGETHER_IMAGE_TAG:-prod}
     restart: unless-stopped
@@ -317,6 +377,79 @@ services:
       OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
       OTEL_TRACE_SAMPLE_RATIO: ${OTEL_TRACE_SAMPLE_RATIO:-0.1}
     command: ["/app/roomservice"]
+
+  progressservice:
+    image: watch-together-roomserver:${WATCH_TOGETHER_IMAGE_TAG:-prod}
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      progress-postgres-init:
+        condition: service_completed_successfully
+      identityservice:
+        condition: service_started
+      mediaservice:
+        condition: service_started
+    env_file:
+      - .env.prod
+    environment:
+      APP_ENV: prod
+      SERVICE_NAME: watch-together-progressservice
+      SERVICE_VERSION: ${SERVICE_VERSION:-prod}
+      INTERNAL_RPC_ADDR: :8090
+      INTERNAL_RPC_PATH_PREFIX: ${INTERNAL_RPC_PATH_PREFIX:-/internal.rpc}
+      INTERNAL_RPC_TIMEOUT_MS: ${INTERNAL_RPC_TIMEOUT_MS:-1000}
+      INTERNAL_RPC_AUTH_TOKEN: ${INTERNAL_RPC_AUTH_TOKEN:-change_me_internal_rpc_token}
+      METRICS_ENABLED: ${METRICS_ENABLED:-true}
+      METRICS_PATH: ${METRICS_PATH:-/metrics}
+      READINESS_PATH: ${READINESS_PATH:-/readyz}
+      DATABASE_URL: postgres://${POSTGRES_USER:-watch_together}:${POSTGRES_PASSWORD:-change_me_postgres_password}@postgres:5432/${POSTGRES_DB:-watch_together_prod}?sslmode=disable
+      PROGRESS_DATABASE_URL: postgres://${POSTGRES_USER:-watch_together}:${POSTGRES_PASSWORD:-change_me_postgres_password}@postgres:5432/${PROGRESS_POSTGRES_DB:-watch_together_progress_prod}?sslmode=disable
+      IDENTITY_SERVICE_MODE: rpc
+      IDENTITY_SERVICE_ADDR: http://identityservice:8090
+      MEDIA_SERVICE_MODE: rpc
+      MEDIA_SERVICE_ADDR: http://mediaservice:8090
+      OTEL_TRACING_ENABLED: ${OTEL_TRACING_ENABLED:-false}
+      OTEL_SERVICE_NAME: ${OTEL_SERVICE_NAME:-watch-together-progressservice}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+      OTEL_TRACE_SAMPLE_RATIO: ${OTEL_TRACE_SAMPLE_RATIO:-0.1}
+    command: ["/app/progressservice"]
+
+  homecompositionservice:
+    image: watch-together-roomserver:${WATCH_TOGETHER_IMAGE_TAG:-prod}
+    restart: unless-stopped
+    depends_on:
+      identityservice:
+        condition: service_started
+      progressservice:
+        condition: service_started
+      mediaservice:
+        condition: service_started
+    env_file:
+      - .env.prod
+    environment:
+      APP_ENV: prod
+      SERVICE_NAME: watch-together-homecompositionservice
+      SERVICE_VERSION: ${SERVICE_VERSION:-prod}
+      INTERNAL_RPC_ADDR: :8090
+      INTERNAL_RPC_PATH_PREFIX: ${INTERNAL_RPC_PATH_PREFIX:-/internal.rpc}
+      INTERNAL_RPC_TIMEOUT_MS: ${INTERNAL_RPC_TIMEOUT_MS:-1000}
+      INTERNAL_RPC_AUTH_TOKEN: ${INTERNAL_RPC_AUTH_TOKEN:-change_me_internal_rpc_token}
+      METRICS_ENABLED: ${METRICS_ENABLED:-true}
+      METRICS_PATH: ${METRICS_PATH:-/metrics}
+      READINESS_PATH: ${READINESS_PATH:-/readyz}
+      DATABASE_URL: postgres://${POSTGRES_USER:-watch_together}:${POSTGRES_PASSWORD:-change_me_postgres_password}@postgres:5432/${POSTGRES_DB:-watch_together_prod}?sslmode=disable
+      IDENTITY_SERVICE_MODE: rpc
+      IDENTITY_SERVICE_ADDR: http://identityservice:8090
+      PROGRESS_SERVICE_MODE: rpc
+      PROGRESS_SERVICE_ADDR: http://progressservice:8090
+      MEDIA_SERVICE_MODE: rpc
+      MEDIA_SERVICE_ADDR: http://mediaservice:8090
+      OTEL_TRACING_ENABLED: ${OTEL_TRACING_ENABLED:-false}
+      OTEL_SERVICE_NAME: ${OTEL_SERVICE_NAME:-watch-together-homecompositionservice}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+      OTEL_TRACE_SAMPLE_RATIO: ${OTEL_TRACE_SAMPLE_RATIO:-0.1}
+    command: ["/app/homecompositionservice"]
 
   timelineservice:
     image: watch-together-roomserver:${WATCH_TOGETHER_IMAGE_TAG:-prod}
