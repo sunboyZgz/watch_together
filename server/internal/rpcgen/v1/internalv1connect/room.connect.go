@@ -48,6 +48,27 @@ const (
 	// RoomInternalServiceIsActiveMemberProcedure is the fully-qualified name of the
 	// RoomInternalService's IsActiveMember RPC.
 	RoomInternalServiceIsActiveMemberProcedure = "/watch_together.internal.v1.RoomInternalService/IsActiveMember"
+	// RoomInternalServiceGetRoomRuntimeBootstrapProcedure is the fully-qualified name of the
+	// RoomInternalService's GetRoomRuntimeBootstrap RPC.
+	RoomInternalServiceGetRoomRuntimeBootstrapProcedure = "/watch_together.internal.v1.RoomInternalService/GetRoomRuntimeBootstrap"
+	// RoomInternalServiceListRecoverableRoomsProcedure is the fully-qualified name of the
+	// RoomInternalService's ListRecoverableRooms RPC.
+	RoomInternalServiceListRecoverableRoomsProcedure = "/watch_together.internal.v1.RoomInternalService/ListRecoverableRooms"
+	// RoomInternalServiceMarkRoomGracePeriodProcedure is the fully-qualified name of the
+	// RoomInternalService's MarkRoomGracePeriod RPC.
+	RoomInternalServiceMarkRoomGracePeriodProcedure = "/watch_together.internal.v1.RoomInternalService/MarkRoomGracePeriod"
+	// RoomInternalServiceMarkRoomActiveProcedure is the fully-qualified name of the
+	// RoomInternalService's MarkRoomActive RPC.
+	RoomInternalServiceMarkRoomActiveProcedure = "/watch_together.internal.v1.RoomInternalService/MarkRoomActive"
+	// RoomInternalServiceDestroyRoomProcedure is the fully-qualified name of the RoomInternalService's
+	// DestroyRoom RPC.
+	RoomInternalServiceDestroyRoomProcedure = "/watch_together.internal.v1.RoomInternalService/DestroyRoom"
+	// RoomInternalServiceMarkAllActiveRoomsGracePeriodProcedure is the fully-qualified name of the
+	// RoomInternalService's MarkAllActiveRoomsGracePeriod RPC.
+	RoomInternalServiceMarkAllActiveRoomsGracePeriodProcedure = "/watch_together.internal.v1.RoomInternalService/MarkAllActiveRoomsGracePeriod"
+	// RoomInternalServiceCleanupExpiredRoomsProcedure is the fully-qualified name of the
+	// RoomInternalService's CleanupExpiredRooms RPC.
+	RoomInternalServiceCleanupExpiredRoomsProcedure = "/watch_together.internal.v1.RoomInternalService/CleanupExpiredRooms"
 )
 
 // RoomInternalServiceClient is a client for the watch_together.internal.v1.RoomInternalService
@@ -58,6 +79,13 @@ type RoomInternalServiceClient interface {
 	LeaveRoom(context.Context, *connect.Request[v1.LeaveRoomRequest]) (*connect.Response[v1.LeaveRoomResponse], error)
 	GetRoomDetail(context.Context, *connect.Request[v1.GetRoomDetailRequest]) (*connect.Response[v1.GetRoomDetailResponse], error)
 	IsActiveMember(context.Context, *connect.Request[v1.IsActiveMemberRequest]) (*connect.Response[v1.IsActiveMemberResponse], error)
+	GetRoomRuntimeBootstrap(context.Context, *connect.Request[v1.GetRoomRuntimeBootstrapRequest]) (*connect.Response[v1.GetRoomRuntimeBootstrapResponse], error)
+	ListRecoverableRooms(context.Context, *connect.Request[v1.ListRecoverableRoomsRequest]) (*connect.Response[v1.ListRecoverableRoomsResponse], error)
+	MarkRoomGracePeriod(context.Context, *connect.Request[v1.MarkRoomGracePeriodRequest]) (*connect.Response[v1.MarkRoomGracePeriodResponse], error)
+	MarkRoomActive(context.Context, *connect.Request[v1.MarkRoomActiveRequest]) (*connect.Response[v1.MarkRoomActiveResponse], error)
+	DestroyRoom(context.Context, *connect.Request[v1.DestroyRoomRequest]) (*connect.Response[v1.DestroyRoomResponse], error)
+	MarkAllActiveRoomsGracePeriod(context.Context, *connect.Request[v1.MarkAllActiveRoomsGracePeriodRequest]) (*connect.Response[v1.MarkAllActiveRoomsGracePeriodResponse], error)
+	CleanupExpiredRooms(context.Context, *connect.Request[v1.CleanupExpiredRoomsRequest]) (*connect.Response[v1.CleanupExpiredRoomsResponse], error)
 }
 
 // NewRoomInternalServiceClient constructs a client for the
@@ -102,16 +130,65 @@ func NewRoomInternalServiceClient(httpClient connect.HTTPClient, baseURL string,
 			connect.WithSchema(roomInternalServiceMethods.ByName("IsActiveMember")),
 			connect.WithClientOptions(opts...),
 		),
+		getRoomRuntimeBootstrap: connect.NewClient[v1.GetRoomRuntimeBootstrapRequest, v1.GetRoomRuntimeBootstrapResponse](
+			httpClient,
+			baseURL+RoomInternalServiceGetRoomRuntimeBootstrapProcedure,
+			connect.WithSchema(roomInternalServiceMethods.ByName("GetRoomRuntimeBootstrap")),
+			connect.WithClientOptions(opts...),
+		),
+		listRecoverableRooms: connect.NewClient[v1.ListRecoverableRoomsRequest, v1.ListRecoverableRoomsResponse](
+			httpClient,
+			baseURL+RoomInternalServiceListRecoverableRoomsProcedure,
+			connect.WithSchema(roomInternalServiceMethods.ByName("ListRecoverableRooms")),
+			connect.WithClientOptions(opts...),
+		),
+		markRoomGracePeriod: connect.NewClient[v1.MarkRoomGracePeriodRequest, v1.MarkRoomGracePeriodResponse](
+			httpClient,
+			baseURL+RoomInternalServiceMarkRoomGracePeriodProcedure,
+			connect.WithSchema(roomInternalServiceMethods.ByName("MarkRoomGracePeriod")),
+			connect.WithClientOptions(opts...),
+		),
+		markRoomActive: connect.NewClient[v1.MarkRoomActiveRequest, v1.MarkRoomActiveResponse](
+			httpClient,
+			baseURL+RoomInternalServiceMarkRoomActiveProcedure,
+			connect.WithSchema(roomInternalServiceMethods.ByName("MarkRoomActive")),
+			connect.WithClientOptions(opts...),
+		),
+		destroyRoom: connect.NewClient[v1.DestroyRoomRequest, v1.DestroyRoomResponse](
+			httpClient,
+			baseURL+RoomInternalServiceDestroyRoomProcedure,
+			connect.WithSchema(roomInternalServiceMethods.ByName("DestroyRoom")),
+			connect.WithClientOptions(opts...),
+		),
+		markAllActiveRoomsGracePeriod: connect.NewClient[v1.MarkAllActiveRoomsGracePeriodRequest, v1.MarkAllActiveRoomsGracePeriodResponse](
+			httpClient,
+			baseURL+RoomInternalServiceMarkAllActiveRoomsGracePeriodProcedure,
+			connect.WithSchema(roomInternalServiceMethods.ByName("MarkAllActiveRoomsGracePeriod")),
+			connect.WithClientOptions(opts...),
+		),
+		cleanupExpiredRooms: connect.NewClient[v1.CleanupExpiredRoomsRequest, v1.CleanupExpiredRoomsResponse](
+			httpClient,
+			baseURL+RoomInternalServiceCleanupExpiredRoomsProcedure,
+			connect.WithSchema(roomInternalServiceMethods.ByName("CleanupExpiredRooms")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
 // roomInternalServiceClient implements RoomInternalServiceClient.
 type roomInternalServiceClient struct {
-	createRoom     *connect.Client[v1.CreateRoomRequest, v1.CreateRoomResponse]
-	joinRoom       *connect.Client[v1.JoinRoomRequest, v1.JoinRoomResponse]
-	leaveRoom      *connect.Client[v1.LeaveRoomRequest, v1.LeaveRoomResponse]
-	getRoomDetail  *connect.Client[v1.GetRoomDetailRequest, v1.GetRoomDetailResponse]
-	isActiveMember *connect.Client[v1.IsActiveMemberRequest, v1.IsActiveMemberResponse]
+	createRoom                    *connect.Client[v1.CreateRoomRequest, v1.CreateRoomResponse]
+	joinRoom                      *connect.Client[v1.JoinRoomRequest, v1.JoinRoomResponse]
+	leaveRoom                     *connect.Client[v1.LeaveRoomRequest, v1.LeaveRoomResponse]
+	getRoomDetail                 *connect.Client[v1.GetRoomDetailRequest, v1.GetRoomDetailResponse]
+	isActiveMember                *connect.Client[v1.IsActiveMemberRequest, v1.IsActiveMemberResponse]
+	getRoomRuntimeBootstrap       *connect.Client[v1.GetRoomRuntimeBootstrapRequest, v1.GetRoomRuntimeBootstrapResponse]
+	listRecoverableRooms          *connect.Client[v1.ListRecoverableRoomsRequest, v1.ListRecoverableRoomsResponse]
+	markRoomGracePeriod           *connect.Client[v1.MarkRoomGracePeriodRequest, v1.MarkRoomGracePeriodResponse]
+	markRoomActive                *connect.Client[v1.MarkRoomActiveRequest, v1.MarkRoomActiveResponse]
+	destroyRoom                   *connect.Client[v1.DestroyRoomRequest, v1.DestroyRoomResponse]
+	markAllActiveRoomsGracePeriod *connect.Client[v1.MarkAllActiveRoomsGracePeriodRequest, v1.MarkAllActiveRoomsGracePeriodResponse]
+	cleanupExpiredRooms           *connect.Client[v1.CleanupExpiredRoomsRequest, v1.CleanupExpiredRoomsResponse]
 }
 
 // CreateRoom calls watch_together.internal.v1.RoomInternalService.CreateRoom.
@@ -139,6 +216,43 @@ func (c *roomInternalServiceClient) IsActiveMember(ctx context.Context, req *con
 	return c.isActiveMember.CallUnary(ctx, req)
 }
 
+// GetRoomRuntimeBootstrap calls
+// watch_together.internal.v1.RoomInternalService.GetRoomRuntimeBootstrap.
+func (c *roomInternalServiceClient) GetRoomRuntimeBootstrap(ctx context.Context, req *connect.Request[v1.GetRoomRuntimeBootstrapRequest]) (*connect.Response[v1.GetRoomRuntimeBootstrapResponse], error) {
+	return c.getRoomRuntimeBootstrap.CallUnary(ctx, req)
+}
+
+// ListRecoverableRooms calls watch_together.internal.v1.RoomInternalService.ListRecoverableRooms.
+func (c *roomInternalServiceClient) ListRecoverableRooms(ctx context.Context, req *connect.Request[v1.ListRecoverableRoomsRequest]) (*connect.Response[v1.ListRecoverableRoomsResponse], error) {
+	return c.listRecoverableRooms.CallUnary(ctx, req)
+}
+
+// MarkRoomGracePeriod calls watch_together.internal.v1.RoomInternalService.MarkRoomGracePeriod.
+func (c *roomInternalServiceClient) MarkRoomGracePeriod(ctx context.Context, req *connect.Request[v1.MarkRoomGracePeriodRequest]) (*connect.Response[v1.MarkRoomGracePeriodResponse], error) {
+	return c.markRoomGracePeriod.CallUnary(ctx, req)
+}
+
+// MarkRoomActive calls watch_together.internal.v1.RoomInternalService.MarkRoomActive.
+func (c *roomInternalServiceClient) MarkRoomActive(ctx context.Context, req *connect.Request[v1.MarkRoomActiveRequest]) (*connect.Response[v1.MarkRoomActiveResponse], error) {
+	return c.markRoomActive.CallUnary(ctx, req)
+}
+
+// DestroyRoom calls watch_together.internal.v1.RoomInternalService.DestroyRoom.
+func (c *roomInternalServiceClient) DestroyRoom(ctx context.Context, req *connect.Request[v1.DestroyRoomRequest]) (*connect.Response[v1.DestroyRoomResponse], error) {
+	return c.destroyRoom.CallUnary(ctx, req)
+}
+
+// MarkAllActiveRoomsGracePeriod calls
+// watch_together.internal.v1.RoomInternalService.MarkAllActiveRoomsGracePeriod.
+func (c *roomInternalServiceClient) MarkAllActiveRoomsGracePeriod(ctx context.Context, req *connect.Request[v1.MarkAllActiveRoomsGracePeriodRequest]) (*connect.Response[v1.MarkAllActiveRoomsGracePeriodResponse], error) {
+	return c.markAllActiveRoomsGracePeriod.CallUnary(ctx, req)
+}
+
+// CleanupExpiredRooms calls watch_together.internal.v1.RoomInternalService.CleanupExpiredRooms.
+func (c *roomInternalServiceClient) CleanupExpiredRooms(ctx context.Context, req *connect.Request[v1.CleanupExpiredRoomsRequest]) (*connect.Response[v1.CleanupExpiredRoomsResponse], error) {
+	return c.cleanupExpiredRooms.CallUnary(ctx, req)
+}
+
 // RoomInternalServiceHandler is an implementation of the
 // watch_together.internal.v1.RoomInternalService service.
 type RoomInternalServiceHandler interface {
@@ -147,6 +261,13 @@ type RoomInternalServiceHandler interface {
 	LeaveRoom(context.Context, *connect.Request[v1.LeaveRoomRequest]) (*connect.Response[v1.LeaveRoomResponse], error)
 	GetRoomDetail(context.Context, *connect.Request[v1.GetRoomDetailRequest]) (*connect.Response[v1.GetRoomDetailResponse], error)
 	IsActiveMember(context.Context, *connect.Request[v1.IsActiveMemberRequest]) (*connect.Response[v1.IsActiveMemberResponse], error)
+	GetRoomRuntimeBootstrap(context.Context, *connect.Request[v1.GetRoomRuntimeBootstrapRequest]) (*connect.Response[v1.GetRoomRuntimeBootstrapResponse], error)
+	ListRecoverableRooms(context.Context, *connect.Request[v1.ListRecoverableRoomsRequest]) (*connect.Response[v1.ListRecoverableRoomsResponse], error)
+	MarkRoomGracePeriod(context.Context, *connect.Request[v1.MarkRoomGracePeriodRequest]) (*connect.Response[v1.MarkRoomGracePeriodResponse], error)
+	MarkRoomActive(context.Context, *connect.Request[v1.MarkRoomActiveRequest]) (*connect.Response[v1.MarkRoomActiveResponse], error)
+	DestroyRoom(context.Context, *connect.Request[v1.DestroyRoomRequest]) (*connect.Response[v1.DestroyRoomResponse], error)
+	MarkAllActiveRoomsGracePeriod(context.Context, *connect.Request[v1.MarkAllActiveRoomsGracePeriodRequest]) (*connect.Response[v1.MarkAllActiveRoomsGracePeriodResponse], error)
+	CleanupExpiredRooms(context.Context, *connect.Request[v1.CleanupExpiredRoomsRequest]) (*connect.Response[v1.CleanupExpiredRoomsResponse], error)
 }
 
 // NewRoomInternalServiceHandler builds an HTTP handler from the service implementation. It returns
@@ -186,6 +307,48 @@ func NewRoomInternalServiceHandler(svc RoomInternalServiceHandler, opts ...conne
 		connect.WithSchema(roomInternalServiceMethods.ByName("IsActiveMember")),
 		connect.WithHandlerOptions(opts...),
 	)
+	roomInternalServiceGetRoomRuntimeBootstrapHandler := connect.NewUnaryHandler(
+		RoomInternalServiceGetRoomRuntimeBootstrapProcedure,
+		svc.GetRoomRuntimeBootstrap,
+		connect.WithSchema(roomInternalServiceMethods.ByName("GetRoomRuntimeBootstrap")),
+		connect.WithHandlerOptions(opts...),
+	)
+	roomInternalServiceListRecoverableRoomsHandler := connect.NewUnaryHandler(
+		RoomInternalServiceListRecoverableRoomsProcedure,
+		svc.ListRecoverableRooms,
+		connect.WithSchema(roomInternalServiceMethods.ByName("ListRecoverableRooms")),
+		connect.WithHandlerOptions(opts...),
+	)
+	roomInternalServiceMarkRoomGracePeriodHandler := connect.NewUnaryHandler(
+		RoomInternalServiceMarkRoomGracePeriodProcedure,
+		svc.MarkRoomGracePeriod,
+		connect.WithSchema(roomInternalServiceMethods.ByName("MarkRoomGracePeriod")),
+		connect.WithHandlerOptions(opts...),
+	)
+	roomInternalServiceMarkRoomActiveHandler := connect.NewUnaryHandler(
+		RoomInternalServiceMarkRoomActiveProcedure,
+		svc.MarkRoomActive,
+		connect.WithSchema(roomInternalServiceMethods.ByName("MarkRoomActive")),
+		connect.WithHandlerOptions(opts...),
+	)
+	roomInternalServiceDestroyRoomHandler := connect.NewUnaryHandler(
+		RoomInternalServiceDestroyRoomProcedure,
+		svc.DestroyRoom,
+		connect.WithSchema(roomInternalServiceMethods.ByName("DestroyRoom")),
+		connect.WithHandlerOptions(opts...),
+	)
+	roomInternalServiceMarkAllActiveRoomsGracePeriodHandler := connect.NewUnaryHandler(
+		RoomInternalServiceMarkAllActiveRoomsGracePeriodProcedure,
+		svc.MarkAllActiveRoomsGracePeriod,
+		connect.WithSchema(roomInternalServiceMethods.ByName("MarkAllActiveRoomsGracePeriod")),
+		connect.WithHandlerOptions(opts...),
+	)
+	roomInternalServiceCleanupExpiredRoomsHandler := connect.NewUnaryHandler(
+		RoomInternalServiceCleanupExpiredRoomsProcedure,
+		svc.CleanupExpiredRooms,
+		connect.WithSchema(roomInternalServiceMethods.ByName("CleanupExpiredRooms")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/watch_together.internal.v1.RoomInternalService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case RoomInternalServiceCreateRoomProcedure:
@@ -198,6 +361,20 @@ func NewRoomInternalServiceHandler(svc RoomInternalServiceHandler, opts ...conne
 			roomInternalServiceGetRoomDetailHandler.ServeHTTP(w, r)
 		case RoomInternalServiceIsActiveMemberProcedure:
 			roomInternalServiceIsActiveMemberHandler.ServeHTTP(w, r)
+		case RoomInternalServiceGetRoomRuntimeBootstrapProcedure:
+			roomInternalServiceGetRoomRuntimeBootstrapHandler.ServeHTTP(w, r)
+		case RoomInternalServiceListRecoverableRoomsProcedure:
+			roomInternalServiceListRecoverableRoomsHandler.ServeHTTP(w, r)
+		case RoomInternalServiceMarkRoomGracePeriodProcedure:
+			roomInternalServiceMarkRoomGracePeriodHandler.ServeHTTP(w, r)
+		case RoomInternalServiceMarkRoomActiveProcedure:
+			roomInternalServiceMarkRoomActiveHandler.ServeHTTP(w, r)
+		case RoomInternalServiceDestroyRoomProcedure:
+			roomInternalServiceDestroyRoomHandler.ServeHTTP(w, r)
+		case RoomInternalServiceMarkAllActiveRoomsGracePeriodProcedure:
+			roomInternalServiceMarkAllActiveRoomsGracePeriodHandler.ServeHTTP(w, r)
+		case RoomInternalServiceCleanupExpiredRoomsProcedure:
+			roomInternalServiceCleanupExpiredRoomsHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -225,4 +402,32 @@ func (UnimplementedRoomInternalServiceHandler) GetRoomDetail(context.Context, *c
 
 func (UnimplementedRoomInternalServiceHandler) IsActiveMember(context.Context, *connect.Request[v1.IsActiveMemberRequest]) (*connect.Response[v1.IsActiveMemberResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("watch_together.internal.v1.RoomInternalService.IsActiveMember is not implemented"))
+}
+
+func (UnimplementedRoomInternalServiceHandler) GetRoomRuntimeBootstrap(context.Context, *connect.Request[v1.GetRoomRuntimeBootstrapRequest]) (*connect.Response[v1.GetRoomRuntimeBootstrapResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("watch_together.internal.v1.RoomInternalService.GetRoomRuntimeBootstrap is not implemented"))
+}
+
+func (UnimplementedRoomInternalServiceHandler) ListRecoverableRooms(context.Context, *connect.Request[v1.ListRecoverableRoomsRequest]) (*connect.Response[v1.ListRecoverableRoomsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("watch_together.internal.v1.RoomInternalService.ListRecoverableRooms is not implemented"))
+}
+
+func (UnimplementedRoomInternalServiceHandler) MarkRoomGracePeriod(context.Context, *connect.Request[v1.MarkRoomGracePeriodRequest]) (*connect.Response[v1.MarkRoomGracePeriodResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("watch_together.internal.v1.RoomInternalService.MarkRoomGracePeriod is not implemented"))
+}
+
+func (UnimplementedRoomInternalServiceHandler) MarkRoomActive(context.Context, *connect.Request[v1.MarkRoomActiveRequest]) (*connect.Response[v1.MarkRoomActiveResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("watch_together.internal.v1.RoomInternalService.MarkRoomActive is not implemented"))
+}
+
+func (UnimplementedRoomInternalServiceHandler) DestroyRoom(context.Context, *connect.Request[v1.DestroyRoomRequest]) (*connect.Response[v1.DestroyRoomResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("watch_together.internal.v1.RoomInternalService.DestroyRoom is not implemented"))
+}
+
+func (UnimplementedRoomInternalServiceHandler) MarkAllActiveRoomsGracePeriod(context.Context, *connect.Request[v1.MarkAllActiveRoomsGracePeriodRequest]) (*connect.Response[v1.MarkAllActiveRoomsGracePeriodResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("watch_together.internal.v1.RoomInternalService.MarkAllActiveRoomsGracePeriod is not implemented"))
+}
+
+func (UnimplementedRoomInternalServiceHandler) CleanupExpiredRooms(context.Context, *connect.Request[v1.CleanupExpiredRoomsRequest]) (*connect.Response[v1.CleanupExpiredRoomsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("watch_together.internal.v1.RoomInternalService.CleanupExpiredRooms is not implemented"))
 }

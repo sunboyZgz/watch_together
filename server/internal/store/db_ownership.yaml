@@ -12,7 +12,7 @@ tables:
   users:
     owner: identity
     writers: [identity]
-    readers: [identity, home-composition, room-session]
+    readers: [identity, home-composition]
   media_tags:
     owner: media
     writers: [media]
@@ -73,9 +73,3 @@ cross_context_access:
     access: read
     path: home_postgres.go
     reason: continue-watching progress read model
-  - caller: room-session
-    owner: identity
-    tables: [users]
-    access: read
-    path: room_postgres.go
-    reason: room host/member validation and member details

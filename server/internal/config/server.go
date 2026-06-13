@@ -22,6 +22,7 @@ type ServerRuntimeConfig struct {
 	RoomRuntimeMode     string
 	DatabaseURL         string
 	IdentityDatabaseURL string
+	RoomDatabaseURL     string
 	MediaDatabaseURL    string
 	ProgressDatabaseURL string
 	TimelineDatabaseURL string
@@ -243,6 +244,7 @@ func LoadServerRuntimeConfig(configDir string) (ServerRuntimeConfig, error) {
 		"ROOM_RUNTIME_MODE",
 		"DATABASE_URL",
 		"IDENTITY_DATABASE_URL",
+		"ROOM_DATABASE_URL",
 		"MEDIA_DATABASE_URL",
 		"PROGRESS_DATABASE_URL",
 		"TIMELINE_DATABASE_URL",
@@ -350,6 +352,7 @@ func LoadServerRuntimeConfig(configDir string) (ServerRuntimeConfig, error) {
 		RoomRuntimeMode:     roomRuntimeMode,
 		DatabaseURL:         trimmedString(loader, "DATABASE_URL"),
 		IdentityDatabaseURL: trimmedString(loader, "IDENTITY_DATABASE_URL"),
+		RoomDatabaseURL:     trimmedString(loader, "ROOM_DATABASE_URL"),
 		MediaDatabaseURL:    trimmedString(loader, "MEDIA_DATABASE_URL"),
 		ProgressDatabaseURL: trimmedString(loader, "PROGRESS_DATABASE_URL"),
 		TimelineDatabaseURL: trimmedString(loader, "TIMELINE_DATABASE_URL"),
@@ -481,6 +484,10 @@ func validateRoomserverRuntimeConfig(config ServerRuntimeConfig) error {
 	if normalizeServiceMode(config.ServiceClients.IdentityMode) == "rpc" &&
 		strings.TrimSpace(config.IdentityDatabaseURL) != "" {
 		return fmt.Errorf("IDENTITY_DATABASE_URL must be empty for roomserver when IDENTITY_SERVICE_MODE=rpc; use ROOMSERVER_IDENTITY_DATABASE_URL only with IDENTITY_SERVICE_MODE=local")
+	}
+	if normalizeServiceMode(config.ServiceClients.RoomMode) == "rpc" &&
+		strings.TrimSpace(config.RoomDatabaseURL) != "" {
+		return fmt.Errorf("ROOM_DATABASE_URL must be empty for roomserver when ROOM_SERVICE_MODE=rpc; use ROOMSERVER_ROOM_DATABASE_URL only with ROOM_SERVICE_MODE=local")
 	}
 	if normalizeServiceMode(config.ServiceClients.MediaMode) == "rpc" &&
 		strings.TrimSpace(config.MediaDatabaseURL) != "" {

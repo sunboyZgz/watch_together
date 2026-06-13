@@ -172,6 +172,13 @@ func TestComposeAppUsesFullRPCBoundaryAndProdKeepsAuthorityLocal(t *testing.T) {
 	if addr := envString(localRoomserver.Environment, "ROOM_SERVICE_ADDR"); !strings.Contains(addr, "http://roomservice:8090") {
 		t.Fatalf("app roomserver ROOM_SERVICE_ADDR = %q, want roomservice URL", addr)
 	}
+	roomDatabaseURL := envString(localRoomserver.Environment, "ROOM_DATABASE_URL")
+	if strings.Contains(roomDatabaseURL, "${ROOM_DATABASE_URL") {
+		t.Fatalf("app roomserver must not receive room-owned ROOM_DATABASE_URL directly, got %q", roomDatabaseURL)
+	}
+	if roomDatabaseURL != "" && !strings.Contains(roomDatabaseURL, "ROOMSERVER_ROOM_DATABASE_URL") {
+		t.Fatalf("app roomserver room DB override must be explicit, got %q", roomDatabaseURL)
+	}
 	identityDatabaseURL := envString(localRoomserver.Environment, "IDENTITY_DATABASE_URL")
 	if strings.Contains(identityDatabaseURL, "${IDENTITY_DATABASE_URL") {
 		t.Fatalf("app roomserver must not receive identity-owned IDENTITY_DATABASE_URL directly, got %q", identityDatabaseURL)
@@ -225,6 +232,15 @@ func TestComposeAppUsesFullRPCBoundaryAndProdKeepsAuthorityLocal(t *testing.T) {
 	}
 	if !containsContext(localRoom.Profiles, "app") {
 		t.Fatalf("roomservice profiles = %v, want app profile", localRoom.Profiles)
+	}
+	if !dependsOnService(localRoom.DependsOn, "room-postgres-init") {
+		t.Fatalf("roomservice must depend on room-postgres-init")
+	}
+	if !dependsOnService(localRoom.DependsOn, "identityservice") {
+		t.Fatalf("roomservice must depend on identityservice")
+	}
+	if roomDatabaseURL := envString(localRoom.Environment, "ROOM_DATABASE_URL"); !strings.Contains(roomDatabaseURL, "anime_watch_room_dev") {
+		t.Fatalf("roomservice ROOM_DATABASE_URL = %q, want local room database", roomDatabaseURL)
 	}
 	if !containsContext(localMedia.Profiles, "app") {
 		t.Fatalf("mediaservice profiles = %v, want app profile", localMedia.Profiles)
@@ -280,6 +296,12 @@ func TestComposeAppUsesFullRPCBoundaryAndProdKeepsAuthorityLocal(t *testing.T) {
 	if old := envString(pilotAuthority.Environment, "AUTHORITY_SERVICE_INSTANCE_ID"); old != "" {
 		t.Fatalf("roomauthorityservice must not use deprecated AUTHORITY_SERVICE_INSTANCE_ID, got %q", old)
 	}
+	if addr := envString(pilotAuthority.Environment, "ROOM_SERVICE_ADDR"); !strings.Contains(addr, "http://roomservice:8090") {
+		t.Fatalf("roomauthorityservice ROOM_SERVICE_ADDR = %q, want roomservice URL", addr)
+	}
+	if databaseURL := envString(pilotAuthority.Environment, "ROOM_DATABASE_URL"); databaseURL != "" {
+		t.Fatalf("roomauthorityservice must not receive direct ROOM_DATABASE_URL, got %q", databaseURL)
+	}
 
 	prodCompose := readCompose(t, "../../compose.prod.yaml")
 	prodRoomserver := requireComposeService(t, prodCompose, "roomserver")
@@ -317,8 +339,14 @@ func TestComposeAppUsesFullRPCBoundaryAndProdKeepsAuthorityLocal(t *testing.T) {
 	if mediaDatabaseURL := envString(prodRoomserver.Environment, "MEDIA_DATABASE_URL"); strings.Contains(mediaDatabaseURL, "${MEDIA_DATABASE_URL") {
 		t.Fatalf("prod roomserver must not receive media-owned MEDIA_DATABASE_URL directly, got %q", mediaDatabaseURL)
 	}
+	if roomDatabaseURL := envString(prodRoomserver.Environment, "ROOM_DATABASE_URL"); strings.Contains(roomDatabaseURL, "${ROOM_DATABASE_URL") {
+		t.Fatalf("prod roomserver must not receive room-owned ROOM_DATABASE_URL directly, got %q", roomDatabaseURL)
+	}
 	if progressDatabaseURL := envString(prodRoomserver.Environment, "PROGRESS_DATABASE_URL"); strings.Contains(progressDatabaseURL, "${PROGRESS_DATABASE_URL") {
 		t.Fatalf("prod roomserver must not receive progress-owned PROGRESS_DATABASE_URL directly, got %q", progressDatabaseURL)
+	}
+	if roomDatabaseURL := envString(prodRoom.Environment, "ROOM_DATABASE_URL"); !strings.Contains(roomDatabaseURL, "watch_together_room_prod") {
+		t.Fatalf("prod roomservice ROOM_DATABASE_URL = %q, want prod room database", roomDatabaseURL)
 	}
 	if len(prodMedia.Profiles) != 0 {
 		t.Fatalf("prod mediaservice should be a default service, got profiles %v", prodMedia.Profiles)
@@ -502,6 +530,32 @@ func TestProgressMigrationCreatedTablesDeclareProgressOwner(t *testing.T) {
 			}
 			if ownership.Owner != "progress" {
 				t.Fatalf("progress migration %s creates table %s owned by %q, want progress", filepath.Base(file), table, ownership.Owner)
+			}
+		}
+	}
+}
+
+func TestRoomMigrationCreatedTablesDeclareRoomOwner(t *testing.T) {
+	registry := loadOwnershipRegistry(t)
+	files, err := filepath.Glob("../../room_migrations/*.up.sql")
+	if err != nil {
+		t.Fatalf("glob room migrations: %v", err)
+	}
+	if len(files) == 0 {
+		t.Fatalf("expected room migrations to exist")
+	}
+	for _, file := range files {
+		contentBytes, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatalf("read room migration %s: %v", file, err)
+		}
+		for _, table := range createdTables(string(contentBytes)) {
+			ownership, ok := registry.Tables[table]
+			if !ok {
+				t.Fatalf("room migration %s creates table %s without ownership registry entry", filepath.Base(file), table)
+			}
+			if ownership.Owner != "room-session" {
+				t.Fatalf("room migration %s creates table %s owned by %q, want room-session", filepath.Base(file), table, ownership.Owner)
 			}
 		}
 	}

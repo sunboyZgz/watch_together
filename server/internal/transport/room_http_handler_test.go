@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"watch_together/server/internal/room"
 	"watch_together/server/internal/roomapi"
@@ -399,6 +400,40 @@ func (s *fakeRoomStore) IsActiveMemberByCode(_ context.Context, roomCode string,
 		}
 	}
 	return false, s.err
+}
+
+func (s *fakeRoomStore) GetRoomRuntimeBootstrap(_ context.Context, roomCode string) (roomapi.RuntimeBootstrapResult, error) {
+	if s.err != nil {
+		return roomapi.RuntimeBootstrapResult{}, s.err
+	}
+	return roomapi.RuntimeBootstrapResult{
+		Room:  s.detailResult.Room,
+		Media: s.detailResult.Media,
+	}, nil
+}
+
+func (s *fakeRoomStore) ListRecoverableRoomCodes(context.Context, int) ([]string, error) {
+	return nil, s.err
+}
+
+func (s *fakeRoomStore) MarkRoomGracePeriod(context.Context, string, time.Time, time.Time) error {
+	return s.err
+}
+
+func (s *fakeRoomStore) MarkRoomActive(context.Context, string) error {
+	return s.err
+}
+
+func (s *fakeRoomStore) DestroyRoom(context.Context, string) error {
+	return s.err
+}
+
+func (s *fakeRoomStore) MarkAllActiveRoomsGracePeriod(context.Context, time.Time, time.Time) (int64, error) {
+	return 0, s.err
+}
+
+func (s *fakeRoomStore) CleanupExpiredRoomCodes(context.Context, time.Time) ([]string, error) {
+	return nil, s.err
 }
 
 type fakeRoomRuntime struct {

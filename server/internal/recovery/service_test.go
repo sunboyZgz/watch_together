@@ -231,8 +231,8 @@ type fakeRoomDetailStore struct {
 	durationMs *int64
 }
 
-func (s *fakeRoomDetailStore) GetRoomDetail(context.Context, string) (roomapi.DetailResult, error) {
-	return roomapi.DetailResult{
+func (s *fakeRoomDetailStore) RuntimeBootstrapByCode(context.Context, string) (roomapi.RuntimeBootstrapResult, error) {
+	return roomapi.RuntimeBootstrapResult{
 		Room: roomapi.Room{
 			RoomCode:    "ROOM01",
 			HostUserID:  "user_a",

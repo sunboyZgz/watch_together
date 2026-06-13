@@ -78,6 +78,19 @@ func TestLoadServerRuntimeConfigLoadsIdentityDatabaseURL(t *testing.T) {
 	}
 }
 
+func TestLoadServerRuntimeConfigLoadsRoomDatabaseURL(t *testing.T) {
+	configDir := t.TempDir()
+	mustWriteConfigFile(t, filepath.Join(configDir, ".env"), "ROOM_DATABASE_URL=postgres://room-db\n")
+
+	cfg, err := LoadServerRuntimeConfig(configDir)
+	if err != nil {
+		t.Fatalf("load runtime config: %v", err)
+	}
+	if cfg.RoomDatabaseURL != "postgres://room-db" {
+		t.Fatalf("expected room database url, got %q", cfg.RoomDatabaseURL)
+	}
+}
+
 func TestLoadServerRuntimeConfigLoadsTimelineDatabaseURL(t *testing.T) {
 	configDir := t.TempDir()
 	mustWriteConfigFile(t, filepath.Join(configDir, ".env"), "TIMELINE_DATABASE_URL=postgres://timeline-db\n")
@@ -116,6 +129,11 @@ func TestLoadRoomserverRuntimeConfigRejectsOwnedDatabaseURLInRPCMode(t *testing.
 			name:        "identity",
 			content:     "IDENTITY_SERVICE_MODE=rpc\nIDENTITY_SERVICE_ADDR=http://identityservice:8090\nIDENTITY_DATABASE_URL=postgres://identity-db\n",
 			wantMessage: "IDENTITY_DATABASE_URL",
+		},
+		{
+			name:        "room",
+			content:     "ROOM_SERVICE_MODE=rpc\nROOM_SERVICE_ADDR=http://roomservice:8090\nROOM_DATABASE_URL=postgres://room-db\n",
+			wantMessage: "ROOM_DATABASE_URL",
 		},
 		{
 			name:        "media",

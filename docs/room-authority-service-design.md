@@ -1,6 +1,6 @@
 # Room Authority Service Design
 
-Phase 13 defines the target `room-authority-service` boundary. Phase 14 implements a non-default RPC pilot under `rpc-pilot`. Phase 15 hardens that pilot with dynamic readiness, metrics, stable failure tests, and explicit lease-owner identity. Phase 16 promotes authority RPC into the local compose `app` development path, while production compose still keeps room authority inside `roomserver` by default. Phase 17/18 adds identity RPC to the same local app baseline; Phase 19 adds room metadata and membership RPC through `cmd/roomservice`. These changes do not change the authority contract. Android HTTP/WebSocket contracts remain unchanged.
+Phase 13 defines the target `room-authority-service` boundary. Phase 14 implements a non-default RPC pilot under `rpc-pilot`. Phase 15 hardens that pilot with dynamic readiness, metrics, stable failure tests, and explicit lease-owner identity. Phase 16 promotes authority RPC into the local compose `app` development path, while production compose still keeps room authority inside `roomserver` by default. Phase 17/18 adds identity RPC to the same local app baseline; Phase 19 adds room metadata and membership RPC through `cmd/roomservice`; Phase 21 moves room lifecycle and recovery bootstrap reads behind room RPC. These changes do not change the authority contract. Android HTTP/WebSocket contracts remain unchanged.
 
 ## Goals
 
@@ -34,7 +34,7 @@ Phase 14 adds generated internal authority RPC and `cmd/roomauthorityservice` fo
 At the end of Phase 15, authority RPC was still non-default and focused on cutover readiness for `rpc-pilot`.
 
 - `AUTHORITY_LEASE_INSTANCE_ID` is the Redis authority lease owner used by `roomserver` HTTP bootstrap when `AUTHORITY_SERVICE_MODE=rpc`.
-- `roomauthorityservice` readiness checks PostgreSQL, Redis, NATS broadcast connectivity, timeline RPC readiness, and internal RPC availability.
+- `roomauthorityservice` readiness checks Redis, NATS broadcast connectivity, timeline RPC readiness, room RPC readiness, and internal RPC availability.
 - `roomauthorityservice` exposes authority RPC request count/latency/error metrics and authority apply accepted/rejected metrics.
 - Phase 15 architecture tests kept app/prod local while only `roomserver-rpc-pilot` depended on `roomauthorityservice` and used authority RPC. Phase 16 updates that guard so local app now uses authority RPC and prod remains local.
 - Failure tests cover authority RPC unavailable and stale authority responses so ingress forgets pending requests and returns stable client errors.
@@ -58,6 +58,7 @@ Today, `distributed_authority` uses these ownership boundaries:
 
 - `roomserver` owns WebSocket ingress/egress, HTTP room bootstrap, the local connection table, accepted envelope broadcast, NATS control forwarding, and the authoritative `room.Manager` instance for rooms whose Redis lease points to the local instance.
 - `roomservice` owns room metadata and membership RPC in compose app/prod paths, while realtime room runtime stays in `roomserver`.
+- Phase 21 also routes authority recovery bootstrap reads and recoverable-room metadata through `roomservice`; `roomauthorityservice` does not directly read room tables.
 - Redis stores authority leases, active-device leases, control request idempotency, seek rate limits, latest room snapshots, and user-level presence.
 - NATS Core handles realtime WebSocket fan-out and non-authority control request/reply between roomserver instances.
 - `timelineservice` owns canonical timeline result event construction and recovery-ready event feeds.

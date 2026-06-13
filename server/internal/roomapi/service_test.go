@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	mediacatalog "watch_together/server/internal/media"
 )
@@ -157,4 +158,35 @@ func (s *fakeRoomServiceStore) GetRoomDetail(_ context.Context, roomCode string)
 
 func (s *fakeRoomServiceStore) IsActiveMemberByCode(context.Context, string, string) (bool, error) {
 	return false, s.err
+}
+
+func (s *fakeRoomServiceStore) GetRoomRuntimeBootstrap(_ context.Context, roomCode string) (RuntimeBootstrapResult, error) {
+	if s.err != nil {
+		return RuntimeBootstrapResult{}, s.err
+	}
+	return RuntimeBootstrapResult{Room: s.detailResult.Room}, nil
+}
+
+func (s *fakeRoomServiceStore) ListRecoverableRoomCodes(context.Context, int) ([]string, error) {
+	return []string{"A7K2M9"}, s.err
+}
+
+func (s *fakeRoomServiceStore) MarkRoomGracePeriod(context.Context, string, time.Time, time.Time) error {
+	return s.err
+}
+
+func (s *fakeRoomServiceStore) MarkRoomActive(context.Context, string) error {
+	return s.err
+}
+
+func (s *fakeRoomServiceStore) DestroyRoom(context.Context, string) error {
+	return s.err
+}
+
+func (s *fakeRoomServiceStore) MarkAllActiveRoomsGracePeriod(context.Context, time.Time, time.Time) (int64, error) {
+	return 1, s.err
+}
+
+func (s *fakeRoomServiceStore) CleanupExpiredRoomCodes(context.Context, time.Time) ([]string, error) {
+	return []string{"A7K2M9"}, s.err
 }

@@ -42,6 +42,7 @@ type Config struct {
 	RoomRuntimeMode     string
 	DatabaseURL         string
 	IdentityDatabaseURL string
+	RoomDatabaseURL     string
 	MediaDatabaseURL    string
 	ProgressDatabaseURL string
 	TimelineDatabaseURL string
@@ -119,6 +120,7 @@ type Server struct {
 	redis             *cache.RedisClient
 	db                *gorm.DB
 	identityDB        *gorm.DB
+	roomDB            *gorm.DB
 	mediaDB           *gorm.DB
 	progressDB        *gorm.DB
 	timelineDB        *gorm.DB
@@ -188,6 +190,10 @@ func NewServer(config Config) *Server {
 	if !isRPCMode(config.ServiceClients.IdentityMode) && strings.TrimSpace(config.IdentityDatabaseURL) != "" {
 		identityDB = newPostgresDB("identity_postgres", config.IdentityDatabaseURL)
 	}
+	var roomDB *gorm.DB
+	if !isRPCMode(config.ServiceClients.RoomMode) && strings.TrimSpace(config.RoomDatabaseURL) != "" {
+		roomDB = newPostgresDB("room_postgres", config.RoomDatabaseURL)
+	}
 	var mediaDB *gorm.DB
 	if !isRPCMode(config.ServiceClients.MediaMode) && strings.TrimSpace(config.MediaDatabaseURL) != "" {
 		mediaDB = newPostgresDB("media_postgres", config.MediaDatabaseURL)
@@ -204,7 +210,7 @@ func NewServer(config Config) *Server {
 	identityService := newIdentityService(db, identityDB, config, serviceConfig, tokenManager)
 	progressService := newProgressService(db, progressDB, identityService, mediaService, config, serviceConfig)
 	homeService := newHomeService(db, identityService, progressService, mediaService, config, serviceConfig)
-	roomService, roomStore := newRoomService(db, mediaService, config, serviceConfig)
+	roomService, roomLifecycle := newRoomService(db, roomDB, mediaService, identityService, config, serviceConfig)
 	var timelineRecorder timeline.ResultRecorder = timeline.NoopRecorder{}
 	var timelineRecoveryReader timeline.RecoveryReader
 	var timelineOutboxStore *store.PostgresTimelineOutboxStore
@@ -225,10 +231,10 @@ func NewServer(config Config) *Server {
 			timelineRecoveryReader = timelineClient
 		}
 	}
-	installRoomLifecycleHooks(roomManager, roomStore, roomStateCache)
-	if roomStore != nil {
+	installRoomLifecycleHooks(roomManager, roomLifecycle, roomStateCache)
+	if roomLifecycle != nil {
 		now := time.Now()
-		backfilled, err := roomStore.MarkAllActiveRoomsGracePeriod(
+		backfilled, err := roomLifecycle.MarkAllActiveRoomsGracePeriod(
 			context.Background(),
 			now,
 			now.Add(room.DefaultEmptyRoomGracePeriod()),
@@ -240,8 +246,8 @@ func NewServer(config Config) *Server {
 		}
 	}
 	go roomManager.StartCleanupLoop(serverCtx, room.DefaultCleanupInterval())
-	if roomStore != nil {
-		go startPersistentRoomCleanupLoop(serverCtx, room.DefaultCleanupInterval(), roomStore, roomStateCache)
+	if roomLifecycle != nil {
+		go startPersistentRoomCleanupLoop(serverCtx, room.DefaultCleanupInterval(), roomLifecycle, roomStateCache)
 	}
 	roomHTTPHandler := transport.NewRoomHTTPHandlerWithTokenVerifierAndRoomStateWriter(
 		roomManager,
@@ -278,7 +284,7 @@ func NewServer(config Config) *Server {
 			},
 			authorityRegistry,
 			roomManager,
-			roomStore,
+			roomLifecycle,
 			timelineRecoveryReader,
 			roomStateCache,
 		)
@@ -318,7 +324,7 @@ func NewServer(config Config) *Server {
 		progressHTTPHandler,
 		runtimeBoundaryFromConfig(config),
 		func(ctx context.Context) observability.ReadinessSnapshot {
-			return readinessSnapshotFromConfig(ctx, config, db, identityDB, mediaDB, progressDB, timelineDB, redisClient, roomBroadcastBus, roomControlBus, timelineOutboxStore, authorityRecovery)
+			return readinessSnapshotFromConfig(ctx, config, db, identityDB, roomDB, mediaDB, progressDB, timelineDB, redisClient, roomBroadcastBus, roomControlBus, timelineOutboxStore, authorityRecovery)
 		},
 		observabilityConfig,
 		metrics,
@@ -347,6 +353,7 @@ func NewServer(config Config) *Server {
 		redis:             redisClient,
 		db:                db,
 		identityDB:        identityDB,
+		roomDB:            roomDB,
 		mediaDB:           mediaDB,
 		progressDB:        progressDB,
 		timelineDB:        timelineDB,
@@ -397,6 +404,7 @@ func readinessSnapshotFromConfig(
 	config Config,
 	db *gorm.DB,
 	identityDB *gorm.DB,
+	roomDB *gorm.DB,
 	mediaDB *gorm.DB,
 	progressDB *gorm.DB,
 	timelineDB *gorm.DB,
@@ -414,6 +422,7 @@ func readinessSnapshotFromConfig(
 		[]observability.DependencyStatus{
 			dependencyStatus("postgres", db != nil, distributedAuthority || strings.TrimSpace(config.DatabaseURL) != ""),
 			dependencyStatus("identity_postgres", identityDB != nil, !isRPCMode(config.ServiceClients.IdentityMode) && strings.TrimSpace(config.IdentityDatabaseURL) != ""),
+			dependencyStatus("room_postgres", roomDB != nil, !isRPCMode(config.ServiceClients.RoomMode) && strings.TrimSpace(config.RoomDatabaseURL) != ""),
 			dependencyStatus("media_postgres", mediaDB != nil, !isRPCMode(config.ServiceClients.MediaMode) && strings.TrimSpace(config.MediaDatabaseURL) != ""),
 			dependencyStatus("progress_postgres", progressDB != nil, !isRPCMode(config.ServiceClients.ProgressMode) && strings.TrimSpace(config.ProgressDatabaseURL) != ""),
 			dependencyStatus("timeline_postgres", timelineDB != nil, !isRPCMode(config.ServiceClients.TimelineMode) && strings.TrimSpace(config.TimelineDatabaseURL) != ""),
@@ -775,26 +784,33 @@ func newTimelineOutboxStore(db *gorm.DB, timelineDB *gorm.DB, config Config) *st
 // newRoomService connects room business APIs to the shared PostgreSQL handle when available.
 func newRoomService(
 	db *gorm.DB,
+	roomDB *gorm.DB,
 	mediaService *media.Service,
+	identityService auth.IdentityService,
 	config Config,
 	service servicekit.Config,
-) (roomapi.BusinessService, *store.PostgresRoomStore) {
-	var roomStore *store.PostgresRoomStore
-	if db != nil {
-		roomStore = store.NewPostgresRoomStore(db)
-	}
+) (roomapi.BusinessService, roomapi.BusinessService) {
 	if isRPCMode(config.ServiceClients.RoomMode) {
-		return roomapi.NewRPCClient(config.ServiceClients.RoomAddr, internalRPCClientConfig(config, service)), roomStore
+		client := roomapi.NewRPCClient(config.ServiceClients.RoomAddr, internalRPCClientConfig(config, service))
+		return client, client
 	}
-	if db == nil {
+	var storeDB *gorm.DB
+	if strings.TrimSpace(config.RoomDatabaseURL) != "" {
+		storeDB = roomDB
+	} else {
+		storeDB = db
+	}
+	if storeDB == nil {
 		return nil, nil
 	}
 	if mediaService == nil {
-		return nil, roomStore
+		return nil, nil
 	}
 	var mediaLookup roomapi.MediaDetailLookup
 	mediaLookup = mediaService
-	return roomapi.NewServiceWithMediaLookup(roomStore, mediaLookup), roomStore
+	roomStore := store.NewPostgresRoomStore(storeDB)
+	roomService := roomapi.NewServiceWithBoundaries(roomStore, mediaLookup, identityService)
+	return roomService, roomService
 }
 
 // newProgressService connects progress APIs to local storage or the progress RPC boundary.
@@ -826,7 +842,7 @@ func newProgressService(
 func startPersistentRoomCleanupLoop(
 	ctx context.Context,
 	interval time.Duration,
-	roomStore *store.PostgresRoomStore,
+	roomLifecycle roomapi.BusinessService,
 	roomStateCache *cache.RoomStateCache,
 ) {
 	ticker := time.NewTicker(interval)
@@ -837,7 +853,7 @@ func startPersistentRoomCleanupLoop(
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			roomCodes, err := roomStore.CleanupExpiredRoomCodes(context.Background(), time.Now())
+			roomCodes, err := roomLifecycle.CleanupExpiredRoomCodes(context.Background(), time.Now())
 			if err != nil {
 				log.Printf("failed to cleanup expired rooms in postgres: %v", err)
 				continue
@@ -882,7 +898,7 @@ func startAuthorityRenewLoop(
 
 func installRoomLifecycleHooks(
 	roomManager *room.Manager,
-	roomStore *store.PostgresRoomStore,
+	roomLifecycle roomapi.BusinessService,
 	roomStateCache *cache.RoomStateCache,
 ) {
 	if roomManager == nil {
@@ -890,22 +906,22 @@ func installRoomLifecycleHooks(
 	}
 	roomManager.SetLifecycleHooks(room.LifecycleHooks{
 		OnRoomBecameEmpty: func(roomID string, emptySince time.Time, destroyAfter time.Time) {
-			if roomStore != nil {
-				if err := roomStore.MarkRoomGracePeriod(context.Background(), roomID, emptySince, destroyAfter); err != nil {
+			if roomLifecycle != nil {
+				if err := roomLifecycle.MarkRoomGracePeriod(context.Background(), roomID, emptySince, destroyAfter); err != nil {
 					log.Printf("failed to mark room %s grace_period: %v", roomID, err)
 				}
 			}
 		},
 		OnRoomReactivated: func(roomID string) {
-			if roomStore != nil {
-				if err := roomStore.MarkRoomActive(context.Background(), roomID); err != nil {
+			if roomLifecycle != nil {
+				if err := roomLifecycle.MarkRoomActive(context.Background(), roomID); err != nil {
 					log.Printf("failed to reactivate room %s: %v", roomID, err)
 				}
 			}
 		},
 		OnRoomDestroyed: func(roomID string) {
-			if roomStore != nil {
-				if err := roomStore.DestroyRoom(context.Background(), roomID); err != nil {
+			if roomLifecycle != nil {
+				if err := roomLifecycle.DestroyRoom(context.Background(), roomID); err != nil {
 					log.Printf("failed to destroy room %s: %v", roomID, err)
 				}
 			}
@@ -1002,7 +1018,17 @@ func (s *Server) Close() error {
 			closeErr = err
 		}
 	}
-	if s.mediaDB != nil && s.mediaDB != s.db && s.mediaDB != s.identityDB {
+	if s.roomDB != nil && s.roomDB != s.db && s.roomDB != s.identityDB {
+		sqlDB, err := s.roomDB.DB()
+		if err != nil {
+			if closeErr == nil {
+				closeErr = err
+			}
+		} else if err := sqlDB.Close(); err != nil && closeErr == nil {
+			closeErr = err
+		}
+	}
+	if s.mediaDB != nil && s.mediaDB != s.db && s.mediaDB != s.identityDB && s.mediaDB != s.roomDB {
 		sqlDB, err := s.mediaDB.DB()
 		if err != nil {
 			if closeErr == nil {
@@ -1012,7 +1038,7 @@ func (s *Server) Close() error {
 			closeErr = err
 		}
 	}
-	if s.progressDB != nil && s.progressDB != s.db && s.progressDB != s.identityDB && s.progressDB != s.mediaDB {
+	if s.progressDB != nil && s.progressDB != s.db && s.progressDB != s.identityDB && s.progressDB != s.roomDB && s.progressDB != s.mediaDB {
 		sqlDB, err := s.progressDB.DB()
 		if err != nil {
 			if closeErr == nil {
@@ -1022,7 +1048,7 @@ func (s *Server) Close() error {
 			closeErr = err
 		}
 	}
-	if s.timelineDB != nil && s.timelineDB != s.db && s.timelineDB != s.identityDB && s.timelineDB != s.mediaDB && s.timelineDB != s.progressDB {
+	if s.timelineDB != nil && s.timelineDB != s.db && s.timelineDB != s.identityDB && s.timelineDB != s.roomDB && s.timelineDB != s.mediaDB && s.timelineDB != s.progressDB {
 		sqlDB, err := s.timelineDB.DB()
 		if err != nil {
 			if closeErr == nil {

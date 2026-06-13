@@ -14,6 +14,7 @@ import (
 	"syscall"
 	"time"
 
+	"watch_together/server/internal/auth"
 	wtconfig "watch_together/server/internal/config"
 	"watch_together/server/internal/internalrpc"
 	"watch_together/server/internal/media"
@@ -65,22 +66,44 @@ func main() {
 		_ = telemetry.Shutdown(shutdownCtx, shutdownTelemetry)
 	}()
 
-	db, err := store.OpenPostgres(ctx, runtimeConfig.DatabaseURL)
+	mainDB, err := store.OpenPostgres(ctx, runtimeConfig.DatabaseURL)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "connect postgres: %v\n", err)
 		os.Exit(1)
 	}
-	sqlDB, err := db.DB()
+	mainSQLDB, err := mainDB.DB()
 	if err == nil {
-		defer sqlDB.Close()
+		defer mainSQLDB.Close()
 	}
 
-	mediaService := newMediaBoundary(ctx, runtimeConfig, serviceConfig, db)
+	roomDB := mainDB
+	var roomSQLDB *sql.DB
+	if strings.TrimSpace(runtimeConfig.RoomDatabaseURL) != "" {
+		opened, err := store.OpenPostgres(ctx, runtimeConfig.RoomDatabaseURL)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "connect room_postgres: %v\n", err)
+			os.Exit(1)
+		}
+		roomDB = opened
+		if sqlDB, err := opened.DB(); err == nil {
+			roomSQLDB = sqlDB
+			defer sqlDB.Close()
+		}
+	} else {
+		roomSQLDB = mainSQLDB
+	}
+
+	identityService := newIdentityBoundary(runtimeConfig, serviceConfig, mainDB)
+	if identityService == nil {
+		fmt.Fprintln(os.Stderr, "identity boundary is required for roomservice")
+		os.Exit(1)
+	}
+	mediaService := newMediaBoundary(ctx, runtimeConfig, serviceConfig, mainDB)
 	if mediaService == nil {
 		fmt.Fprintln(os.Stderr, "media boundary is required for roomservice")
 		os.Exit(1)
 	}
-	roomService := roomapi.NewServiceWithMediaLookup(store.NewPostgresRoomStore(db), mediaService)
+	roomService := roomapi.NewServiceWithBoundaries(store.NewPostgresRoomStore(roomDB), mediaService, identityService)
 	metrics := observability.NewMetrics()
 	mux := http.NewServeMux()
 	installServiceEndpoints(
@@ -88,7 +111,7 @@ func main() {
 		runtimeConfig,
 		serviceConfig,
 		metrics,
-		sqlDB,
+		roomSQLDB,
 	)
 	roomapi.RegisterInternalRPC(mux, runtimeConfig.InternalRPC.PathPrefix, runtimeConfig.InternalRPC.AuthToken, roomService)
 
@@ -150,6 +173,25 @@ func newMediaBoundary(
 	return media.NewService(store.NewPostgresMediaStore(mediaDB))
 }
 
+func newIdentityBoundary(
+	config wtconfig.ServerRuntimeConfig,
+	service servicekit.Config,
+	db *gorm.DB,
+) auth.IdentityService {
+	if strings.EqualFold(strings.TrimSpace(config.ServiceClients.IdentityMode), "rpc") {
+		return auth.NewRPCClient(config.ServiceClients.IdentityAddr, internalrpc.ClientConfig{
+			PathPrefix: config.InternalRPC.PathPrefix,
+			Timeout:    time.Duration(config.InternalRPC.TimeoutMs) * time.Millisecond,
+			AuthToken:  config.InternalRPC.AuthToken,
+			Service:    service,
+		})
+	}
+	if db == nil {
+		return nil
+	}
+	return auth.NewService(store.NewPostgresUserStore(db))
+}
+
 func installServiceEndpoints(
 	mux *http.ServeMux,
 	config wtconfig.ServerRuntimeConfig,
@@ -191,14 +233,15 @@ func roomserviceReadiness(ctx context.Context, config wtconfig.ServerRuntimeConf
 		config.InstanceID,
 		"roomservice",
 		[]observability.DependencyStatus{
-			postgresDependency(ctx, sqlDB),
+			roomPostgresDependency(ctx, sqlDB),
 			{Name: "internal_rpc", Status: "ok", Required: true},
+			roomIdentityDependency(ctx, config),
 			roomMediaDependency(ctx, config),
 		},
 	)
 }
 
-func postgresDependency(ctx context.Context, sqlDB *sql.DB) observability.DependencyStatus {
+func roomPostgresDependency(ctx context.Context, sqlDB *sql.DB) observability.DependencyStatus {
 	status := "unavailable"
 	if sqlDB != nil {
 		pingCtx, cancel := context.WithTimeout(ctx, 200*time.Millisecond)
@@ -207,16 +250,27 @@ func postgresDependency(ctx context.Context, sqlDB *sql.DB) observability.Depend
 			status = "ok"
 		}
 	}
-	return observability.DependencyStatus{Name: "postgres", Status: status, Required: true}
+	return observability.DependencyStatus{Name: "room_postgres", Status: status, Required: true}
+}
+
+func roomIdentityDependency(ctx context.Context, config wtconfig.ServerRuntimeConfig) observability.DependencyStatus {
+	if !strings.EqualFold(strings.TrimSpace(config.ServiceClients.IdentityMode), "rpc") {
+		return observability.DependencyStatus{Name: "identity_rpc", Status: "disabled", Required: false}
+	}
+	return rpcReadinessDependency(ctx, "identity_rpc", config.ServiceClients.IdentityAddr, config)
 }
 
 func roomMediaDependency(ctx context.Context, config wtconfig.ServerRuntimeConfig) observability.DependencyStatus {
 	if !strings.EqualFold(strings.TrimSpace(config.ServiceClients.MediaMode), "rpc") {
 		return observability.DependencyStatus{Name: "media_rpc", Status: "disabled", Required: false}
 	}
-	baseURL := internalrpc.NormalizeBaseURL(config.ServiceClients.MediaAddr)
+	return rpcReadinessDependency(ctx, "media_rpc", config.ServiceClients.MediaAddr, config)
+}
+
+func rpcReadinessDependency(ctx context.Context, name string, addr string, config wtconfig.ServerRuntimeConfig) observability.DependencyStatus {
+	baseURL := internalrpc.NormalizeBaseURL(addr)
 	if baseURL == "" {
-		return observability.DependencyStatus{Name: "media_rpc", Status: "unavailable", Required: true}
+		return observability.DependencyStatus{Name: name, Status: "unavailable", Required: true}
 	}
 	readinessPath := strings.TrimSpace(config.Observability.ReadinessPath)
 	if readinessPath == "" {
@@ -229,21 +283,21 @@ func roomMediaDependency(ctx context.Context, config wtconfig.ServerRuntimeConfi
 	defer cancel()
 	request, err := http.NewRequestWithContext(probeCtx, http.MethodGet, strings.TrimRight(baseURL, "/")+readinessPath, nil)
 	if err != nil {
-		return observability.DependencyStatus{Name: "media_rpc", Status: "unavailable", Required: true}
+		return observability.DependencyStatus{Name: name, Status: "unavailable", Required: true}
 	}
 	response, err := (&http.Client{Timeout: 300 * time.Millisecond}).Do(request)
 	if err != nil {
-		return observability.DependencyStatus{Name: "media_rpc", Status: "unavailable", Required: true}
+		return observability.DependencyStatus{Name: name, Status: "unavailable", Required: true}
 	}
 	defer response.Body.Close()
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return observability.DependencyStatus{Name: "media_rpc", Status: "unavailable", Required: true}
+		return observability.DependencyStatus{Name: name, Status: "unavailable", Required: true}
 	}
 	var snapshot observability.ReadinessSnapshot
 	if err := json.NewDecoder(response.Body).Decode(&snapshot); err != nil || snapshot.Status != "ready" {
-		return observability.DependencyStatus{Name: "media_rpc", Status: "unavailable", Required: true}
+		return observability.DependencyStatus{Name: name, Status: "unavailable", Required: true}
 	}
-	return observability.DependencyStatus{Name: "media_rpc", Status: "ok", Required: true}
+	return observability.DependencyStatus{Name: name, Status: "ok", Required: true}
 }
 
 func serviceName(configured string, fallback string) string {

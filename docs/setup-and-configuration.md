@@ -165,6 +165,8 @@ MEDIA_STORAGE_FORCE_PATH_STYLE=true
 
 If `DATABASE_URL` is empty or PostgreSQL cannot be opened, database-backed HTTP endpoints return `503`. If `IDENTITY_DATABASE_URL` is set, local identity mode and `cmd/identityservice` use it for identity-owned tables and `/readyz` reports that dependency as `identity_postgres`; if it is empty, identity uses the main `DATABASE_URL`. In `IDENTITY_SERVICE_MODE=rpc`, `roomserver` does not connect to the identity database directly. Identity data still uses the main `users` table by default.
 
+If `ROOM_DATABASE_URL` is set, local room mode and `cmd/roomservice` use it for `rooms` and `room_members`; if it is empty, room storage uses the main `DATABASE_URL`. In `ROOM_SERVICE_MODE=rpc`, `roomserver` does not connect to the room database directly and rejects a non-empty `ROOM_DATABASE_URL`; compose app/prod paths pass the room URL only to `cmd/roomservice`. Room database migrations live under `server/room_migrations`, and `cmd/roomdbsync` can copy/verify the main-database shadow tables.
+
 If `MEDIA_DATABASE_URL` is set, local media mode and `cmd/mediaservice` use it for media-owned tables and `/readyz` reports that dependency as `media_postgres`; if it is empty, media uses the main `DATABASE_URL`. In `MEDIA_SERVICE_MODE=rpc`, `roomserver` does not connect to the media database directly.
 
 If `TIMELINE_DATABASE_URL` is set, local timeline mode, `cmd/timelineservice`, and `cmd/outboxworker` use it for `room_timeline_outbox` and `/readyz` reports that dependency as `timeline_postgres`; if it is empty, timeline uses the main `DATABASE_URL`. In `TIMELINE_SERVICE_MODE=rpc`, `roomserver` does not connect to the timeline database directly and rejects a non-empty `TIMELINE_DATABASE_URL`; compose app/prod paths default to this RPC mode and leave the roomserver timeline DB URL empty. Set `TIMELINE_SERVICE_MODE=local` plus `ROOMSERVER_TIMELINE_DATABASE_URL` only for explicit compose rollback. Timeline is fail-closed: if the configured timeline RPC or local timeline database is unavailable, accepted distributed controls must not fall back to the main database or broadcast an accepted result.
@@ -215,7 +217,7 @@ Service foundation settings:
 - `SERVICE_NAME` and `SERVICE_VERSION` identify the current process in logs, internal RPC metadata, and traces.
 - `INTERNAL_RPC_*` configures optional ConnectRPC service endpoints. `INTERNAL_RPC_AUTH_TOKEN` protects internal calls when configured and is required for production internal RPC.
 - `SERVICE_DISCOVERY_MODE=static` is the only supported discovery mode in the current serviceized path.
-- `IDENTITY_SERVICE_MODE`, `ROOM_SERVICE_MODE`, `MEDIA_SERVICE_MODE`, `TIMELINE_SERVICE_MODE`, and `AUTHORITY_SERVICE_MODE` accept `local` or `rpc`. `local` keeps current in-process adapters. `rpc` calls `IDENTITY_SERVICE_ADDR`, `ROOM_SERVICE_ADDR`, `MEDIA_SERVICE_ADDR`, `TIMELINE_SERVICE_ADDR`, or `AUTHORITY_SERVICE_ADDR`.
+- `IDENTITY_SERVICE_MODE`, `ROOM_SERVICE_MODE`, `MEDIA_SERVICE_MODE`, `PROGRESS_SERVICE_MODE`, `HOME_SERVICE_MODE`, `TIMELINE_SERVICE_MODE`, and `AUTHORITY_SERVICE_MODE` accept `local` or `rpc`. `local` keeps current in-process adapters. `rpc` calls the matching `*_SERVICE_ADDR`.
 - `AUTHORITY_SERVICE_MODE=rpc` also requires `AUTHORITY_LEASE_INSTANCE_ID`, which is the Redis authority lease owner claimed during HTTP room bootstrap for the authority service.
 - `OTEL_TRACING_ENABLED` turns on OpenTelemetry tracing. `OTEL_EXPORTER_OTLP_ENDPOINT` points at the internal OTLP collector, and `OTEL_TRACE_SAMPLE_RATIO` must be between `0` and `1`.
 - Phase 9 keeps the old single-database fallback but can put media-owned tables in an independent PostgreSQL database through `MEDIA_DATABASE_URL`. Phase 10 does the same for timeline-owned outbox rows through `TIMELINE_DATABASE_URL`. Phase 11 makes timeline RPC the compose default while preserving `local` as an explicit single-process rollback path, Phase 12 moves result timeline ownership into `cmd/timelineservice`, Phase 13 documents the authority boundary, Phase 14 adds a non-default `roomauthorityservice` RPC pilot under `rpc-pilot`, Phase 15 hardens that pilot with dynamic readiness, metrics, stable failure tests, and lease identity naming, Phase 16 makes local compose `app` default to media/timeline/authority RPC, and Phase 17/18 adds identity RPC to the same local app baseline. Table owners and future split rules are documented in [Database Ownership](./database-ownership.md) and enforced from `server/internal/store/db_ownership.yaml`.
@@ -229,9 +231,18 @@ cd server
 APP_ENV=local go run ./cmd/outboxworker
 APP_ENV=local go run ./cmd/derivedworker
 APP_ENV=local INTERNAL_RPC_ADDR=:8093 go run ./cmd/identityservice
-APP_ENV=local INTERNAL_RPC_ADDR=:8094 MEDIA_SERVICE_MODE=local go run ./cmd/roomservice
+APP_ENV=local INTERNAL_RPC_ADDR=:8094 IDENTITY_SERVICE_MODE=local MEDIA_SERVICE_MODE=local go run ./cmd/roomservice
 APP_ENV=local INTERNAL_RPC_ADDR=:8090 go run ./cmd/mediaservice
 APP_ENV=local INTERNAL_RPC_ADDR=:8091 go run ./cmd/timelineservice
+```
+
+Room database helpers:
+
+```bash
+cd server
+ROOM_DATABASE_URL=postgres://app:app@127.0.0.1:5432/anime_watch_room_dev?sslmode=disable make room-migration-up
+go run ./cmd/roomdbsync --dry-run
+go run ./cmd/roomdbsync --verify-only
 ```
 
 Generate and lint internal RPC contracts:

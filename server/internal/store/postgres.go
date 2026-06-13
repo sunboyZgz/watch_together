@@ -96,6 +96,21 @@ func (s *PostgresUserStore) FindUserByID(ctx context.Context, userID string) (au
 	return userFromModel(dbUser), nil
 }
 
+func (s *PostgresUserStore) FindUsersByIDs(ctx context.Context, userIDs []string) ([]auth.User, error) {
+	if len(userIDs) == 0 {
+		return nil, nil
+	}
+	var dbUsers []model.User
+	if err := s.db.WithContext(ctx).Where("id IN ?", userIDs).Find(&dbUsers).Error; err != nil {
+		return nil, fmt.Errorf("find users by ids: %w", err)
+	}
+	users := make([]auth.User, 0, len(dbUsers))
+	for _, dbUser := range dbUsers {
+		users = append(users, userFromModel(dbUser))
+	}
+	return users, nil
+}
+
 type rowScanner interface {
 	Scan(dest ...any) error
 }

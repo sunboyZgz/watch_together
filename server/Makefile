@@ -2,8 +2,9 @@ MIGRATIONS_DIR := ./migrations
 MEDIA_MIGRATIONS_DIR := ./media_migrations
 TIMELINE_MIGRATIONS_DIR := ./timeline_migrations
 PROGRESS_MIGRATIONS_DIR := ./progress_migrations
+ROOM_MIGRATIONS_DIR := ./room_migrations
 
-.PHONY: migration-create migration-up migration-down migration-version media-migration-up media-migration-down media-migration-version timeline-migration-up timeline-migration-down timeline-migration-version progress-migration-up progress-migration-down progress-migration-version proto-lint proto-generate verify-phase8 verify-phase9 verify-phase10 verify-phase11 verify-phase16
+.PHONY: migration-create migration-up migration-down migration-version media-migration-up media-migration-down media-migration-version timeline-migration-up timeline-migration-down timeline-migration-version progress-migration-up progress-migration-down progress-migration-version room-migration-up room-migration-down room-migration-version proto-lint proto-generate verify-phase8 verify-phase9 verify-phase10 verify-phase11 verify-phase16
 
 migration-create:
 	@test -n "$(name)" || (echo "usage: make migration-create name=create_users_table" && exit 1)
@@ -53,6 +54,18 @@ progress-migration-down:
 progress-migration-version:
 	@test -n "$$PROGRESS_DATABASE_URL" || (echo "PROGRESS_DATABASE_URL is required" && exit 1)
 	@MIGRATIONS_DIR=$(PROGRESS_MIGRATIONS_DIR) DATABASE_URL="$$PROGRESS_DATABASE_URL" ./scripts/migrate.sh version
+
+room-migration-up:
+	@test -n "$$ROOM_DATABASE_URL" || (echo "ROOM_DATABASE_URL is required" && exit 1)
+	@MIGRATIONS_DIR=$(ROOM_MIGRATIONS_DIR) DATABASE_URL="$$ROOM_DATABASE_URL" ./scripts/migrate.sh up
+
+room-migration-down:
+	@test -n "$$ROOM_DATABASE_URL" || (echo "ROOM_DATABASE_URL is required" && exit 1)
+	@MIGRATIONS_DIR=$(ROOM_MIGRATIONS_DIR) DATABASE_URL="$$ROOM_DATABASE_URL" ./scripts/migrate.sh down 1
+
+room-migration-version:
+	@test -n "$$ROOM_DATABASE_URL" || (echo "ROOM_DATABASE_URL is required" && exit 1)
+	@MIGRATIONS_DIR=$(ROOM_MIGRATIONS_DIR) DATABASE_URL="$$ROOM_DATABASE_URL" ./scripts/migrate.sh version
 
 proto-lint:
 	@cd .. && buf lint

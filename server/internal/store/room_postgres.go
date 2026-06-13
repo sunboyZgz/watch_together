@@ -25,12 +25,6 @@ func NewPostgresRoomStore(db *gorm.DB) *PostgresRoomStore {
 func (s *PostgresRoomStore) CreateRoom(ctx context.Context, params roomapi.CreateRoomParams) (roomapi.CreateRoomResult, error) {
 	var result roomapi.CreateRoomResult
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if exists, err := rowExists(ctx, tx, `SELECT 1 FROM users WHERE id = ?`, params.HostUserID); err != nil {
-			return fmt.Errorf("check host user: %w", err)
-		} else if !exists {
-			return roomapi.ErrUserNotFound
-		}
-
 		const insertRoom = `
 			INSERT INTO rooms (room_code, host_user_id, media_episode_id, status)
 			VALUES (?, ?, ?, 'active')
@@ -74,12 +68,6 @@ func (s *PostgresRoomStore) CreateRoom(ctx context.Context, params roomapi.Creat
 func (s *PostgresRoomStore) JoinRoomByCode(ctx context.Context, params roomapi.JoinRoomParams) (roomapi.JoinRoomResult, error) {
 	var result roomapi.JoinRoomResult
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if exists, err := rowExists(ctx, tx, `SELECT 1 FROM users WHERE id = ?`, params.UserID); err != nil {
-			return fmt.Errorf("check join user: %w", err)
-		} else if !exists {
-			return roomapi.ErrUserNotFound
-		}
-
 		room, err := findActiveRoomByCode(ctx, tx, params.RoomCode)
 		if err != nil {
 			return err
@@ -181,9 +169,8 @@ func (s *PostgresRoomStore) GetRoomDetail(ctx context.Context, roomCode string) 
 
 func findActiveMembers(ctx context.Context, tx *gorm.DB, roomID string) ([]roomapi.Member, error) {
 	const query = `
-		SELECT users.id::text, users.nickname, users.avatar_seed, users.avatar_url, room_members.role
+		SELECT room_members.user_id::text, room_members.role
 		FROM room_members
-		INNER JOIN users ON users.id = room_members.user_id
 		WHERE room_members.room_id = ? AND room_members.is_active = true
 		ORDER BY
 			CASE room_members.role WHEN 'host' THEN 0 ELSE 1 END,
@@ -198,17 +185,12 @@ func findActiveMembers(ctx context.Context, tx *gorm.DB, roomID string) ([]rooma
 	members := make([]roomapi.Member, 0)
 	for rows.Next() {
 		var member roomapi.Member
-		var avatarURL sql.NullString
 		if err := rows.Scan(
 			&member.UserID,
-			&member.Nickname,
-			&member.AvatarSeed,
-			&avatarURL,
 			&member.Role,
 		); err != nil {
 			return nil, fmt.Errorf("scan active member: %w", err)
 		}
-		member.AvatarURL = nullableStringPtr(avatarURL)
 		members = append(members, member)
 	}
 	if err := rows.Err(); err != nil {
@@ -237,6 +219,14 @@ func findActiveRoomByCode(ctx context.Context, tx *gorm.DB, roomCode string) (ro
 		return roomapi.Room{}, fmt.Errorf("find active room by code: %w", err)
 	}
 	return room, nil
+}
+
+func (s *PostgresRoomStore) GetRoomRuntimeBootstrap(ctx context.Context, roomCode string) (roomapi.RuntimeBootstrapResult, error) {
+	room, err := findActiveRoomByCode(ctx, s.db, roomCode)
+	if err != nil {
+		return roomapi.RuntimeBootstrapResult{}, err
+	}
+	return roomapi.RuntimeBootstrapResult{Room: room}, nil
 }
 
 func findActiveMember(ctx context.Context, tx *gorm.DB, roomID string, userID string) (roomapi.Member, error) {

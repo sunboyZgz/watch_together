@@ -11,6 +11,7 @@ service IdentityInternalService {
   rpc Login(LoginRequest) returns (LoginResponse);
   rpc VerifyAccessToken(VerifyAccessTokenRequest) returns (VerifyAccessTokenResponse);
   rpc GetUserProfile(GetUserProfileRequest) returns (GetUserProfileResponse);
+  rpc BatchGetUserProfiles(BatchGetUserProfilesRequest) returns (BatchGetUserProfilesResponse);
 }
 
 message RegisterRequest {
@@ -52,6 +53,15 @@ message GetUserProfileRequest {
 
 message GetUserProfileResponse {
   IdentityUser user = 1;
+}
+
+message BatchGetUserProfilesRequest {
+  RequestMetadata metadata = 1;
+  repeated string user_ids = 2;
+}
+
+message BatchGetUserProfilesResponse {
+  repeated IdentityUser users = 1;
 }
 
 message IdentityUser {

@@ -27,7 +27,7 @@ type AuthorityRegistry interface {
 }
 
 type RoomDetailStore interface {
-	GetRoomDetail(ctx context.Context, roomCode string) (roomapi.DetailResult, error)
+	RuntimeBootstrapByCode(ctx context.Context, roomCode string) (roomapi.RuntimeBootstrapResult, error)
 }
 
 type RecoverableRoomStore interface {
@@ -126,11 +126,11 @@ func (s *Service) TryRecoverRoomAuthority(ctx context.Context, roomID string, re
 		return Result{Lease: lease}, ErrAuthorityActive
 	}
 
-	detail, err := s.roomStore.GetRoomDetail(recoveryCtx, roomID)
+	bootstrap, err := s.roomStore.RuntimeBootstrapByCode(recoveryCtx, roomID)
 	if err != nil {
 		return Result{Lease: lease}, fmt.Errorf("load room metadata: %w", err)
 	}
-	state := baseStateFromRoomDetail(detail, s.now())
+	state := baseStateFromRoomBootstrap(bootstrap, s.now())
 
 	events, err := s.timeline.ReadRoomRecoveryEvents(recoveryCtx, roomID)
 	if err != nil {
@@ -335,7 +335,7 @@ func applyPlaybackPayload(
 	return state
 }
 
-func baseStateFromRoomDetail(detail roomapi.DetailResult, now time.Time) room.State {
+func baseStateFromRoomBootstrap(detail roomapi.RuntimeBootstrapResult, now time.Time) room.State {
 	return room.State{
 		RoomID:          detail.Room.RoomCode,
 		MediaID:         detail.Room.MediaItemID,
@@ -351,8 +351,8 @@ func baseStateFromRoomDetail(detail roomapi.DetailResult, now time.Time) room.St
 	}
 }
 
-func BaseStateFromRoomDetail(detail roomapi.DetailResult, now time.Time) room.State {
-	return baseStateFromRoomDetail(detail, now)
+func BaseStateFromRoomBootstrap(detail roomapi.RuntimeBootstrapResult, now time.Time) room.State {
+	return baseStateFromRoomBootstrap(detail, now)
 }
 
 func roomStatePayload(state room.State) protocol.RoomStatePayload {

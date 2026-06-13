@@ -70,6 +70,24 @@ services:
       fi;
       "
 
+  room-postgres-init:
+    image: postgres:16-alpine
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-watch_together}
+      PGPASSWORD: ${POSTGRES_PASSWORD:-change_me_postgres_password}
+      POSTGRES_DB: ${POSTGRES_DB:-watch_together_prod}
+      ROOM_POSTGRES_DB: ${ROOM_POSTGRES_DB:-watch_together_room_prod}
+    entrypoint: >
+      /bin/sh -c "
+      if ! psql -h postgres -U \"$${POSTGRES_USER}\" -d postgres -tAc \"SELECT 1 FROM pg_database WHERE datname = '$${ROOM_POSTGRES_DB}'\" | grep -q 1; then
+        createdb -h postgres -U \"$${POSTGRES_USER}\" \"$${ROOM_POSTGRES_DB}\";
+      fi;
+      "
+
   redis:
     image: redis:7.2-alpine
     restart: unless-stopped
@@ -204,6 +222,7 @@ services:
       IDENTITY_DATABASE_URL: ${ROOMSERVER_IDENTITY_DATABASE_URL:-}
       ROOM_SERVICE_MODE: ${ROOM_SERVICE_MODE:-rpc}
       ROOM_SERVICE_ADDR: ${ROOM_SERVICE_ADDR:-http://roomservice:8090}
+      ROOM_DATABASE_URL: ${ROOMSERVER_ROOM_DATABASE_URL:-}
       MEDIA_SERVICE_MODE: ${MEDIA_SERVICE_MODE:-rpc}
       MEDIA_SERVICE_ADDR: ${MEDIA_SERVICE_ADDR:-http://mediaservice:8090}
       MEDIA_DATABASE_URL: ${ROOMSERVER_MEDIA_DATABASE_URL:-}
@@ -354,6 +373,10 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      room-postgres-init:
+        condition: service_completed_successfully
+      identityservice:
+        condition: service_started
       mediaservice:
         condition: service_started
     env_file:
@@ -370,6 +393,9 @@ services:
       METRICS_PATH: ${METRICS_PATH:-/metrics}
       READINESS_PATH: ${READINESS_PATH:-/readyz}
       DATABASE_URL: postgres://${POSTGRES_USER:-watch_together}:${POSTGRES_PASSWORD:-change_me_postgres_password}@postgres:5432/${POSTGRES_DB:-watch_together_prod}?sslmode=disable
+      ROOM_DATABASE_URL: postgres://${POSTGRES_USER:-watch_together}:${POSTGRES_PASSWORD:-change_me_postgres_password}@postgres:5432/${ROOM_POSTGRES_DB:-watch_together_room_prod}?sslmode=disable
+      IDENTITY_SERVICE_MODE: rpc
+      IDENTITY_SERVICE_ADDR: http://identityservice:8090
       MEDIA_SERVICE_MODE: rpc
       MEDIA_SERVICE_ADDR: http://mediaservice:8090
       OTEL_TRACING_ENABLED: ${OTEL_TRACING_ENABLED:-false}

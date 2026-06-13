@@ -67,6 +67,25 @@ services:
         createdb -h postgres -U app \"$${PROGRESS_POSTGRES_DB:-anime_watch_progress_dev}\";
       fi;
       "
+  room-postgres-init:
+    profiles: ["app", "services", "rpc-pilot"]
+    image: postgres:16
+    container_name: anime-watch-room-postgres-init
+    depends_on:
+      - postgres
+    restart: "no"
+    environment:
+      PGPASSWORD: app
+      ROOM_POSTGRES_DB: ${ROOM_POSTGRES_DB:-anime_watch_room_dev}
+    entrypoint: >
+      /bin/sh -c "
+      until pg_isready -h postgres -U app -d anime_watch_dev; do
+        sleep 1;
+      done;
+      if ! psql -h postgres -U app -d postgres -tAc \"SELECT 1 FROM pg_database WHERE datname = '$${ROOM_POSTGRES_DB:-anime_watch_room_dev}'\" | grep -q 1; then
+        createdb -h postgres -U app \"$${ROOM_POSTGRES_DB:-anime_watch_room_dev}\";
+      fi;
+      "
   redis:
     image: redis:7.2-alpine
     container_name: anime-watch-redis
@@ -203,6 +222,7 @@ services:
       IDENTITY_DATABASE_URL: ${ROOMSERVER_IDENTITY_DATABASE_URL:-}
       ROOM_SERVICE_MODE: ${ROOMSERVER_ROOM_SERVICE_MODE:-rpc}
       ROOM_SERVICE_ADDR: ${ROOMSERVER_ROOM_SERVICE_ADDR:-http://roomservice:8090}
+      ROOM_DATABASE_URL: ${ROOMSERVER_ROOM_DATABASE_URL:-}
       MEDIA_SERVICE_MODE: ${ROOMSERVER_MEDIA_SERVICE_MODE:-rpc}
       MEDIA_SERVICE_ADDR: ${ROOMSERVER_MEDIA_SERVICE_ADDR:-http://mediaservice:8090}
       MEDIA_DATABASE_URL: ${ROOMSERVER_MEDIA_DATABASE_URL:-}
@@ -302,6 +322,8 @@ services:
     restart: unless-stopped
     depends_on:
       - postgres
+      - room-postgres-init
+      - identityservice
       - mediaservice
     env_file:
       - .env
@@ -317,6 +339,9 @@ services:
       METRICS_PATH: ${METRICS_PATH:-/metrics}
       READINESS_PATH: ${READINESS_PATH:-/readyz}
       DATABASE_URL: postgres://app:app@postgres:5432/anime_watch_dev?sslmode=disable
+      ROOM_DATABASE_URL: postgres://app:app@postgres:5432/${ROOM_POSTGRES_DB:-anime_watch_room_dev}?sslmode=disable
+      IDENTITY_SERVICE_MODE: rpc
+      IDENTITY_SERVICE_ADDR: http://identityservice:8090
       MEDIA_SERVICE_MODE: rpc
       MEDIA_SERVICE_ADDR: http://mediaservice:8090
       OTEL_TRACING_ENABLED: ${OTEL_TRACING_ENABLED:-false}
@@ -522,10 +547,9 @@ services:
     container_name: anime-watch-roomauthorityservice
     restart: unless-stopped
     depends_on:
-      - postgres
       - redis
       - nats
-      - timeline-postgres-init
+      - roomservice
       - timelineservice
     env_file:
       - .env
@@ -541,6 +565,8 @@ services:
       INTERNAL_RPC_AUTH_TOKEN: ${INTERNAL_RPC_AUTH_TOKEN:-}
       TIMELINE_SERVICE_MODE: rpc
       TIMELINE_SERVICE_ADDR: ${TIMELINE_SERVICE_ADDR:-http://timelineservice:8090}
+      ROOM_SERVICE_MODE: rpc
+      ROOM_SERVICE_ADDR: ${ROOM_SERVICE_ADDR:-http://roomservice:8090}
       WS_CROSS_INSTANCE_BROADCAST_ENABLED: "true"
       WS_EVENT_BUS: ${WS_EVENT_BUS:-nats_core}
       NATS_URL: ${NATS_URL:-nats://nats:4222}
@@ -558,7 +584,7 @@ services:
       OTEL_SERVICE_NAME: ${OTEL_SERVICE_NAME:-watch-together-roomauthorityservice}
       OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
       OTEL_TRACE_SAMPLE_RATIO: ${OTEL_TRACE_SAMPLE_RATIO:-0.1}
-      DATABASE_URL: postgres://app:app@postgres:5432/anime_watch_dev?sslmode=disable
+      DATABASE_URL: ""
       REDIS_ADDR: redis:6380
       REDIS_PASSWORD: ${REDIS_PASSWORD:-watch_together_redis_dev}
       REDIS_DB: 0

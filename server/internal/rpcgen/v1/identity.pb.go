@@ -445,6 +445,102 @@ func (x *GetUserProfileResponse) GetUser() *IdentityUser {
 	return nil
 }
 
+type BatchGetUserProfilesRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Metadata      *RequestMetadata       `protobuf:"bytes,1,opt,name=metadata,proto3" json:"metadata,omitempty"`
+	UserIds       []string               `protobuf:"bytes,2,rep,name=user_ids,json=userIds,proto3" json:"user_ids,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *BatchGetUserProfilesRequest) Reset() {
+	*x = BatchGetUserProfilesRequest{}
+	mi := &file_server_api_internal_v1_identity_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *BatchGetUserProfilesRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*BatchGetUserProfilesRequest) ProtoMessage() {}
+
+func (x *BatchGetUserProfilesRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_server_api_internal_v1_identity_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use BatchGetUserProfilesRequest.ProtoReflect.Descriptor instead.
+func (*BatchGetUserProfilesRequest) Descriptor() ([]byte, []int) {
+	return file_server_api_internal_v1_identity_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *BatchGetUserProfilesRequest) GetMetadata() *RequestMetadata {
+	if x != nil {
+		return x.Metadata
+	}
+	return nil
+}
+
+func (x *BatchGetUserProfilesRequest) GetUserIds() []string {
+	if x != nil {
+		return x.UserIds
+	}
+	return nil
+}
+
+type BatchGetUserProfilesResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Users         []*IdentityUser        `protobuf:"bytes,1,rep,name=users,proto3" json:"users,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *BatchGetUserProfilesResponse) Reset() {
+	*x = BatchGetUserProfilesResponse{}
+	mi := &file_server_api_internal_v1_identity_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *BatchGetUserProfilesResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*BatchGetUserProfilesResponse) ProtoMessage() {}
+
+func (x *BatchGetUserProfilesResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_server_api_internal_v1_identity_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use BatchGetUserProfilesResponse.ProtoReflect.Descriptor instead.
+func (*BatchGetUserProfilesResponse) Descriptor() ([]byte, []int) {
+	return file_server_api_internal_v1_identity_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *BatchGetUserProfilesResponse) GetUsers() []*IdentityUser {
+	if x != nil {
+		return x.Users
+	}
+	return nil
+}
+
 type IdentityUser struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
@@ -459,7 +555,7 @@ type IdentityUser struct {
 
 func (x *IdentityUser) Reset() {
 	*x = IdentityUser{}
-	mi := &file_server_api_internal_v1_identity_proto_msgTypes[8]
+	mi := &file_server_api_internal_v1_identity_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -471,7 +567,7 @@ func (x *IdentityUser) String() string {
 func (*IdentityUser) ProtoMessage() {}
 
 func (x *IdentityUser) ProtoReflect() protoreflect.Message {
-	mi := &file_server_api_internal_v1_identity_proto_msgTypes[8]
+	mi := &file_server_api_internal_v1_identity_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -484,7 +580,7 @@ func (x *IdentityUser) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use IdentityUser.ProtoReflect.Descriptor instead.
 func (*IdentityUser) Descriptor() ([]byte, []int) {
-	return file_server_api_internal_v1_identity_proto_rawDescGZIP(), []int{8}
+	return file_server_api_internal_v1_identity_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *IdentityUser) GetId() string {
@@ -558,7 +654,12 @@ const file_server_api_internal_v1_identity_proto_rawDesc = "" +
 	"\bmetadata\x18\x01 \x01(\v2+.watch_together.internal.v1.RequestMetadataR\bmetadata\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\"V\n" +
 	"\x16GetUserProfileResponse\x12<\n" +
-	"\x04user\x18\x01 \x01(\v2(.watch_together.internal.v1.IdentityUserR\x04user\"\xc7\x01\n" +
+	"\x04user\x18\x01 \x01(\v2(.watch_together.internal.v1.IdentityUserR\x04user\"\x81\x01\n" +
+	"\x1bBatchGetUserProfilesRequest\x12G\n" +
+	"\bmetadata\x18\x01 \x01(\v2+.watch_together.internal.v1.RequestMetadataR\bmetadata\x12\x19\n" +
+	"\buser_ids\x18\x02 \x03(\tR\auserIds\"^\n" +
+	"\x1cBatchGetUserProfilesResponse\x12>\n" +
+	"\x05users\x18\x01 \x03(\v2(.watch_together.internal.v1.IdentityUserR\x05users\"\xc7\x01\n" +
 	"\fIdentityUser\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x18\n" +
 	"\aaccount\x18\x02 \x01(\tR\aaccount\x12\x1a\n" +
@@ -569,12 +670,13 @@ const file_server_api_internal_v1_identity_proto_rawDesc = "" +
 	"avatar_url\x18\x05 \x01(\tH\x00R\tavatarUrl\x88\x01\x01\x12\x15\n" +
 	"\x03bio\x18\x06 \x01(\tH\x01R\x03bio\x88\x01\x01B\r\n" +
 	"\v_avatar_urlB\x06\n" +
-	"\x04_bio2\xda\x03\n" +
+	"\x04_bio2\xe6\x04\n" +
 	"\x17IdentityInternalService\x12e\n" +
 	"\bRegister\x12+.watch_together.internal.v1.RegisterRequest\x1a,.watch_together.internal.v1.RegisterResponse\x12\\\n" +
 	"\x05Login\x12(.watch_together.internal.v1.LoginRequest\x1a).watch_together.internal.v1.LoginResponse\x12\x80\x01\n" +
 	"\x11VerifyAccessToken\x124.watch_together.internal.v1.VerifyAccessTokenRequest\x1a5.watch_together.internal.v1.VerifyAccessTokenResponse\x12w\n" +
-	"\x0eGetUserProfile\x121.watch_together.internal.v1.GetUserProfileRequest\x1a2.watch_together.internal.v1.GetUserProfileResponseB5Z3watch_together/server/internal/rpcgen/v1;internalv1b\x06proto3"
+	"\x0eGetUserProfile\x121.watch_together.internal.v1.GetUserProfileRequest\x1a2.watch_together.internal.v1.GetUserProfileResponse\x12\x89\x01\n" +
+	"\x14BatchGetUserProfiles\x127.watch_together.internal.v1.BatchGetUserProfilesRequest\x1a8.watch_together.internal.v1.BatchGetUserProfilesResponseB5Z3watch_together/server/internal/rpcgen/v1;internalv1b\x06proto3"
 
 var (
 	file_server_api_internal_v1_identity_proto_rawDescOnce sync.Once
@@ -588,40 +690,46 @@ func file_server_api_internal_v1_identity_proto_rawDescGZIP() []byte {
 	return file_server_api_internal_v1_identity_proto_rawDescData
 }
 
-var file_server_api_internal_v1_identity_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
+var file_server_api_internal_v1_identity_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
 var file_server_api_internal_v1_identity_proto_goTypes = []any{
-	(*RegisterRequest)(nil),           // 0: watch_together.internal.v1.RegisterRequest
-	(*LoginRequest)(nil),              // 1: watch_together.internal.v1.LoginRequest
-	(*RegisterResponse)(nil),          // 2: watch_together.internal.v1.RegisterResponse
-	(*LoginResponse)(nil),             // 3: watch_together.internal.v1.LoginResponse
-	(*VerifyAccessTokenRequest)(nil),  // 4: watch_together.internal.v1.VerifyAccessTokenRequest
-	(*VerifyAccessTokenResponse)(nil), // 5: watch_together.internal.v1.VerifyAccessTokenResponse
-	(*GetUserProfileRequest)(nil),     // 6: watch_together.internal.v1.GetUserProfileRequest
-	(*GetUserProfileResponse)(nil),    // 7: watch_together.internal.v1.GetUserProfileResponse
-	(*IdentityUser)(nil),              // 8: watch_together.internal.v1.IdentityUser
-	(*RequestMetadata)(nil),           // 9: watch_together.internal.v1.RequestMetadata
+	(*RegisterRequest)(nil),              // 0: watch_together.internal.v1.RegisterRequest
+	(*LoginRequest)(nil),                 // 1: watch_together.internal.v1.LoginRequest
+	(*RegisterResponse)(nil),             // 2: watch_together.internal.v1.RegisterResponse
+	(*LoginResponse)(nil),                // 3: watch_together.internal.v1.LoginResponse
+	(*VerifyAccessTokenRequest)(nil),     // 4: watch_together.internal.v1.VerifyAccessTokenRequest
+	(*VerifyAccessTokenResponse)(nil),    // 5: watch_together.internal.v1.VerifyAccessTokenResponse
+	(*GetUserProfileRequest)(nil),        // 6: watch_together.internal.v1.GetUserProfileRequest
+	(*GetUserProfileResponse)(nil),       // 7: watch_together.internal.v1.GetUserProfileResponse
+	(*BatchGetUserProfilesRequest)(nil),  // 8: watch_together.internal.v1.BatchGetUserProfilesRequest
+	(*BatchGetUserProfilesResponse)(nil), // 9: watch_together.internal.v1.BatchGetUserProfilesResponse
+	(*IdentityUser)(nil),                 // 10: watch_together.internal.v1.IdentityUser
+	(*RequestMetadata)(nil),              // 11: watch_together.internal.v1.RequestMetadata
 }
 var file_server_api_internal_v1_identity_proto_depIdxs = []int32{
-	9,  // 0: watch_together.internal.v1.RegisterRequest.metadata:type_name -> watch_together.internal.v1.RequestMetadata
-	9,  // 1: watch_together.internal.v1.LoginRequest.metadata:type_name -> watch_together.internal.v1.RequestMetadata
-	8,  // 2: watch_together.internal.v1.RegisterResponse.user:type_name -> watch_together.internal.v1.IdentityUser
-	8,  // 3: watch_together.internal.v1.LoginResponse.user:type_name -> watch_together.internal.v1.IdentityUser
-	9,  // 4: watch_together.internal.v1.VerifyAccessTokenRequest.metadata:type_name -> watch_together.internal.v1.RequestMetadata
-	9,  // 5: watch_together.internal.v1.GetUserProfileRequest.metadata:type_name -> watch_together.internal.v1.RequestMetadata
-	8,  // 6: watch_together.internal.v1.GetUserProfileResponse.user:type_name -> watch_together.internal.v1.IdentityUser
-	0,  // 7: watch_together.internal.v1.IdentityInternalService.Register:input_type -> watch_together.internal.v1.RegisterRequest
-	1,  // 8: watch_together.internal.v1.IdentityInternalService.Login:input_type -> watch_together.internal.v1.LoginRequest
-	4,  // 9: watch_together.internal.v1.IdentityInternalService.VerifyAccessToken:input_type -> watch_together.internal.v1.VerifyAccessTokenRequest
-	6,  // 10: watch_together.internal.v1.IdentityInternalService.GetUserProfile:input_type -> watch_together.internal.v1.GetUserProfileRequest
-	2,  // 11: watch_together.internal.v1.IdentityInternalService.Register:output_type -> watch_together.internal.v1.RegisterResponse
-	3,  // 12: watch_together.internal.v1.IdentityInternalService.Login:output_type -> watch_together.internal.v1.LoginResponse
-	5,  // 13: watch_together.internal.v1.IdentityInternalService.VerifyAccessToken:output_type -> watch_together.internal.v1.VerifyAccessTokenResponse
-	7,  // 14: watch_together.internal.v1.IdentityInternalService.GetUserProfile:output_type -> watch_together.internal.v1.GetUserProfileResponse
-	11, // [11:15] is the sub-list for method output_type
-	7,  // [7:11] is the sub-list for method input_type
-	7,  // [7:7] is the sub-list for extension type_name
-	7,  // [7:7] is the sub-list for extension extendee
-	0,  // [0:7] is the sub-list for field type_name
+	11, // 0: watch_together.internal.v1.RegisterRequest.metadata:type_name -> watch_together.internal.v1.RequestMetadata
+	11, // 1: watch_together.internal.v1.LoginRequest.metadata:type_name -> watch_together.internal.v1.RequestMetadata
+	10, // 2: watch_together.internal.v1.RegisterResponse.user:type_name -> watch_together.internal.v1.IdentityUser
+	10, // 3: watch_together.internal.v1.LoginResponse.user:type_name -> watch_together.internal.v1.IdentityUser
+	11, // 4: watch_together.internal.v1.VerifyAccessTokenRequest.metadata:type_name -> watch_together.internal.v1.RequestMetadata
+	11, // 5: watch_together.internal.v1.GetUserProfileRequest.metadata:type_name -> watch_together.internal.v1.RequestMetadata
+	10, // 6: watch_together.internal.v1.GetUserProfileResponse.user:type_name -> watch_together.internal.v1.IdentityUser
+	11, // 7: watch_together.internal.v1.BatchGetUserProfilesRequest.metadata:type_name -> watch_together.internal.v1.RequestMetadata
+	10, // 8: watch_together.internal.v1.BatchGetUserProfilesResponse.users:type_name -> watch_together.internal.v1.IdentityUser
+	0,  // 9: watch_together.internal.v1.IdentityInternalService.Register:input_type -> watch_together.internal.v1.RegisterRequest
+	1,  // 10: watch_together.internal.v1.IdentityInternalService.Login:input_type -> watch_together.internal.v1.LoginRequest
+	4,  // 11: watch_together.internal.v1.IdentityInternalService.VerifyAccessToken:input_type -> watch_together.internal.v1.VerifyAccessTokenRequest
+	6,  // 12: watch_together.internal.v1.IdentityInternalService.GetUserProfile:input_type -> watch_together.internal.v1.GetUserProfileRequest
+	8,  // 13: watch_together.internal.v1.IdentityInternalService.BatchGetUserProfiles:input_type -> watch_together.internal.v1.BatchGetUserProfilesRequest
+	2,  // 14: watch_together.internal.v1.IdentityInternalService.Register:output_type -> watch_together.internal.v1.RegisterResponse
+	3,  // 15: watch_together.internal.v1.IdentityInternalService.Login:output_type -> watch_together.internal.v1.LoginResponse
+	5,  // 16: watch_together.internal.v1.IdentityInternalService.VerifyAccessToken:output_type -> watch_together.internal.v1.VerifyAccessTokenResponse
+	7,  // 17: watch_together.internal.v1.IdentityInternalService.GetUserProfile:output_type -> watch_together.internal.v1.GetUserProfileResponse
+	9,  // 18: watch_together.internal.v1.IdentityInternalService.BatchGetUserProfiles:output_type -> watch_together.internal.v1.BatchGetUserProfilesResponse
+	14, // [14:19] is the sub-list for method output_type
+	9,  // [9:14] is the sub-list for method input_type
+	9,  // [9:9] is the sub-list for extension type_name
+	9,  // [9:9] is the sub-list for extension extendee
+	0,  // [0:9] is the sub-list for field type_name
 }
 
 func init() { file_server_api_internal_v1_identity_proto_init() }
@@ -630,14 +738,14 @@ func file_server_api_internal_v1_identity_proto_init() {
 		return
 	}
 	file_server_api_internal_v1_common_proto_init()
-	file_server_api_internal_v1_identity_proto_msgTypes[8].OneofWrappers = []any{}
+	file_server_api_internal_v1_identity_proto_msgTypes[10].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_server_api_internal_v1_identity_proto_rawDesc), len(file_server_api_internal_v1_identity_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   9,
+			NumMessages:   11,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

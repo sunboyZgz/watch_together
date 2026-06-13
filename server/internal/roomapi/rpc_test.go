@@ -70,11 +70,48 @@ func TestRPCClientMatchesLocalRoomService(t *testing.T) {
 		t.Fatalf("expected viewer active")
 	}
 
+	bootstrap, err := client.RuntimeBootstrapByCode(context.Background(), created.Room.RoomCode)
+	if err != nil {
+		t.Fatalf("runtime bootstrap through rpc: %v", err)
+	}
+	if bootstrap.Room.RoomCode != created.Room.RoomCode || bootstrap.Media.ID != "episode-1" {
+		t.Fatalf("unexpected bootstrap: %+v", bootstrap)
+	}
+
+	recoverable, err := client.ListRecoverableRoomCodes(context.Background(), 10)
+	if err != nil {
+		t.Fatalf("recoverable rooms through rpc: %v", err)
+	}
+	if len(recoverable) != 1 || recoverable[0] != created.Room.RoomCode {
+		t.Fatalf("unexpected recoverable rooms: %+v", recoverable)
+	}
+
 	if err := client.LeaveRoomByCode(context.Background(), created.Room.RoomCode, "user-viewer"); err != nil {
 		t.Fatalf("leave through rpc: %v", err)
 	}
 	if localStore.lastLeave.UserID != "user-viewer" {
 		t.Fatalf("expected leave user-viewer, got %+v", localStore.lastLeave)
+	}
+
+	now := time.Now()
+	if err := client.MarkRoomGracePeriod(context.Background(), created.Room.RoomCode, now, now.Add(time.Minute)); err != nil {
+		t.Fatalf("mark grace period through rpc: %v", err)
+	}
+	if err := client.MarkRoomActive(context.Background(), created.Room.RoomCode); err != nil {
+		t.Fatalf("mark active through rpc: %v", err)
+	}
+	if count, err := client.MarkAllActiveRoomsGracePeriod(context.Background(), now, now.Add(time.Minute)); err != nil || count != 1 {
+		t.Fatalf("mark all active through rpc count=%d err=%v", count, err)
+	}
+	expired, err := client.CleanupExpiredRoomCodes(context.Background(), now.Add(time.Hour))
+	if err != nil {
+		t.Fatalf("cleanup expired through rpc: %v", err)
+	}
+	if len(expired) != 1 || expired[0] != created.Room.RoomCode {
+		t.Fatalf("unexpected expired rooms: %+v", expired)
+	}
+	if err := client.DestroyRoom(context.Background(), created.Room.RoomCode); err != nil {
+		t.Fatalf("destroy room through rpc: %v", err)
 	}
 }
 
@@ -129,17 +166,19 @@ func TestRPCClientRejectsInvalidRoomAuthToken(t *testing.T) {
 }
 
 type fakeRPCRoomStore struct {
-	mediaID    string
-	durationMs *int64
-	active     bool
-	err        error
-	lastLeave  LeaveRoomParams
+	mediaID      string
+	durationMs   *int64
+	active       bool
+	err          error
+	lastLeave    LeaveRoomParams
+	lastRoomCode string
 }
 
 func (s *fakeRPCRoomStore) CreateRoom(_ context.Context, params CreateRoomParams) (CreateRoomResult, error) {
 	if s.err != nil {
 		return CreateRoomResult{}, s.err
 	}
+	s.lastRoomCode = params.RoomCode
 	return CreateRoomResult{Room: s.room(params.RoomCode, params.HostUserID, params.MediaItemID)}, nil
 }
 
@@ -171,8 +210,45 @@ func (s *fakeRPCRoomStore) GetRoomDetail(_ context.Context, roomCode string) (De
 	}, nil
 }
 
+func (s *fakeRPCRoomStore) GetRoomRuntimeBootstrap(_ context.Context, roomCode string) (RuntimeBootstrapResult, error) {
+	if s.err != nil {
+		return RuntimeBootstrapResult{}, s.err
+	}
+	return RuntimeBootstrapResult{Room: s.room(roomCode, "user-host", s.mediaIDOrDefault())}, nil
+}
+
 func (s *fakeRPCRoomStore) IsActiveMemberByCode(context.Context, string, string) (bool, error) {
 	return s.active, s.err
+}
+
+func (s *fakeRPCRoomStore) ListRecoverableRoomCodes(context.Context, int) ([]string, error) {
+	if s.err != nil {
+		return nil, s.err
+	}
+	return []string{s.lastRoomCode}, nil
+}
+
+func (s *fakeRPCRoomStore) MarkRoomGracePeriod(context.Context, string, time.Time, time.Time) error {
+	return s.err
+}
+
+func (s *fakeRPCRoomStore) MarkRoomActive(context.Context, string) error {
+	return s.err
+}
+
+func (s *fakeRPCRoomStore) DestroyRoom(context.Context, string) error {
+	return s.err
+}
+
+func (s *fakeRPCRoomStore) MarkAllActiveRoomsGracePeriod(context.Context, time.Time, time.Time) (int64, error) {
+	return 1, s.err
+}
+
+func (s *fakeRPCRoomStore) CleanupExpiredRoomCodes(context.Context, time.Time) ([]string, error) {
+	if s.err != nil {
+		return nil, s.err
+	}
+	return []string{s.lastRoomCode}, nil
 }
 
 func (s *fakeRPCRoomStore) room(roomCode string, hostUserID string, mediaItemID string) Room {

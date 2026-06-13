@@ -573,6 +573,710 @@ func (x *IsActiveMemberResponse) GetActive() bool {
 	return false
 }
 
+type GetRoomRuntimeBootstrapRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Metadata      *RequestMetadata       `protobuf:"bytes,1,opt,name=metadata,proto3" json:"metadata,omitempty"`
+	RoomCode      string                 `protobuf:"bytes,2,opt,name=room_code,json=roomCode,proto3" json:"room_code,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetRoomRuntimeBootstrapRequest) Reset() {
+	*x = GetRoomRuntimeBootstrapRequest{}
+	mi := &file_server_api_internal_v1_room_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetRoomRuntimeBootstrapRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetRoomRuntimeBootstrapRequest) ProtoMessage() {}
+
+func (x *GetRoomRuntimeBootstrapRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_server_api_internal_v1_room_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetRoomRuntimeBootstrapRequest.ProtoReflect.Descriptor instead.
+func (*GetRoomRuntimeBootstrapRequest) Descriptor() ([]byte, []int) {
+	return file_server_api_internal_v1_room_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *GetRoomRuntimeBootstrapRequest) GetMetadata() *RequestMetadata {
+	if x != nil {
+		return x.Metadata
+	}
+	return nil
+}
+
+func (x *GetRoomRuntimeBootstrapRequest) GetRoomCode() string {
+	if x != nil {
+		return x.RoomCode
+	}
+	return ""
+}
+
+type GetRoomRuntimeBootstrapResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Room          *RoomBusinessRoom      `protobuf:"bytes,1,opt,name=room,proto3" json:"room,omitempty"`
+	Media         *RoomBusinessMedia     `protobuf:"bytes,2,opt,name=media,proto3" json:"media,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetRoomRuntimeBootstrapResponse) Reset() {
+	*x = GetRoomRuntimeBootstrapResponse{}
+	mi := &file_server_api_internal_v1_room_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetRoomRuntimeBootstrapResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetRoomRuntimeBootstrapResponse) ProtoMessage() {}
+
+func (x *GetRoomRuntimeBootstrapResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_server_api_internal_v1_room_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetRoomRuntimeBootstrapResponse.ProtoReflect.Descriptor instead.
+func (*GetRoomRuntimeBootstrapResponse) Descriptor() ([]byte, []int) {
+	return file_server_api_internal_v1_room_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *GetRoomRuntimeBootstrapResponse) GetRoom() *RoomBusinessRoom {
+	if x != nil {
+		return x.Room
+	}
+	return nil
+}
+
+func (x *GetRoomRuntimeBootstrapResponse) GetMedia() *RoomBusinessMedia {
+	if x != nil {
+		return x.Media
+	}
+	return nil
+}
+
+type ListRecoverableRoomsRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Metadata      *RequestMetadata       `protobuf:"bytes,1,opt,name=metadata,proto3" json:"metadata,omitempty"`
+	Limit         int32                  `protobuf:"varint,2,opt,name=limit,proto3" json:"limit,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListRecoverableRoomsRequest) Reset() {
+	*x = ListRecoverableRoomsRequest{}
+	mi := &file_server_api_internal_v1_room_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListRecoverableRoomsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListRecoverableRoomsRequest) ProtoMessage() {}
+
+func (x *ListRecoverableRoomsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_server_api_internal_v1_room_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListRecoverableRoomsRequest.ProtoReflect.Descriptor instead.
+func (*ListRecoverableRoomsRequest) Descriptor() ([]byte, []int) {
+	return file_server_api_internal_v1_room_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *ListRecoverableRoomsRequest) GetMetadata() *RequestMetadata {
+	if x != nil {
+		return x.Metadata
+	}
+	return nil
+}
+
+func (x *ListRecoverableRoomsRequest) GetLimit() int32 {
+	if x != nil {
+		return x.Limit
+	}
+	return 0
+}
+
+type ListRecoverableRoomsResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	RoomCodes     []string               `protobuf:"bytes,1,rep,name=room_codes,json=roomCodes,proto3" json:"room_codes,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListRecoverableRoomsResponse) Reset() {
+	*x = ListRecoverableRoomsResponse{}
+	mi := &file_server_api_internal_v1_room_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListRecoverableRoomsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListRecoverableRoomsResponse) ProtoMessage() {}
+
+func (x *ListRecoverableRoomsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_server_api_internal_v1_room_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListRecoverableRoomsResponse.ProtoReflect.Descriptor instead.
+func (*ListRecoverableRoomsResponse) Descriptor() ([]byte, []int) {
+	return file_server_api_internal_v1_room_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *ListRecoverableRoomsResponse) GetRoomCodes() []string {
+	if x != nil {
+		return x.RoomCodes
+	}
+	return nil
+}
+
+type MarkRoomGracePeriodRequest struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	Metadata       *RequestMetadata       `protobuf:"bytes,1,opt,name=metadata,proto3" json:"metadata,omitempty"`
+	RoomCode       string                 `protobuf:"bytes,2,opt,name=room_code,json=roomCode,proto3" json:"room_code,omitempty"`
+	LastEmptyAtMs  int64                  `protobuf:"varint,3,opt,name=last_empty_at_ms,json=lastEmptyAtMs,proto3" json:"last_empty_at_ms,omitempty"`
+	DestroyAfterMs int64                  `protobuf:"varint,4,opt,name=destroy_after_ms,json=destroyAfterMs,proto3" json:"destroy_after_ms,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *MarkRoomGracePeriodRequest) Reset() {
+	*x = MarkRoomGracePeriodRequest{}
+	mi := &file_server_api_internal_v1_room_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MarkRoomGracePeriodRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MarkRoomGracePeriodRequest) ProtoMessage() {}
+
+func (x *MarkRoomGracePeriodRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_server_api_internal_v1_room_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MarkRoomGracePeriodRequest.ProtoReflect.Descriptor instead.
+func (*MarkRoomGracePeriodRequest) Descriptor() ([]byte, []int) {
+	return file_server_api_internal_v1_room_proto_rawDescGZIP(), []int{14}
+}
+
+func (x *MarkRoomGracePeriodRequest) GetMetadata() *RequestMetadata {
+	if x != nil {
+		return x.Metadata
+	}
+	return nil
+}
+
+func (x *MarkRoomGracePeriodRequest) GetRoomCode() string {
+	if x != nil {
+		return x.RoomCode
+	}
+	return ""
+}
+
+func (x *MarkRoomGracePeriodRequest) GetLastEmptyAtMs() int64 {
+	if x != nil {
+		return x.LastEmptyAtMs
+	}
+	return 0
+}
+
+func (x *MarkRoomGracePeriodRequest) GetDestroyAfterMs() int64 {
+	if x != nil {
+		return x.DestroyAfterMs
+	}
+	return 0
+}
+
+type MarkRoomGracePeriodResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Updated       bool                   `protobuf:"varint,1,opt,name=updated,proto3" json:"updated,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MarkRoomGracePeriodResponse) Reset() {
+	*x = MarkRoomGracePeriodResponse{}
+	mi := &file_server_api_internal_v1_room_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MarkRoomGracePeriodResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MarkRoomGracePeriodResponse) ProtoMessage() {}
+
+func (x *MarkRoomGracePeriodResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_server_api_internal_v1_room_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MarkRoomGracePeriodResponse.ProtoReflect.Descriptor instead.
+func (*MarkRoomGracePeriodResponse) Descriptor() ([]byte, []int) {
+	return file_server_api_internal_v1_room_proto_rawDescGZIP(), []int{15}
+}
+
+func (x *MarkRoomGracePeriodResponse) GetUpdated() bool {
+	if x != nil {
+		return x.Updated
+	}
+	return false
+}
+
+type MarkRoomActiveRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Metadata      *RequestMetadata       `protobuf:"bytes,1,opt,name=metadata,proto3" json:"metadata,omitempty"`
+	RoomCode      string                 `protobuf:"bytes,2,opt,name=room_code,json=roomCode,proto3" json:"room_code,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MarkRoomActiveRequest) Reset() {
+	*x = MarkRoomActiveRequest{}
+	mi := &file_server_api_internal_v1_room_proto_msgTypes[16]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MarkRoomActiveRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MarkRoomActiveRequest) ProtoMessage() {}
+
+func (x *MarkRoomActiveRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_server_api_internal_v1_room_proto_msgTypes[16]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MarkRoomActiveRequest.ProtoReflect.Descriptor instead.
+func (*MarkRoomActiveRequest) Descriptor() ([]byte, []int) {
+	return file_server_api_internal_v1_room_proto_rawDescGZIP(), []int{16}
+}
+
+func (x *MarkRoomActiveRequest) GetMetadata() *RequestMetadata {
+	if x != nil {
+		return x.Metadata
+	}
+	return nil
+}
+
+func (x *MarkRoomActiveRequest) GetRoomCode() string {
+	if x != nil {
+		return x.RoomCode
+	}
+	return ""
+}
+
+type MarkRoomActiveResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Updated       bool                   `protobuf:"varint,1,opt,name=updated,proto3" json:"updated,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MarkRoomActiveResponse) Reset() {
+	*x = MarkRoomActiveResponse{}
+	mi := &file_server_api_internal_v1_room_proto_msgTypes[17]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MarkRoomActiveResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MarkRoomActiveResponse) ProtoMessage() {}
+
+func (x *MarkRoomActiveResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_server_api_internal_v1_room_proto_msgTypes[17]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MarkRoomActiveResponse.ProtoReflect.Descriptor instead.
+func (*MarkRoomActiveResponse) Descriptor() ([]byte, []int) {
+	return file_server_api_internal_v1_room_proto_rawDescGZIP(), []int{17}
+}
+
+func (x *MarkRoomActiveResponse) GetUpdated() bool {
+	if x != nil {
+		return x.Updated
+	}
+	return false
+}
+
+type DestroyRoomRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Metadata      *RequestMetadata       `protobuf:"bytes,1,opt,name=metadata,proto3" json:"metadata,omitempty"`
+	RoomCode      string                 `protobuf:"bytes,2,opt,name=room_code,json=roomCode,proto3" json:"room_code,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DestroyRoomRequest) Reset() {
+	*x = DestroyRoomRequest{}
+	mi := &file_server_api_internal_v1_room_proto_msgTypes[18]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DestroyRoomRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DestroyRoomRequest) ProtoMessage() {}
+
+func (x *DestroyRoomRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_server_api_internal_v1_room_proto_msgTypes[18]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DestroyRoomRequest.ProtoReflect.Descriptor instead.
+func (*DestroyRoomRequest) Descriptor() ([]byte, []int) {
+	return file_server_api_internal_v1_room_proto_rawDescGZIP(), []int{18}
+}
+
+func (x *DestroyRoomRequest) GetMetadata() *RequestMetadata {
+	if x != nil {
+		return x.Metadata
+	}
+	return nil
+}
+
+func (x *DestroyRoomRequest) GetRoomCode() string {
+	if x != nil {
+		return x.RoomCode
+	}
+	return ""
+}
+
+type DestroyRoomResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Destroyed     bool                   `protobuf:"varint,1,opt,name=destroyed,proto3" json:"destroyed,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DestroyRoomResponse) Reset() {
+	*x = DestroyRoomResponse{}
+	mi := &file_server_api_internal_v1_room_proto_msgTypes[19]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DestroyRoomResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DestroyRoomResponse) ProtoMessage() {}
+
+func (x *DestroyRoomResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_server_api_internal_v1_room_proto_msgTypes[19]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DestroyRoomResponse.ProtoReflect.Descriptor instead.
+func (*DestroyRoomResponse) Descriptor() ([]byte, []int) {
+	return file_server_api_internal_v1_room_proto_rawDescGZIP(), []int{19}
+}
+
+func (x *DestroyRoomResponse) GetDestroyed() bool {
+	if x != nil {
+		return x.Destroyed
+	}
+	return false
+}
+
+type MarkAllActiveRoomsGracePeriodRequest struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	Metadata       *RequestMetadata       `protobuf:"bytes,1,opt,name=metadata,proto3" json:"metadata,omitempty"`
+	LastEmptyAtMs  int64                  `protobuf:"varint,2,opt,name=last_empty_at_ms,json=lastEmptyAtMs,proto3" json:"last_empty_at_ms,omitempty"`
+	DestroyAfterMs int64                  `protobuf:"varint,3,opt,name=destroy_after_ms,json=destroyAfterMs,proto3" json:"destroy_after_ms,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *MarkAllActiveRoomsGracePeriodRequest) Reset() {
+	*x = MarkAllActiveRoomsGracePeriodRequest{}
+	mi := &file_server_api_internal_v1_room_proto_msgTypes[20]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MarkAllActiveRoomsGracePeriodRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MarkAllActiveRoomsGracePeriodRequest) ProtoMessage() {}
+
+func (x *MarkAllActiveRoomsGracePeriodRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_server_api_internal_v1_room_proto_msgTypes[20]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MarkAllActiveRoomsGracePeriodRequest.ProtoReflect.Descriptor instead.
+func (*MarkAllActiveRoomsGracePeriodRequest) Descriptor() ([]byte, []int) {
+	return file_server_api_internal_v1_room_proto_rawDescGZIP(), []int{20}
+}
+
+func (x *MarkAllActiveRoomsGracePeriodRequest) GetMetadata() *RequestMetadata {
+	if x != nil {
+		return x.Metadata
+	}
+	return nil
+}
+
+func (x *MarkAllActiveRoomsGracePeriodRequest) GetLastEmptyAtMs() int64 {
+	if x != nil {
+		return x.LastEmptyAtMs
+	}
+	return 0
+}
+
+func (x *MarkAllActiveRoomsGracePeriodRequest) GetDestroyAfterMs() int64 {
+	if x != nil {
+		return x.DestroyAfterMs
+	}
+	return 0
+}
+
+type MarkAllActiveRoomsGracePeriodResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	UpdatedCount  int64                  `protobuf:"varint,1,opt,name=updated_count,json=updatedCount,proto3" json:"updated_count,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MarkAllActiveRoomsGracePeriodResponse) Reset() {
+	*x = MarkAllActiveRoomsGracePeriodResponse{}
+	mi := &file_server_api_internal_v1_room_proto_msgTypes[21]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MarkAllActiveRoomsGracePeriodResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MarkAllActiveRoomsGracePeriodResponse) ProtoMessage() {}
+
+func (x *MarkAllActiveRoomsGracePeriodResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_server_api_internal_v1_room_proto_msgTypes[21]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MarkAllActiveRoomsGracePeriodResponse.ProtoReflect.Descriptor instead.
+func (*MarkAllActiveRoomsGracePeriodResponse) Descriptor() ([]byte, []int) {
+	return file_server_api_internal_v1_room_proto_rawDescGZIP(), []int{21}
+}
+
+func (x *MarkAllActiveRoomsGracePeriodResponse) GetUpdatedCount() int64 {
+	if x != nil {
+		return x.UpdatedCount
+	}
+	return 0
+}
+
+type CleanupExpiredRoomsRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Metadata      *RequestMetadata       `protobuf:"bytes,1,opt,name=metadata,proto3" json:"metadata,omitempty"`
+	NowMs         int64                  `protobuf:"varint,2,opt,name=now_ms,json=nowMs,proto3" json:"now_ms,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CleanupExpiredRoomsRequest) Reset() {
+	*x = CleanupExpiredRoomsRequest{}
+	mi := &file_server_api_internal_v1_room_proto_msgTypes[22]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CleanupExpiredRoomsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CleanupExpiredRoomsRequest) ProtoMessage() {}
+
+func (x *CleanupExpiredRoomsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_server_api_internal_v1_room_proto_msgTypes[22]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CleanupExpiredRoomsRequest.ProtoReflect.Descriptor instead.
+func (*CleanupExpiredRoomsRequest) Descriptor() ([]byte, []int) {
+	return file_server_api_internal_v1_room_proto_rawDescGZIP(), []int{22}
+}
+
+func (x *CleanupExpiredRoomsRequest) GetMetadata() *RequestMetadata {
+	if x != nil {
+		return x.Metadata
+	}
+	return nil
+}
+
+func (x *CleanupExpiredRoomsRequest) GetNowMs() int64 {
+	if x != nil {
+		return x.NowMs
+	}
+	return 0
+}
+
+type CleanupExpiredRoomsResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	RoomCodes     []string               `protobuf:"bytes,1,rep,name=room_codes,json=roomCodes,proto3" json:"room_codes,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CleanupExpiredRoomsResponse) Reset() {
+	*x = CleanupExpiredRoomsResponse{}
+	mi := &file_server_api_internal_v1_room_proto_msgTypes[23]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CleanupExpiredRoomsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CleanupExpiredRoomsResponse) ProtoMessage() {}
+
+func (x *CleanupExpiredRoomsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_server_api_internal_v1_room_proto_msgTypes[23]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CleanupExpiredRoomsResponse.ProtoReflect.Descriptor instead.
+func (*CleanupExpiredRoomsResponse) Descriptor() ([]byte, []int) {
+	return file_server_api_internal_v1_room_proto_rawDescGZIP(), []int{23}
+}
+
+func (x *CleanupExpiredRoomsResponse) GetRoomCodes() []string {
+	if x != nil {
+		return x.RoomCodes
+	}
+	return nil
+}
+
 type RoomBusinessRoom struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
@@ -586,7 +1290,7 @@ type RoomBusinessRoom struct {
 
 func (x *RoomBusinessRoom) Reset() {
 	*x = RoomBusinessRoom{}
-	mi := &file_server_api_internal_v1_room_proto_msgTypes[10]
+	mi := &file_server_api_internal_v1_room_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -598,7 +1302,7 @@ func (x *RoomBusinessRoom) String() string {
 func (*RoomBusinessRoom) ProtoMessage() {}
 
 func (x *RoomBusinessRoom) ProtoReflect() protoreflect.Message {
-	mi := &file_server_api_internal_v1_room_proto_msgTypes[10]
+	mi := &file_server_api_internal_v1_room_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -611,7 +1315,7 @@ func (x *RoomBusinessRoom) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RoomBusinessRoom.ProtoReflect.Descriptor instead.
 func (*RoomBusinessRoom) Descriptor() ([]byte, []int) {
-	return file_server_api_internal_v1_room_proto_rawDescGZIP(), []int{10}
+	return file_server_api_internal_v1_room_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *RoomBusinessRoom) GetId() string {
@@ -664,7 +1368,7 @@ type RoomBusinessMedia struct {
 
 func (x *RoomBusinessMedia) Reset() {
 	*x = RoomBusinessMedia{}
-	mi := &file_server_api_internal_v1_room_proto_msgTypes[11]
+	mi := &file_server_api_internal_v1_room_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -676,7 +1380,7 @@ func (x *RoomBusinessMedia) String() string {
 func (*RoomBusinessMedia) ProtoMessage() {}
 
 func (x *RoomBusinessMedia) ProtoReflect() protoreflect.Message {
-	mi := &file_server_api_internal_v1_room_proto_msgTypes[11]
+	mi := &file_server_api_internal_v1_room_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -689,7 +1393,7 @@ func (x *RoomBusinessMedia) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RoomBusinessMedia.ProtoReflect.Descriptor instead.
 func (*RoomBusinessMedia) Descriptor() ([]byte, []int) {
-	return file_server_api_internal_v1_room_proto_rawDescGZIP(), []int{11}
+	return file_server_api_internal_v1_room_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *RoomBusinessMedia) GetId() string {
@@ -754,7 +1458,7 @@ type RoomBusinessMember struct {
 
 func (x *RoomBusinessMember) Reset() {
 	*x = RoomBusinessMember{}
-	mi := &file_server_api_internal_v1_room_proto_msgTypes[12]
+	mi := &file_server_api_internal_v1_room_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -766,7 +1470,7 @@ func (x *RoomBusinessMember) String() string {
 func (*RoomBusinessMember) ProtoMessage() {}
 
 func (x *RoomBusinessMember) ProtoReflect() protoreflect.Message {
-	mi := &file_server_api_internal_v1_room_proto_msgTypes[12]
+	mi := &file_server_api_internal_v1_room_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -779,7 +1483,7 @@ func (x *RoomBusinessMember) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RoomBusinessMember.ProtoReflect.Descriptor instead.
 func (*RoomBusinessMember) Descriptor() ([]byte, []int) {
-	return file_server_api_internal_v1_room_proto_rawDescGZIP(), []int{12}
+	return file_server_api_internal_v1_room_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *RoomBusinessMember) GetUserId() string {
@@ -856,7 +1560,48 @@ const file_server_api_internal_v1_room_proto_rawDesc = "" +
 	"\troom_code\x18\x02 \x01(\tR\broomCode\x12\x17\n" +
 	"\auser_id\x18\x03 \x01(\tR\x06userId\"0\n" +
 	"\x16IsActiveMemberResponse\x12\x16\n" +
-	"\x06active\x18\x01 \x01(\bR\x06active\"\x9d\x01\n" +
+	"\x06active\x18\x01 \x01(\bR\x06active\"\x86\x01\n" +
+	"\x1eGetRoomRuntimeBootstrapRequest\x12G\n" +
+	"\bmetadata\x18\x01 \x01(\v2+.watch_together.internal.v1.RequestMetadataR\bmetadata\x12\x1b\n" +
+	"\troom_code\x18\x02 \x01(\tR\broomCode\"\xa8\x01\n" +
+	"\x1fGetRoomRuntimeBootstrapResponse\x12@\n" +
+	"\x04room\x18\x01 \x01(\v2,.watch_together.internal.v1.RoomBusinessRoomR\x04room\x12C\n" +
+	"\x05media\x18\x02 \x01(\v2-.watch_together.internal.v1.RoomBusinessMediaR\x05media\"|\n" +
+	"\x1bListRecoverableRoomsRequest\x12G\n" +
+	"\bmetadata\x18\x01 \x01(\v2+.watch_together.internal.v1.RequestMetadataR\bmetadata\x12\x14\n" +
+	"\x05limit\x18\x02 \x01(\x05R\x05limit\"=\n" +
+	"\x1cListRecoverableRoomsResponse\x12\x1d\n" +
+	"\n" +
+	"room_codes\x18\x01 \x03(\tR\troomCodes\"\xd5\x01\n" +
+	"\x1aMarkRoomGracePeriodRequest\x12G\n" +
+	"\bmetadata\x18\x01 \x01(\v2+.watch_together.internal.v1.RequestMetadataR\bmetadata\x12\x1b\n" +
+	"\troom_code\x18\x02 \x01(\tR\broomCode\x12'\n" +
+	"\x10last_empty_at_ms\x18\x03 \x01(\x03R\rlastEmptyAtMs\x12(\n" +
+	"\x10destroy_after_ms\x18\x04 \x01(\x03R\x0edestroyAfterMs\"7\n" +
+	"\x1bMarkRoomGracePeriodResponse\x12\x18\n" +
+	"\aupdated\x18\x01 \x01(\bR\aupdated\"}\n" +
+	"\x15MarkRoomActiveRequest\x12G\n" +
+	"\bmetadata\x18\x01 \x01(\v2+.watch_together.internal.v1.RequestMetadataR\bmetadata\x12\x1b\n" +
+	"\troom_code\x18\x02 \x01(\tR\broomCode\"2\n" +
+	"\x16MarkRoomActiveResponse\x12\x18\n" +
+	"\aupdated\x18\x01 \x01(\bR\aupdated\"z\n" +
+	"\x12DestroyRoomRequest\x12G\n" +
+	"\bmetadata\x18\x01 \x01(\v2+.watch_together.internal.v1.RequestMetadataR\bmetadata\x12\x1b\n" +
+	"\troom_code\x18\x02 \x01(\tR\broomCode\"3\n" +
+	"\x13DestroyRoomResponse\x12\x1c\n" +
+	"\tdestroyed\x18\x01 \x01(\bR\tdestroyed\"\xc2\x01\n" +
+	"$MarkAllActiveRoomsGracePeriodRequest\x12G\n" +
+	"\bmetadata\x18\x01 \x01(\v2+.watch_together.internal.v1.RequestMetadataR\bmetadata\x12'\n" +
+	"\x10last_empty_at_ms\x18\x02 \x01(\x03R\rlastEmptyAtMs\x12(\n" +
+	"\x10destroy_after_ms\x18\x03 \x01(\x03R\x0edestroyAfterMs\"L\n" +
+	"%MarkAllActiveRoomsGracePeriodResponse\x12#\n" +
+	"\rupdated_count\x18\x01 \x01(\x03R\fupdatedCount\"|\n" +
+	"\x1aCleanupExpiredRoomsRequest\x12G\n" +
+	"\bmetadata\x18\x01 \x01(\v2+.watch_together.internal.v1.RequestMetadataR\bmetadata\x12\x15\n" +
+	"\x06now_ms\x18\x02 \x01(\x03R\x05nowMs\"<\n" +
+	"\x1bCleanupExpiredRoomsResponse\x12\x1d\n" +
+	"\n" +
+	"room_codes\x18\x01 \x03(\tR\troomCodes\"\x9d\x01\n" +
 	"\x10RoomBusinessRoom\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1b\n" +
 	"\troom_code\x18\x02 \x01(\tR\broomCode\x12 \n" +
@@ -885,14 +1630,21 @@ const file_server_api_internal_v1_room_proto_rawDesc = "" +
 	"\n" +
 	"avatar_url\x18\x04 \x01(\tH\x00R\tavatarUrl\x88\x01\x01\x12\x12\n" +
 	"\x04role\x18\x05 \x01(\tR\x04roleB\r\n" +
-	"\v_avatar_url2\xc2\x04\n" +
+	"\v_avatar_url2\x85\f\n" +
 	"\x13RoomInternalService\x12k\n" +
 	"\n" +
 	"CreateRoom\x12-.watch_together.internal.v1.CreateRoomRequest\x1a..watch_together.internal.v1.CreateRoomResponse\x12e\n" +
 	"\bJoinRoom\x12+.watch_together.internal.v1.JoinRoomRequest\x1a,.watch_together.internal.v1.JoinRoomResponse\x12h\n" +
 	"\tLeaveRoom\x12,.watch_together.internal.v1.LeaveRoomRequest\x1a-.watch_together.internal.v1.LeaveRoomResponse\x12t\n" +
 	"\rGetRoomDetail\x120.watch_together.internal.v1.GetRoomDetailRequest\x1a1.watch_together.internal.v1.GetRoomDetailResponse\x12w\n" +
-	"\x0eIsActiveMember\x121.watch_together.internal.v1.IsActiveMemberRequest\x1a2.watch_together.internal.v1.IsActiveMemberResponseB5Z3watch_together/server/internal/rpcgen/v1;internalv1b\x06proto3"
+	"\x0eIsActiveMember\x121.watch_together.internal.v1.IsActiveMemberRequest\x1a2.watch_together.internal.v1.IsActiveMemberResponse\x12\x92\x01\n" +
+	"\x17GetRoomRuntimeBootstrap\x12:.watch_together.internal.v1.GetRoomRuntimeBootstrapRequest\x1a;.watch_together.internal.v1.GetRoomRuntimeBootstrapResponse\x12\x89\x01\n" +
+	"\x14ListRecoverableRooms\x127.watch_together.internal.v1.ListRecoverableRoomsRequest\x1a8.watch_together.internal.v1.ListRecoverableRoomsResponse\x12\x86\x01\n" +
+	"\x13MarkRoomGracePeriod\x126.watch_together.internal.v1.MarkRoomGracePeriodRequest\x1a7.watch_together.internal.v1.MarkRoomGracePeriodResponse\x12w\n" +
+	"\x0eMarkRoomActive\x121.watch_together.internal.v1.MarkRoomActiveRequest\x1a2.watch_together.internal.v1.MarkRoomActiveResponse\x12n\n" +
+	"\vDestroyRoom\x12..watch_together.internal.v1.DestroyRoomRequest\x1a/.watch_together.internal.v1.DestroyRoomResponse\x12\xa4\x01\n" +
+	"\x1dMarkAllActiveRoomsGracePeriod\x12@.watch_together.internal.v1.MarkAllActiveRoomsGracePeriodRequest\x1aA.watch_together.internal.v1.MarkAllActiveRoomsGracePeriodResponse\x12\x86\x01\n" +
+	"\x13CleanupExpiredRooms\x126.watch_together.internal.v1.CleanupExpiredRoomsRequest\x1a7.watch_together.internal.v1.CleanupExpiredRoomsResponseB5Z3watch_together/server/internal/rpcgen/v1;internalv1b\x06proto3"
 
 var (
 	file_server_api_internal_v1_room_proto_rawDescOnce sync.Once
@@ -906,52 +1658,89 @@ func file_server_api_internal_v1_room_proto_rawDescGZIP() []byte {
 	return file_server_api_internal_v1_room_proto_rawDescData
 }
 
-var file_server_api_internal_v1_room_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
+var file_server_api_internal_v1_room_proto_msgTypes = make([]protoimpl.MessageInfo, 27)
 var file_server_api_internal_v1_room_proto_goTypes = []any{
-	(*CreateRoomRequest)(nil),      // 0: watch_together.internal.v1.CreateRoomRequest
-	(*CreateRoomResponse)(nil),     // 1: watch_together.internal.v1.CreateRoomResponse
-	(*JoinRoomRequest)(nil),        // 2: watch_together.internal.v1.JoinRoomRequest
-	(*JoinRoomResponse)(nil),       // 3: watch_together.internal.v1.JoinRoomResponse
-	(*LeaveRoomRequest)(nil),       // 4: watch_together.internal.v1.LeaveRoomRequest
-	(*LeaveRoomResponse)(nil),      // 5: watch_together.internal.v1.LeaveRoomResponse
-	(*GetRoomDetailRequest)(nil),   // 6: watch_together.internal.v1.GetRoomDetailRequest
-	(*GetRoomDetailResponse)(nil),  // 7: watch_together.internal.v1.GetRoomDetailResponse
-	(*IsActiveMemberRequest)(nil),  // 8: watch_together.internal.v1.IsActiveMemberRequest
-	(*IsActiveMemberResponse)(nil), // 9: watch_together.internal.v1.IsActiveMemberResponse
-	(*RoomBusinessRoom)(nil),       // 10: watch_together.internal.v1.RoomBusinessRoom
-	(*RoomBusinessMedia)(nil),      // 11: watch_together.internal.v1.RoomBusinessMedia
-	(*RoomBusinessMember)(nil),     // 12: watch_together.internal.v1.RoomBusinessMember
-	(*RequestMetadata)(nil),        // 13: watch_together.internal.v1.RequestMetadata
+	(*CreateRoomRequest)(nil),                     // 0: watch_together.internal.v1.CreateRoomRequest
+	(*CreateRoomResponse)(nil),                    // 1: watch_together.internal.v1.CreateRoomResponse
+	(*JoinRoomRequest)(nil),                       // 2: watch_together.internal.v1.JoinRoomRequest
+	(*JoinRoomResponse)(nil),                      // 3: watch_together.internal.v1.JoinRoomResponse
+	(*LeaveRoomRequest)(nil),                      // 4: watch_together.internal.v1.LeaveRoomRequest
+	(*LeaveRoomResponse)(nil),                     // 5: watch_together.internal.v1.LeaveRoomResponse
+	(*GetRoomDetailRequest)(nil),                  // 6: watch_together.internal.v1.GetRoomDetailRequest
+	(*GetRoomDetailResponse)(nil),                 // 7: watch_together.internal.v1.GetRoomDetailResponse
+	(*IsActiveMemberRequest)(nil),                 // 8: watch_together.internal.v1.IsActiveMemberRequest
+	(*IsActiveMemberResponse)(nil),                // 9: watch_together.internal.v1.IsActiveMemberResponse
+	(*GetRoomRuntimeBootstrapRequest)(nil),        // 10: watch_together.internal.v1.GetRoomRuntimeBootstrapRequest
+	(*GetRoomRuntimeBootstrapResponse)(nil),       // 11: watch_together.internal.v1.GetRoomRuntimeBootstrapResponse
+	(*ListRecoverableRoomsRequest)(nil),           // 12: watch_together.internal.v1.ListRecoverableRoomsRequest
+	(*ListRecoverableRoomsResponse)(nil),          // 13: watch_together.internal.v1.ListRecoverableRoomsResponse
+	(*MarkRoomGracePeriodRequest)(nil),            // 14: watch_together.internal.v1.MarkRoomGracePeriodRequest
+	(*MarkRoomGracePeriodResponse)(nil),           // 15: watch_together.internal.v1.MarkRoomGracePeriodResponse
+	(*MarkRoomActiveRequest)(nil),                 // 16: watch_together.internal.v1.MarkRoomActiveRequest
+	(*MarkRoomActiveResponse)(nil),                // 17: watch_together.internal.v1.MarkRoomActiveResponse
+	(*DestroyRoomRequest)(nil),                    // 18: watch_together.internal.v1.DestroyRoomRequest
+	(*DestroyRoomResponse)(nil),                   // 19: watch_together.internal.v1.DestroyRoomResponse
+	(*MarkAllActiveRoomsGracePeriodRequest)(nil),  // 20: watch_together.internal.v1.MarkAllActiveRoomsGracePeriodRequest
+	(*MarkAllActiveRoomsGracePeriodResponse)(nil), // 21: watch_together.internal.v1.MarkAllActiveRoomsGracePeriodResponse
+	(*CleanupExpiredRoomsRequest)(nil),            // 22: watch_together.internal.v1.CleanupExpiredRoomsRequest
+	(*CleanupExpiredRoomsResponse)(nil),           // 23: watch_together.internal.v1.CleanupExpiredRoomsResponse
+	(*RoomBusinessRoom)(nil),                      // 24: watch_together.internal.v1.RoomBusinessRoom
+	(*RoomBusinessMedia)(nil),                     // 25: watch_together.internal.v1.RoomBusinessMedia
+	(*RoomBusinessMember)(nil),                    // 26: watch_together.internal.v1.RoomBusinessMember
+	(*RequestMetadata)(nil),                       // 27: watch_together.internal.v1.RequestMetadata
 }
 var file_server_api_internal_v1_room_proto_depIdxs = []int32{
-	13, // 0: watch_together.internal.v1.CreateRoomRequest.metadata:type_name -> watch_together.internal.v1.RequestMetadata
-	10, // 1: watch_together.internal.v1.CreateRoomResponse.room:type_name -> watch_together.internal.v1.RoomBusinessRoom
-	11, // 2: watch_together.internal.v1.CreateRoomResponse.media:type_name -> watch_together.internal.v1.RoomBusinessMedia
-	13, // 3: watch_together.internal.v1.JoinRoomRequest.metadata:type_name -> watch_together.internal.v1.RequestMetadata
-	10, // 4: watch_together.internal.v1.JoinRoomResponse.room:type_name -> watch_together.internal.v1.RoomBusinessRoom
-	11, // 5: watch_together.internal.v1.JoinRoomResponse.media:type_name -> watch_together.internal.v1.RoomBusinessMedia
-	12, // 6: watch_together.internal.v1.JoinRoomResponse.member:type_name -> watch_together.internal.v1.RoomBusinessMember
-	13, // 7: watch_together.internal.v1.LeaveRoomRequest.metadata:type_name -> watch_together.internal.v1.RequestMetadata
-	13, // 8: watch_together.internal.v1.GetRoomDetailRequest.metadata:type_name -> watch_together.internal.v1.RequestMetadata
-	10, // 9: watch_together.internal.v1.GetRoomDetailResponse.room:type_name -> watch_together.internal.v1.RoomBusinessRoom
-	11, // 10: watch_together.internal.v1.GetRoomDetailResponse.media:type_name -> watch_together.internal.v1.RoomBusinessMedia
-	12, // 11: watch_together.internal.v1.GetRoomDetailResponse.members:type_name -> watch_together.internal.v1.RoomBusinessMember
-	13, // 12: watch_together.internal.v1.IsActiveMemberRequest.metadata:type_name -> watch_together.internal.v1.RequestMetadata
-	0,  // 13: watch_together.internal.v1.RoomInternalService.CreateRoom:input_type -> watch_together.internal.v1.CreateRoomRequest
-	2,  // 14: watch_together.internal.v1.RoomInternalService.JoinRoom:input_type -> watch_together.internal.v1.JoinRoomRequest
-	4,  // 15: watch_together.internal.v1.RoomInternalService.LeaveRoom:input_type -> watch_together.internal.v1.LeaveRoomRequest
-	6,  // 16: watch_together.internal.v1.RoomInternalService.GetRoomDetail:input_type -> watch_together.internal.v1.GetRoomDetailRequest
-	8,  // 17: watch_together.internal.v1.RoomInternalService.IsActiveMember:input_type -> watch_together.internal.v1.IsActiveMemberRequest
-	1,  // 18: watch_together.internal.v1.RoomInternalService.CreateRoom:output_type -> watch_together.internal.v1.CreateRoomResponse
-	3,  // 19: watch_together.internal.v1.RoomInternalService.JoinRoom:output_type -> watch_together.internal.v1.JoinRoomResponse
-	5,  // 20: watch_together.internal.v1.RoomInternalService.LeaveRoom:output_type -> watch_together.internal.v1.LeaveRoomResponse
-	7,  // 21: watch_together.internal.v1.RoomInternalService.GetRoomDetail:output_type -> watch_together.internal.v1.GetRoomDetailResponse
-	9,  // 22: watch_together.internal.v1.RoomInternalService.IsActiveMember:output_type -> watch_together.internal.v1.IsActiveMemberResponse
-	18, // [18:23] is the sub-list for method output_type
-	13, // [13:18] is the sub-list for method input_type
-	13, // [13:13] is the sub-list for extension type_name
-	13, // [13:13] is the sub-list for extension extendee
-	0,  // [0:13] is the sub-list for field type_name
+	27, // 0: watch_together.internal.v1.CreateRoomRequest.metadata:type_name -> watch_together.internal.v1.RequestMetadata
+	24, // 1: watch_together.internal.v1.CreateRoomResponse.room:type_name -> watch_together.internal.v1.RoomBusinessRoom
+	25, // 2: watch_together.internal.v1.CreateRoomResponse.media:type_name -> watch_together.internal.v1.RoomBusinessMedia
+	27, // 3: watch_together.internal.v1.JoinRoomRequest.metadata:type_name -> watch_together.internal.v1.RequestMetadata
+	24, // 4: watch_together.internal.v1.JoinRoomResponse.room:type_name -> watch_together.internal.v1.RoomBusinessRoom
+	25, // 5: watch_together.internal.v1.JoinRoomResponse.media:type_name -> watch_together.internal.v1.RoomBusinessMedia
+	26, // 6: watch_together.internal.v1.JoinRoomResponse.member:type_name -> watch_together.internal.v1.RoomBusinessMember
+	27, // 7: watch_together.internal.v1.LeaveRoomRequest.metadata:type_name -> watch_together.internal.v1.RequestMetadata
+	27, // 8: watch_together.internal.v1.GetRoomDetailRequest.metadata:type_name -> watch_together.internal.v1.RequestMetadata
+	24, // 9: watch_together.internal.v1.GetRoomDetailResponse.room:type_name -> watch_together.internal.v1.RoomBusinessRoom
+	25, // 10: watch_together.internal.v1.GetRoomDetailResponse.media:type_name -> watch_together.internal.v1.RoomBusinessMedia
+	26, // 11: watch_together.internal.v1.GetRoomDetailResponse.members:type_name -> watch_together.internal.v1.RoomBusinessMember
+	27, // 12: watch_together.internal.v1.IsActiveMemberRequest.metadata:type_name -> watch_together.internal.v1.RequestMetadata
+	27, // 13: watch_together.internal.v1.GetRoomRuntimeBootstrapRequest.metadata:type_name -> watch_together.internal.v1.RequestMetadata
+	24, // 14: watch_together.internal.v1.GetRoomRuntimeBootstrapResponse.room:type_name -> watch_together.internal.v1.RoomBusinessRoom
+	25, // 15: watch_together.internal.v1.GetRoomRuntimeBootstrapResponse.media:type_name -> watch_together.internal.v1.RoomBusinessMedia
+	27, // 16: watch_together.internal.v1.ListRecoverableRoomsRequest.metadata:type_name -> watch_together.internal.v1.RequestMetadata
+	27, // 17: watch_together.internal.v1.MarkRoomGracePeriodRequest.metadata:type_name -> watch_together.internal.v1.RequestMetadata
+	27, // 18: watch_together.internal.v1.MarkRoomActiveRequest.metadata:type_name -> watch_together.internal.v1.RequestMetadata
+	27, // 19: watch_together.internal.v1.DestroyRoomRequest.metadata:type_name -> watch_together.internal.v1.RequestMetadata
+	27, // 20: watch_together.internal.v1.MarkAllActiveRoomsGracePeriodRequest.metadata:type_name -> watch_together.internal.v1.RequestMetadata
+	27, // 21: watch_together.internal.v1.CleanupExpiredRoomsRequest.metadata:type_name -> watch_together.internal.v1.RequestMetadata
+	0,  // 22: watch_together.internal.v1.RoomInternalService.CreateRoom:input_type -> watch_together.internal.v1.CreateRoomRequest
+	2,  // 23: watch_together.internal.v1.RoomInternalService.JoinRoom:input_type -> watch_together.internal.v1.JoinRoomRequest
+	4,  // 24: watch_together.internal.v1.RoomInternalService.LeaveRoom:input_type -> watch_together.internal.v1.LeaveRoomRequest
+	6,  // 25: watch_together.internal.v1.RoomInternalService.GetRoomDetail:input_type -> watch_together.internal.v1.GetRoomDetailRequest
+	8,  // 26: watch_together.internal.v1.RoomInternalService.IsActiveMember:input_type -> watch_together.internal.v1.IsActiveMemberRequest
+	10, // 27: watch_together.internal.v1.RoomInternalService.GetRoomRuntimeBootstrap:input_type -> watch_together.internal.v1.GetRoomRuntimeBootstrapRequest
+	12, // 28: watch_together.internal.v1.RoomInternalService.ListRecoverableRooms:input_type -> watch_together.internal.v1.ListRecoverableRoomsRequest
+	14, // 29: watch_together.internal.v1.RoomInternalService.MarkRoomGracePeriod:input_type -> watch_together.internal.v1.MarkRoomGracePeriodRequest
+	16, // 30: watch_together.internal.v1.RoomInternalService.MarkRoomActive:input_type -> watch_together.internal.v1.MarkRoomActiveRequest
+	18, // 31: watch_together.internal.v1.RoomInternalService.DestroyRoom:input_type -> watch_together.internal.v1.DestroyRoomRequest
+	20, // 32: watch_together.internal.v1.RoomInternalService.MarkAllActiveRoomsGracePeriod:input_type -> watch_together.internal.v1.MarkAllActiveRoomsGracePeriodRequest
+	22, // 33: watch_together.internal.v1.RoomInternalService.CleanupExpiredRooms:input_type -> watch_together.internal.v1.CleanupExpiredRoomsRequest
+	1,  // 34: watch_together.internal.v1.RoomInternalService.CreateRoom:output_type -> watch_together.internal.v1.CreateRoomResponse
+	3,  // 35: watch_together.internal.v1.RoomInternalService.JoinRoom:output_type -> watch_together.internal.v1.JoinRoomResponse
+	5,  // 36: watch_together.internal.v1.RoomInternalService.LeaveRoom:output_type -> watch_together.internal.v1.LeaveRoomResponse
+	7,  // 37: watch_together.internal.v1.RoomInternalService.GetRoomDetail:output_type -> watch_together.internal.v1.GetRoomDetailResponse
+	9,  // 38: watch_together.internal.v1.RoomInternalService.IsActiveMember:output_type -> watch_together.internal.v1.IsActiveMemberResponse
+	11, // 39: watch_together.internal.v1.RoomInternalService.GetRoomRuntimeBootstrap:output_type -> watch_together.internal.v1.GetRoomRuntimeBootstrapResponse
+	13, // 40: watch_together.internal.v1.RoomInternalService.ListRecoverableRooms:output_type -> watch_together.internal.v1.ListRecoverableRoomsResponse
+	15, // 41: watch_together.internal.v1.RoomInternalService.MarkRoomGracePeriod:output_type -> watch_together.internal.v1.MarkRoomGracePeriodResponse
+	17, // 42: watch_together.internal.v1.RoomInternalService.MarkRoomActive:output_type -> watch_together.internal.v1.MarkRoomActiveResponse
+	19, // 43: watch_together.internal.v1.RoomInternalService.DestroyRoom:output_type -> watch_together.internal.v1.DestroyRoomResponse
+	21, // 44: watch_together.internal.v1.RoomInternalService.MarkAllActiveRoomsGracePeriod:output_type -> watch_together.internal.v1.MarkAllActiveRoomsGracePeriodResponse
+	23, // 45: watch_together.internal.v1.RoomInternalService.CleanupExpiredRooms:output_type -> watch_together.internal.v1.CleanupExpiredRoomsResponse
+	34, // [34:46] is the sub-list for method output_type
+	22, // [22:34] is the sub-list for method input_type
+	22, // [22:22] is the sub-list for extension type_name
+	22, // [22:22] is the sub-list for extension extendee
+	0,  // [0:22] is the sub-list for field type_name
 }
 
 func init() { file_server_api_internal_v1_room_proto_init() }
@@ -960,15 +1749,15 @@ func file_server_api_internal_v1_room_proto_init() {
 		return
 	}
 	file_server_api_internal_v1_common_proto_init()
-	file_server_api_internal_v1_room_proto_msgTypes[11].OneofWrappers = []any{}
-	file_server_api_internal_v1_room_proto_msgTypes[12].OneofWrappers = []any{}
+	file_server_api_internal_v1_room_proto_msgTypes[25].OneofWrappers = []any{}
+	file_server_api_internal_v1_room_proto_msgTypes[26].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_server_api_internal_v1_room_proto_rawDesc), len(file_server_api_internal_v1_room_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   13,
+			NumMessages:   27,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

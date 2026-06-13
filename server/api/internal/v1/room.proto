@@ -12,6 +12,13 @@ service RoomInternalService {
   rpc LeaveRoom(LeaveRoomRequest) returns (LeaveRoomResponse);
   rpc GetRoomDetail(GetRoomDetailRequest) returns (GetRoomDetailResponse);
   rpc IsActiveMember(IsActiveMemberRequest) returns (IsActiveMemberResponse);
+  rpc GetRoomRuntimeBootstrap(GetRoomRuntimeBootstrapRequest) returns (GetRoomRuntimeBootstrapResponse);
+  rpc ListRecoverableRooms(ListRecoverableRoomsRequest) returns (ListRecoverableRoomsResponse);
+  rpc MarkRoomGracePeriod(MarkRoomGracePeriodRequest) returns (MarkRoomGracePeriodResponse);
+  rpc MarkRoomActive(MarkRoomActiveRequest) returns (MarkRoomActiveResponse);
+  rpc DestroyRoom(DestroyRoomRequest) returns (DestroyRoomResponse);
+  rpc MarkAllActiveRoomsGracePeriod(MarkAllActiveRoomsGracePeriodRequest) returns (MarkAllActiveRoomsGracePeriodResponse);
+  rpc CleanupExpiredRooms(CleanupExpiredRoomsRequest) returns (CleanupExpiredRoomsResponse);
 }
 
 message CreateRoomRequest {
@@ -66,6 +73,73 @@ message IsActiveMemberRequest {
 
 message IsActiveMemberResponse {
   bool active = 1;
+}
+
+message GetRoomRuntimeBootstrapRequest {
+  RequestMetadata metadata = 1;
+  string room_code = 2;
+}
+
+message GetRoomRuntimeBootstrapResponse {
+  RoomBusinessRoom room = 1;
+  RoomBusinessMedia media = 2;
+}
+
+message ListRecoverableRoomsRequest {
+  RequestMetadata metadata = 1;
+  int32 limit = 2;
+}
+
+message ListRecoverableRoomsResponse {
+  repeated string room_codes = 1;
+}
+
+message MarkRoomGracePeriodRequest {
+  RequestMetadata metadata = 1;
+  string room_code = 2;
+  int64 last_empty_at_ms = 3;
+  int64 destroy_after_ms = 4;
+}
+
+message MarkRoomGracePeriodResponse {
+  bool updated = 1;
+}
+
+message MarkRoomActiveRequest {
+  RequestMetadata metadata = 1;
+  string room_code = 2;
+}
+
+message MarkRoomActiveResponse {
+  bool updated = 1;
+}
+
+message DestroyRoomRequest {
+  RequestMetadata metadata = 1;
+  string room_code = 2;
+}
+
+message DestroyRoomResponse {
+  bool destroyed = 1;
+}
+
+message MarkAllActiveRoomsGracePeriodRequest {
+  RequestMetadata metadata = 1;
+  int64 last_empty_at_ms = 2;
+  int64 destroy_after_ms = 3;
+}
+
+message MarkAllActiveRoomsGracePeriodResponse {
+  int64 updated_count = 1;
+}
+
+message CleanupExpiredRoomsRequest {
+  RequestMetadata metadata = 1;
+  int64 now_ms = 2;
+}
+
+message CleanupExpiredRoomsResponse {
+  repeated string room_codes = 1;
 }
 
 message RoomBusinessRoom {

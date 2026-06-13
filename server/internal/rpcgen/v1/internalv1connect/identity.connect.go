@@ -45,6 +45,9 @@ const (
 	// IdentityInternalServiceGetUserProfileProcedure is the fully-qualified name of the
 	// IdentityInternalService's GetUserProfile RPC.
 	IdentityInternalServiceGetUserProfileProcedure = "/watch_together.internal.v1.IdentityInternalService/GetUserProfile"
+	// IdentityInternalServiceBatchGetUserProfilesProcedure is the fully-qualified name of the
+	// IdentityInternalService's BatchGetUserProfiles RPC.
+	IdentityInternalServiceBatchGetUserProfilesProcedure = "/watch_together.internal.v1.IdentityInternalService/BatchGetUserProfiles"
 )
 
 // IdentityInternalServiceClient is a client for the
@@ -54,6 +57,7 @@ type IdentityInternalServiceClient interface {
 	Login(context.Context, *connect.Request[v1.LoginRequest]) (*connect.Response[v1.LoginResponse], error)
 	VerifyAccessToken(context.Context, *connect.Request[v1.VerifyAccessTokenRequest]) (*connect.Response[v1.VerifyAccessTokenResponse], error)
 	GetUserProfile(context.Context, *connect.Request[v1.GetUserProfileRequest]) (*connect.Response[v1.GetUserProfileResponse], error)
+	BatchGetUserProfiles(context.Context, *connect.Request[v1.BatchGetUserProfilesRequest]) (*connect.Response[v1.BatchGetUserProfilesResponse], error)
 }
 
 // NewIdentityInternalServiceClient constructs a client for the
@@ -92,15 +96,22 @@ func NewIdentityInternalServiceClient(httpClient connect.HTTPClient, baseURL str
 			connect.WithSchema(identityInternalServiceMethods.ByName("GetUserProfile")),
 			connect.WithClientOptions(opts...),
 		),
+		batchGetUserProfiles: connect.NewClient[v1.BatchGetUserProfilesRequest, v1.BatchGetUserProfilesResponse](
+			httpClient,
+			baseURL+IdentityInternalServiceBatchGetUserProfilesProcedure,
+			connect.WithSchema(identityInternalServiceMethods.ByName("BatchGetUserProfiles")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
 // identityInternalServiceClient implements IdentityInternalServiceClient.
 type identityInternalServiceClient struct {
-	register          *connect.Client[v1.RegisterRequest, v1.RegisterResponse]
-	login             *connect.Client[v1.LoginRequest, v1.LoginResponse]
-	verifyAccessToken *connect.Client[v1.VerifyAccessTokenRequest, v1.VerifyAccessTokenResponse]
-	getUserProfile    *connect.Client[v1.GetUserProfileRequest, v1.GetUserProfileResponse]
+	register             *connect.Client[v1.RegisterRequest, v1.RegisterResponse]
+	login                *connect.Client[v1.LoginRequest, v1.LoginResponse]
+	verifyAccessToken    *connect.Client[v1.VerifyAccessTokenRequest, v1.VerifyAccessTokenResponse]
+	getUserProfile       *connect.Client[v1.GetUserProfileRequest, v1.GetUserProfileResponse]
+	batchGetUserProfiles *connect.Client[v1.BatchGetUserProfilesRequest, v1.BatchGetUserProfilesResponse]
 }
 
 // Register calls watch_together.internal.v1.IdentityInternalService.Register.
@@ -123,6 +134,12 @@ func (c *identityInternalServiceClient) GetUserProfile(ctx context.Context, req 
 	return c.getUserProfile.CallUnary(ctx, req)
 }
 
+// BatchGetUserProfiles calls
+// watch_together.internal.v1.IdentityInternalService.BatchGetUserProfiles.
+func (c *identityInternalServiceClient) BatchGetUserProfiles(ctx context.Context, req *connect.Request[v1.BatchGetUserProfilesRequest]) (*connect.Response[v1.BatchGetUserProfilesResponse], error) {
+	return c.batchGetUserProfiles.CallUnary(ctx, req)
+}
+
 // IdentityInternalServiceHandler is an implementation of the
 // watch_together.internal.v1.IdentityInternalService service.
 type IdentityInternalServiceHandler interface {
@@ -130,6 +147,7 @@ type IdentityInternalServiceHandler interface {
 	Login(context.Context, *connect.Request[v1.LoginRequest]) (*connect.Response[v1.LoginResponse], error)
 	VerifyAccessToken(context.Context, *connect.Request[v1.VerifyAccessTokenRequest]) (*connect.Response[v1.VerifyAccessTokenResponse], error)
 	GetUserProfile(context.Context, *connect.Request[v1.GetUserProfileRequest]) (*connect.Response[v1.GetUserProfileResponse], error)
+	BatchGetUserProfiles(context.Context, *connect.Request[v1.BatchGetUserProfilesRequest]) (*connect.Response[v1.BatchGetUserProfilesResponse], error)
 }
 
 // NewIdentityInternalServiceHandler builds an HTTP handler from the service implementation. It
@@ -163,6 +181,12 @@ func NewIdentityInternalServiceHandler(svc IdentityInternalServiceHandler, opts 
 		connect.WithSchema(identityInternalServiceMethods.ByName("GetUserProfile")),
 		connect.WithHandlerOptions(opts...),
 	)
+	identityInternalServiceBatchGetUserProfilesHandler := connect.NewUnaryHandler(
+		IdentityInternalServiceBatchGetUserProfilesProcedure,
+		svc.BatchGetUserProfiles,
+		connect.WithSchema(identityInternalServiceMethods.ByName("BatchGetUserProfiles")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/watch_together.internal.v1.IdentityInternalService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case IdentityInternalServiceRegisterProcedure:
@@ -173,6 +197,8 @@ func NewIdentityInternalServiceHandler(svc IdentityInternalServiceHandler, opts 
 			identityInternalServiceVerifyAccessTokenHandler.ServeHTTP(w, r)
 		case IdentityInternalServiceGetUserProfileProcedure:
 			identityInternalServiceGetUserProfileHandler.ServeHTTP(w, r)
+		case IdentityInternalServiceBatchGetUserProfilesProcedure:
+			identityInternalServiceBatchGetUserProfilesHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -196,4 +222,8 @@ func (UnimplementedIdentityInternalServiceHandler) VerifyAccessToken(context.Con
 
 func (UnimplementedIdentityInternalServiceHandler) GetUserProfile(context.Context, *connect.Request[v1.GetUserProfileRequest]) (*connect.Response[v1.GetUserProfileResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("watch_together.internal.v1.IdentityInternalService.GetUserProfile is not implemented"))
+}
+
+func (UnimplementedIdentityInternalServiceHandler) BatchGetUserProfiles(context.Context, *connect.Request[v1.BatchGetUserProfilesRequest]) (*connect.Response[v1.BatchGetUserProfilesResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("watch_together.internal.v1.IdentityInternalService.BatchGetUserProfiles is not implemented"))
 }

@@ -32,6 +32,10 @@ type UserStore interface {
 	FindUserByID(ctx context.Context, userID string) (User, error)
 }
 
+type BatchUserStore interface {
+	FindUsersByIDs(ctx context.Context, userIDs []string) ([]User, error)
+}
+
 type CreateUserParams struct {
 	Account      string
 	PasswordHash string
@@ -54,6 +58,7 @@ type IdentityService interface {
 	Login(ctx context.Context, account string, password string) (AuthResult, error)
 	VerifyAccessToken(rawToken string) (TokenClaims, error)
 	GetUserProfile(ctx context.Context, userID string) (User, error)
+	BatchGetUserProfiles(ctx context.Context, userIDs []string) ([]User, error)
 }
 
 // NewService builds the auth service around a persistent user store.
@@ -136,8 +141,50 @@ func (s *Service) GetUserProfile(ctx context.Context, userID string) (User, erro
 	return s.store.FindUserByID(ctx, userID)
 }
 
+func (s *Service) BatchGetUserProfiles(ctx context.Context, userIDs []string) ([]User, error) {
+	if s == nil || s.store == nil {
+		return nil, ErrUserNotFound
+	}
+	userIDs = normalizeUserIDs(userIDs)
+	if len(userIDs) == 0 {
+		return nil, nil
+	}
+	if batchStore, ok := s.store.(BatchUserStore); ok {
+		return batchStore.FindUsersByIDs(ctx, userIDs)
+	}
+	users := make([]User, 0, len(userIDs))
+	for _, userID := range userIDs {
+		user, err := s.store.FindUserByID(ctx, userID)
+		if err != nil {
+			if errors.Is(err, ErrUserNotFound) {
+				continue
+			}
+			return nil, err
+		}
+		users = append(users, user)
+	}
+	return users, nil
+}
+
 func normalizeAccount(account string) string {
 	return strings.ToLower(strings.TrimSpace(account))
+}
+
+func normalizeUserIDs(userIDs []string) []string {
+	result := make([]string, 0, len(userIDs))
+	seen := map[string]struct{}{}
+	for _, userID := range userIDs {
+		userID = strings.TrimSpace(userID)
+		if userID == "" {
+			continue
+		}
+		if _, ok := seen[userID]; ok {
+			continue
+		}
+		seen[userID] = struct{}{}
+		result = append(result, userID)
+	}
+	return result
 }
 
 func (s *Service) authResult(user User) (AuthResult, error) {

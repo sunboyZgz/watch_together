@@ -5,17 +5,20 @@ import (
 	"crypto/rand"
 	"errors"
 	"strings"
+	"time"
 
+	"watch_together/server/internal/auth"
 	mediacatalog "watch_together/server/internal/media"
 )
 
 var (
-	ErrInvalidInput   = errors.New("invalid input")
-	ErrMediaNotFound  = errors.New("media not found")
-	ErrRoomCodeExists = errors.New("room code already exists")
-	ErrRoomNotFound   = errors.New("room not found")
-	ErrUnableToCreate = errors.New("unable to create room")
-	ErrUserNotFound   = errors.New("user not found")
+	ErrInvalidInput        = errors.New("invalid input")
+	ErrMediaNotFound       = errors.New("media not found")
+	ErrRoomCodeExists      = errors.New("room code already exists")
+	ErrRoomNotFound        = errors.New("room not found")
+	ErrUnableToCreate      = errors.New("unable to create room")
+	ErrUserNotFound        = errors.New("user not found")
+	ErrIdentityUnavailable = errors.New("identity service is unavailable")
 )
 
 type Room struct {
@@ -44,6 +47,11 @@ type Member struct {
 	Role       string
 }
 
+type RuntimeBootstrapResult struct {
+	Room  Room
+	Media Media
+}
+
 type CreateRoomResult struct {
 	Room  Room
 	Media Media
@@ -67,6 +75,13 @@ type Store interface {
 	LeaveRoomByCode(ctx context.Context, params LeaveRoomParams) error
 	GetRoomDetail(ctx context.Context, roomCode string) (DetailResult, error)
 	IsActiveMemberByCode(ctx context.Context, roomCode string, userID string) (bool, error)
+	GetRoomRuntimeBootstrap(ctx context.Context, roomCode string) (RuntimeBootstrapResult, error)
+	ListRecoverableRoomCodes(ctx context.Context, limit int) ([]string, error)
+	MarkRoomGracePeriod(ctx context.Context, roomCode string, lastEmptyAt time.Time, destroyAfter time.Time) error
+	MarkRoomActive(ctx context.Context, roomCode string) error
+	DestroyRoom(ctx context.Context, roomCode string) error
+	MarkAllActiveRoomsGracePeriod(ctx context.Context, lastEmptyAt time.Time, destroyAfter time.Time) (int64, error)
+	CleanupExpiredRoomCodes(ctx context.Context, now time.Time) ([]string, error)
 }
 
 type BusinessService interface {
@@ -75,10 +90,22 @@ type BusinessService interface {
 	LeaveRoomByCode(ctx context.Context, roomCode string, userID string) error
 	DetailByCode(ctx context.Context, roomCode string) (DetailResult, error)
 	IsActiveMemberByCode(ctx context.Context, roomCode string, userID string) (bool, error)
+	RuntimeBootstrapByCode(ctx context.Context, roomCode string) (RuntimeBootstrapResult, error)
+	ListRecoverableRoomCodes(ctx context.Context, limit int) ([]string, error)
+	MarkRoomGracePeriod(ctx context.Context, roomCode string, lastEmptyAt time.Time, destroyAfter time.Time) error
+	MarkRoomActive(ctx context.Context, roomCode string) error
+	DestroyRoom(ctx context.Context, roomCode string) error
+	MarkAllActiveRoomsGracePeriod(ctx context.Context, lastEmptyAt time.Time, destroyAfter time.Time) (int64, error)
+	CleanupExpiredRoomCodes(ctx context.Context, now time.Time) ([]string, error)
 }
 
 type MediaDetailLookup interface {
 	EpisodeDetail(ctx context.Context, episodeID string) (mediacatalog.EpisodeDetail, error)
+}
+
+type UserProfileLookup interface {
+	GetUserProfile(ctx context.Context, userID string) (auth.User, error)
+	BatchGetUserProfiles(ctx context.Context, userIDs []string) ([]auth.User, error)
 }
 
 type CreateRoomParams struct {
@@ -100,6 +127,7 @@ type LeaveRoomParams struct {
 type Service struct {
 	store       Store
 	mediaLookup MediaDetailLookup
+	userLookup  UserProfileLookup
 }
 
 // NewService wires room business APIs to persistent storage.
@@ -112,12 +140,20 @@ func NewServiceWithMediaLookup(store Store, mediaLookup MediaDetailLookup) *Serv
 	return &Service{store: store, mediaLookup: mediaLookup}
 }
 
+// NewServiceWithBoundaries wires room business APIs through identity and media context boundaries.
+func NewServiceWithBoundaries(store Store, mediaLookup MediaDetailLookup, userLookup UserProfileLookup) *Service {
+	return &Service{store: store, mediaLookup: mediaLookup, userLookup: userLookup}
+}
+
 // CreateRoom validates input, generates a shareable room code, and persists the room.
 func (s *Service) CreateRoom(ctx context.Context, hostUserID string, mediaItemID string) (CreateRoomResult, error) {
 	hostUserID = strings.TrimSpace(hostUserID)
 	mediaItemID = strings.TrimSpace(mediaItemID)
 	if hostUserID == "" || mediaItemID == "" {
 		return CreateRoomResult{}, ErrInvalidInput
+	}
+	if err := s.requireUser(ctx, hostUserID); err != nil {
+		return CreateRoomResult{}, err
 	}
 
 	mediaItem, err := s.lookupMedia(ctx, mediaItemID)
@@ -157,6 +193,9 @@ func (s *Service) JoinRoomByCode(ctx context.Context, roomCode string, userID st
 	if len(roomCode) != 6 || userID == "" {
 		return JoinRoomResult{}, ErrInvalidInput
 	}
+	if err := s.requireUser(ctx, userID); err != nil {
+		return JoinRoomResult{}, err
+	}
 	result, err := s.store.JoinRoomByCode(ctx, JoinRoomParams{
 		RoomCode: roomCode,
 		UserID:   userID,
@@ -164,6 +203,7 @@ func (s *Service) JoinRoomByCode(ctx context.Context, roomCode string, userID st
 	if err != nil {
 		return JoinRoomResult{}, err
 	}
+	result.Member = s.enrichMember(ctx, result.Member)
 	mediaItem, err := s.lookupMedia(ctx, result.Room.MediaItemID)
 	if err != nil {
 		return JoinRoomResult{}, err
@@ -208,6 +248,11 @@ func (s *Service) DetailByCode(ctx context.Context, roomCode string) (DetailResu
 	if err != nil {
 		return DetailResult{}, err
 	}
+	members, err := s.enrichMembers(ctx, result.Members)
+	if err != nil {
+		return DetailResult{}, err
+	}
+	result.Members = members
 	mediaItem, err := s.lookupMedia(ctx, result.Room.MediaItemID)
 	if err != nil {
 		return DetailResult{}, err
@@ -217,6 +262,119 @@ func (s *Service) DetailByCode(ctx context.Context, roomCode string) (DetailResu
 	}
 	result.Media = mediaItem
 	return result, nil
+}
+
+func (s *Service) RuntimeBootstrapByCode(ctx context.Context, roomCode string) (RuntimeBootstrapResult, error) {
+	roomCode = strings.ToUpper(strings.TrimSpace(roomCode))
+	if len(roomCode) != 6 {
+		return RuntimeBootstrapResult{}, ErrInvalidInput
+	}
+	result, err := s.store.GetRoomRuntimeBootstrap(ctx, roomCode)
+	if err != nil {
+		return RuntimeBootstrapResult{}, err
+	}
+	mediaItem, err := s.lookupMedia(ctx, result.Room.MediaItemID)
+	if err != nil {
+		return RuntimeBootstrapResult{}, err
+	}
+	if mediaItem.ID != "" {
+		result.Media = mediaItem
+	}
+	return result, nil
+}
+
+func (s *Service) ListRecoverableRoomCodes(ctx context.Context, limit int) ([]string, error) {
+	return s.store.ListRecoverableRoomCodes(ctx, limit)
+}
+
+func (s *Service) MarkRoomGracePeriod(ctx context.Context, roomCode string, lastEmptyAt time.Time, destroyAfter time.Time) error {
+	roomCode = strings.ToUpper(strings.TrimSpace(roomCode))
+	if len(roomCode) != 6 || lastEmptyAt.IsZero() || destroyAfter.IsZero() {
+		return ErrInvalidInput
+	}
+	return s.store.MarkRoomGracePeriod(ctx, roomCode, lastEmptyAt, destroyAfter)
+}
+
+func (s *Service) MarkRoomActive(ctx context.Context, roomCode string) error {
+	roomCode = strings.ToUpper(strings.TrimSpace(roomCode))
+	if len(roomCode) != 6 {
+		return ErrInvalidInput
+	}
+	return s.store.MarkRoomActive(ctx, roomCode)
+}
+
+func (s *Service) DestroyRoom(ctx context.Context, roomCode string) error {
+	roomCode = strings.ToUpper(strings.TrimSpace(roomCode))
+	if len(roomCode) != 6 {
+		return ErrInvalidInput
+	}
+	return s.store.DestroyRoom(ctx, roomCode)
+}
+
+func (s *Service) MarkAllActiveRoomsGracePeriod(ctx context.Context, lastEmptyAt time.Time, destroyAfter time.Time) (int64, error) {
+	if lastEmptyAt.IsZero() || destroyAfter.IsZero() {
+		return 0, ErrInvalidInput
+	}
+	return s.store.MarkAllActiveRoomsGracePeriod(ctx, lastEmptyAt, destroyAfter)
+}
+
+func (s *Service) CleanupExpiredRoomCodes(ctx context.Context, now time.Time) ([]string, error) {
+	if now.IsZero() {
+		now = time.Now()
+	}
+	return s.store.CleanupExpiredRoomCodes(ctx, now)
+}
+
+func (s *Service) requireUser(ctx context.Context, userID string) error {
+	if s == nil || s.userLookup == nil {
+		return nil
+	}
+	if _, err := s.userLookup.GetUserProfile(ctx, userID); err != nil {
+		if errors.Is(err, auth.ErrUserNotFound) || errors.Is(err, auth.ErrInvalidInput) {
+			return ErrUserNotFound
+		}
+		return ErrIdentityUnavailable
+	}
+	return nil
+}
+
+func (s *Service) enrichMember(ctx context.Context, member Member) Member {
+	members, err := s.enrichMembers(ctx, []Member{member})
+	if err != nil {
+		return member
+	}
+	if len(members) == 0 {
+		return member
+	}
+	return members[0]
+}
+
+func (s *Service) enrichMembers(ctx context.Context, members []Member) ([]Member, error) {
+	if s == nil || s.userLookup == nil || len(members) == 0 {
+		return members, nil
+	}
+	userIDs := make([]string, 0, len(members))
+	for _, member := range members {
+		userIDs = append(userIDs, member.UserID)
+	}
+	users, err := s.userLookup.BatchGetUserProfiles(ctx, userIDs)
+	if err != nil {
+		return nil, ErrIdentityUnavailable
+	}
+	byID := make(map[string]auth.User, len(users))
+	for _, user := range users {
+		byID[user.ID] = user
+	}
+	enriched := make([]Member, 0, len(members))
+	for _, member := range members {
+		if user, ok := byID[member.UserID]; ok {
+			member.Nickname = user.Nickname
+			member.AvatarSeed = user.AvatarSeed
+			member.AvatarURL = user.AvatarURL
+		}
+		enriched = append(enriched, member)
+	}
+	return enriched, nil
 }
 
 func (s *Service) lookupMedia(ctx context.Context, episodeID string) (Media, error) {

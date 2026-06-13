@@ -140,6 +140,30 @@ func (c *RPCClient) GetUserProfile(ctx context.Context, userID string) (User, er
 	return userFromProto(response.Msg.GetUser()), nil
 }
 
+func (c *RPCClient) BatchGetUserProfiles(ctx context.Context, userIDs []string) ([]User, error) {
+	if c == nil || c.client == nil {
+		return nil, errors.New("identity rpc client is unavailable")
+	}
+	request := connect.NewRequest(&internalv1.BatchGetUserProfilesRequest{
+		UserIds: userIDs,
+	})
+	ctx, cancel, requestID, span := internalrpc.PrepareClientRequest(
+		ctx,
+		c.config,
+		internalv1connect.IdentityInternalServiceBatchGetUserProfilesProcedure,
+		request.Header(),
+	)
+	defer cancel()
+	defer span.End()
+	request.Msg.Metadata = internalrpc.RequestMetadata(ctx, c.config.Service, requestID)
+
+	response, err := c.client.BatchGetUserProfiles(ctx, request)
+	if err != nil {
+		return nil, authErrorFromConnect(err)
+	}
+	return usersFromProto(response.Msg.GetUsers()), nil
+}
+
 func RegisterInternalRPC(mux *http.ServeMux, prefix string, authToken string, service IdentityService) {
 	if mux == nil || service == nil {
 		return
@@ -239,6 +263,27 @@ func (h *internalRPCHandler) GetUserProfile(
 		return nil, authErrorToConnect(err)
 	}
 	return connect.NewResponse(&internalv1.GetUserProfileResponse{User: userToProto(user)}), nil
+}
+
+func (h *internalRPCHandler) BatchGetUserProfiles(
+	ctx context.Context,
+	request *connect.Request[internalv1.BatchGetUserProfilesRequest],
+) (*connect.Response[internalv1.BatchGetUserProfilesResponse], error) {
+	ctx, span, err := internalrpc.PrepareServerRequest(
+		ctx,
+		request.Header(),
+		h.authToken,
+		internalv1connect.IdentityInternalServiceBatchGetUserProfilesProcedure,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer span.End()
+	users, err := h.service.BatchGetUserProfiles(ctx, request.Msg.GetUserIds())
+	if err != nil {
+		return nil, authErrorToConnect(err)
+	}
+	return connect.NewResponse(&internalv1.BatchGetUserProfilesResponse{Users: usersToProto(users)}), nil
 }
 
 func authErrorToConnect(err error) error {
@@ -342,6 +387,25 @@ func userFromProto(user *internalv1.IdentityUser) User {
 		AvatarURL:  cloneString(user.AvatarUrl),
 		Bio:        cloneString(user.Bio),
 	}
+}
+
+func usersToProto(users []User) []*internalv1.IdentityUser {
+	out := make([]*internalv1.IdentityUser, 0, len(users))
+	for _, user := range users {
+		out = append(out, userToProto(user))
+	}
+	return out
+}
+
+func usersFromProto(users []*internalv1.IdentityUser) []User {
+	out := make([]User, 0, len(users))
+	for _, user := range users {
+		if user == nil {
+			continue
+		}
+		out = append(out, userFromProto(user))
+	}
+	return out
 }
 
 func cloneString(value *string) *string {

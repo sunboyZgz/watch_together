@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"time"
 
 	"connectrpc.com/connect"
 
@@ -163,6 +164,161 @@ func (c *RPCClient) IsActiveMemberByCode(ctx context.Context, roomCode string, u
 	return response.Msg.GetActive(), nil
 }
 
+func (c *RPCClient) RuntimeBootstrapByCode(ctx context.Context, roomCode string) (RuntimeBootstrapResult, error) {
+	if c == nil || c.client == nil {
+		return RuntimeBootstrapResult{}, errors.New("room rpc client is unavailable")
+	}
+	request := connect.NewRequest(&internalv1.GetRoomRuntimeBootstrapRequest{RoomCode: roomCode})
+	ctx, cancel, requestID, span := internalrpc.PrepareClientRequest(
+		ctx,
+		c.config,
+		internalv1connect.RoomInternalServiceGetRoomRuntimeBootstrapProcedure,
+		request.Header(),
+	)
+	defer cancel()
+	defer span.End()
+	request.Msg.Metadata = internalrpc.RequestMetadata(ctx, c.config.Service, requestID)
+
+	response, err := c.client.GetRoomRuntimeBootstrap(ctx, request)
+	if err != nil {
+		return RuntimeBootstrapResult{}, roomErrorFromConnect(err)
+	}
+	return RuntimeBootstrapResult{
+		Room:  roomFromProto(response.Msg.GetRoom()),
+		Media: mediaFromProto(response.Msg.GetMedia()),
+	}, nil
+}
+
+func (c *RPCClient) ListRecoverableRoomCodes(ctx context.Context, limit int) ([]string, error) {
+	if c == nil || c.client == nil {
+		return nil, errors.New("room rpc client is unavailable")
+	}
+	request := connect.NewRequest(&internalv1.ListRecoverableRoomsRequest{Limit: int32(limit)})
+	ctx, cancel, requestID, span := internalrpc.PrepareClientRequest(
+		ctx,
+		c.config,
+		internalv1connect.RoomInternalServiceListRecoverableRoomsProcedure,
+		request.Header(),
+	)
+	defer cancel()
+	defer span.End()
+	request.Msg.Metadata = internalrpc.RequestMetadata(ctx, c.config.Service, requestID)
+
+	response, err := c.client.ListRecoverableRooms(ctx, request)
+	if err != nil {
+		return nil, roomErrorFromConnect(err)
+	}
+	return response.Msg.GetRoomCodes(), nil
+}
+
+func (c *RPCClient) MarkRoomGracePeriod(ctx context.Context, roomCode string, lastEmptyAt time.Time, destroyAfter time.Time) error {
+	if c == nil || c.client == nil {
+		return errors.New("room rpc client is unavailable")
+	}
+	request := connect.NewRequest(&internalv1.MarkRoomGracePeriodRequest{
+		RoomCode:       roomCode,
+		LastEmptyAtMs:  lastEmptyAt.UnixMilli(),
+		DestroyAfterMs: destroyAfter.UnixMilli(),
+	})
+	ctx, cancel, requestID, span := internalrpc.PrepareClientRequest(
+		ctx,
+		c.config,
+		internalv1connect.RoomInternalServiceMarkRoomGracePeriodProcedure,
+		request.Header(),
+	)
+	defer cancel()
+	defer span.End()
+	request.Msg.Metadata = internalrpc.RequestMetadata(ctx, c.config.Service, requestID)
+
+	_, err := c.client.MarkRoomGracePeriod(ctx, request)
+	return roomErrorFromConnect(err)
+}
+
+func (c *RPCClient) MarkRoomActive(ctx context.Context, roomCode string) error {
+	if c == nil || c.client == nil {
+		return errors.New("room rpc client is unavailable")
+	}
+	request := connect.NewRequest(&internalv1.MarkRoomActiveRequest{RoomCode: roomCode})
+	ctx, cancel, requestID, span := internalrpc.PrepareClientRequest(
+		ctx,
+		c.config,
+		internalv1connect.RoomInternalServiceMarkRoomActiveProcedure,
+		request.Header(),
+	)
+	defer cancel()
+	defer span.End()
+	request.Msg.Metadata = internalrpc.RequestMetadata(ctx, c.config.Service, requestID)
+
+	_, err := c.client.MarkRoomActive(ctx, request)
+	return roomErrorFromConnect(err)
+}
+
+func (c *RPCClient) DestroyRoom(ctx context.Context, roomCode string) error {
+	if c == nil || c.client == nil {
+		return errors.New("room rpc client is unavailable")
+	}
+	request := connect.NewRequest(&internalv1.DestroyRoomRequest{RoomCode: roomCode})
+	ctx, cancel, requestID, span := internalrpc.PrepareClientRequest(
+		ctx,
+		c.config,
+		internalv1connect.RoomInternalServiceDestroyRoomProcedure,
+		request.Header(),
+	)
+	defer cancel()
+	defer span.End()
+	request.Msg.Metadata = internalrpc.RequestMetadata(ctx, c.config.Service, requestID)
+
+	_, err := c.client.DestroyRoom(ctx, request)
+	return roomErrorFromConnect(err)
+}
+
+func (c *RPCClient) MarkAllActiveRoomsGracePeriod(ctx context.Context, lastEmptyAt time.Time, destroyAfter time.Time) (int64, error) {
+	if c == nil || c.client == nil {
+		return 0, errors.New("room rpc client is unavailable")
+	}
+	request := connect.NewRequest(&internalv1.MarkAllActiveRoomsGracePeriodRequest{
+		LastEmptyAtMs:  lastEmptyAt.UnixMilli(),
+		DestroyAfterMs: destroyAfter.UnixMilli(),
+	})
+	ctx, cancel, requestID, span := internalrpc.PrepareClientRequest(
+		ctx,
+		c.config,
+		internalv1connect.RoomInternalServiceMarkAllActiveRoomsGracePeriodProcedure,
+		request.Header(),
+	)
+	defer cancel()
+	defer span.End()
+	request.Msg.Metadata = internalrpc.RequestMetadata(ctx, c.config.Service, requestID)
+
+	response, err := c.client.MarkAllActiveRoomsGracePeriod(ctx, request)
+	if err != nil {
+		return 0, roomErrorFromConnect(err)
+	}
+	return response.Msg.GetUpdatedCount(), nil
+}
+
+func (c *RPCClient) CleanupExpiredRoomCodes(ctx context.Context, now time.Time) ([]string, error) {
+	if c == nil || c.client == nil {
+		return nil, errors.New("room rpc client is unavailable")
+	}
+	request := connect.NewRequest(&internalv1.CleanupExpiredRoomsRequest{NowMs: now.UnixMilli()})
+	ctx, cancel, requestID, span := internalrpc.PrepareClientRequest(
+		ctx,
+		c.config,
+		internalv1connect.RoomInternalServiceCleanupExpiredRoomsProcedure,
+		request.Header(),
+	)
+	defer cancel()
+	defer span.End()
+	request.Msg.Metadata = internalrpc.RequestMetadata(ctx, c.config.Service, requestID)
+
+	response, err := c.client.CleanupExpiredRooms(ctx, request)
+	if err != nil {
+		return nil, roomErrorFromConnect(err)
+	}
+	return response.Msg.GetRoomCodes(), nil
+}
+
 func RegisterInternalRPC(mux *http.ServeMux, prefix string, authToken string, service BusinessService) {
 	if mux == nil || service == nil {
 		return
@@ -295,6 +451,162 @@ func (h *internalRPCHandler) IsActiveMember(
 	return connect.NewResponse(&internalv1.IsActiveMemberResponse{Active: active}), nil
 }
 
+func (h *internalRPCHandler) GetRoomRuntimeBootstrap(
+	ctx context.Context,
+	request *connect.Request[internalv1.GetRoomRuntimeBootstrapRequest],
+) (*connect.Response[internalv1.GetRoomRuntimeBootstrapResponse], error) {
+	ctx, span, err := internalrpc.PrepareServerRequest(
+		ctx,
+		request.Header(),
+		h.authToken,
+		internalv1connect.RoomInternalServiceGetRoomRuntimeBootstrapProcedure,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer span.End()
+	result, err := h.service.RuntimeBootstrapByCode(ctx, request.Msg.GetRoomCode())
+	if err != nil {
+		return nil, roomErrorToConnect(err)
+	}
+	return connect.NewResponse(&internalv1.GetRoomRuntimeBootstrapResponse{
+		Room:  roomToProto(result.Room),
+		Media: mediaToProto(result.Media),
+	}), nil
+}
+
+func (h *internalRPCHandler) ListRecoverableRooms(
+	ctx context.Context,
+	request *connect.Request[internalv1.ListRecoverableRoomsRequest],
+) (*connect.Response[internalv1.ListRecoverableRoomsResponse], error) {
+	ctx, span, err := internalrpc.PrepareServerRequest(
+		ctx,
+		request.Header(),
+		h.authToken,
+		internalv1connect.RoomInternalServiceListRecoverableRoomsProcedure,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer span.End()
+	roomCodes, err := h.service.ListRecoverableRoomCodes(ctx, int(request.Msg.GetLimit()))
+	if err != nil {
+		return nil, roomErrorToConnect(err)
+	}
+	return connect.NewResponse(&internalv1.ListRecoverableRoomsResponse{RoomCodes: roomCodes}), nil
+}
+
+func (h *internalRPCHandler) MarkRoomGracePeriod(
+	ctx context.Context,
+	request *connect.Request[internalv1.MarkRoomGracePeriodRequest],
+) (*connect.Response[internalv1.MarkRoomGracePeriodResponse], error) {
+	ctx, span, err := internalrpc.PrepareServerRequest(
+		ctx,
+		request.Header(),
+		h.authToken,
+		internalv1connect.RoomInternalServiceMarkRoomGracePeriodProcedure,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer span.End()
+	if err := h.service.MarkRoomGracePeriod(
+		ctx,
+		request.Msg.GetRoomCode(),
+		time.UnixMilli(request.Msg.GetLastEmptyAtMs()),
+		time.UnixMilli(request.Msg.GetDestroyAfterMs()),
+	); err != nil {
+		return nil, roomErrorToConnect(err)
+	}
+	return connect.NewResponse(&internalv1.MarkRoomGracePeriodResponse{Updated: true}), nil
+}
+
+func (h *internalRPCHandler) MarkRoomActive(
+	ctx context.Context,
+	request *connect.Request[internalv1.MarkRoomActiveRequest],
+) (*connect.Response[internalv1.MarkRoomActiveResponse], error) {
+	ctx, span, err := internalrpc.PrepareServerRequest(
+		ctx,
+		request.Header(),
+		h.authToken,
+		internalv1connect.RoomInternalServiceMarkRoomActiveProcedure,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer span.End()
+	if err := h.service.MarkRoomActive(ctx, request.Msg.GetRoomCode()); err != nil {
+		return nil, roomErrorToConnect(err)
+	}
+	return connect.NewResponse(&internalv1.MarkRoomActiveResponse{Updated: true}), nil
+}
+
+func (h *internalRPCHandler) DestroyRoom(
+	ctx context.Context,
+	request *connect.Request[internalv1.DestroyRoomRequest],
+) (*connect.Response[internalv1.DestroyRoomResponse], error) {
+	ctx, span, err := internalrpc.PrepareServerRequest(
+		ctx,
+		request.Header(),
+		h.authToken,
+		internalv1connect.RoomInternalServiceDestroyRoomProcedure,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer span.End()
+	if err := h.service.DestroyRoom(ctx, request.Msg.GetRoomCode()); err != nil {
+		return nil, roomErrorToConnect(err)
+	}
+	return connect.NewResponse(&internalv1.DestroyRoomResponse{Destroyed: true}), nil
+}
+
+func (h *internalRPCHandler) MarkAllActiveRoomsGracePeriod(
+	ctx context.Context,
+	request *connect.Request[internalv1.MarkAllActiveRoomsGracePeriodRequest],
+) (*connect.Response[internalv1.MarkAllActiveRoomsGracePeriodResponse], error) {
+	ctx, span, err := internalrpc.PrepareServerRequest(
+		ctx,
+		request.Header(),
+		h.authToken,
+		internalv1connect.RoomInternalServiceMarkAllActiveRoomsGracePeriodProcedure,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer span.End()
+	count, err := h.service.MarkAllActiveRoomsGracePeriod(
+		ctx,
+		time.UnixMilli(request.Msg.GetLastEmptyAtMs()),
+		time.UnixMilli(request.Msg.GetDestroyAfterMs()),
+	)
+	if err != nil {
+		return nil, roomErrorToConnect(err)
+	}
+	return connect.NewResponse(&internalv1.MarkAllActiveRoomsGracePeriodResponse{UpdatedCount: count}), nil
+}
+
+func (h *internalRPCHandler) CleanupExpiredRooms(
+	ctx context.Context,
+	request *connect.Request[internalv1.CleanupExpiredRoomsRequest],
+) (*connect.Response[internalv1.CleanupExpiredRoomsResponse], error) {
+	ctx, span, err := internalrpc.PrepareServerRequest(
+		ctx,
+		request.Header(),
+		h.authToken,
+		internalv1connect.RoomInternalServiceCleanupExpiredRoomsProcedure,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer span.End()
+	roomCodes, err := h.service.CleanupExpiredRoomCodes(ctx, time.UnixMilli(request.Msg.GetNowMs()))
+	if err != nil {
+		return nil, roomErrorToConnect(err)
+	}
+	return connect.NewResponse(&internalv1.CleanupExpiredRoomsResponse{RoomCodes: roomCodes}), nil
+}
+
 func roomErrorToConnect(err error) error {
 	switch {
 	case err == nil:
@@ -305,6 +617,8 @@ func roomErrorToConnect(err error) error {
 		return connect.NewError(connect.CodeAlreadyExists, err)
 	case errors.Is(err, ErrMediaNotFound), errors.Is(err, ErrRoomNotFound), errors.Is(err, ErrUserNotFound):
 		return connect.NewError(connect.CodeNotFound, err)
+	case errors.Is(err, ErrIdentityUnavailable):
+		return connect.NewError(connect.CodeUnavailable, err)
 	default:
 		return internalrpc.ToConnectError(err)
 	}
@@ -336,6 +650,11 @@ func roomErrorFromConnect(err error) error {
 		default:
 			return ErrRoomNotFound
 		}
+	case connect.CodeUnavailable:
+		if connectErr.Message() == ErrIdentityUnavailable.Error() {
+			return ErrIdentityUnavailable
+		}
+		return err
 	default:
 		return err
 	}

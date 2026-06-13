@@ -431,6 +431,8 @@ func (h *RoomHTTPHandler) writeRoomError(w http.ResponseWriter, err error) {
 		writeAPIError(w, http.StatusNotFound, "NOT_FOUND", "room not found", nil)
 	case errors.Is(err, roomapi.ErrUnableToCreate):
 		writeAPIError(w, http.StatusConflict, "CONFLICT", "unable to generate room code", nil)
+	case errors.Is(err, roomapi.ErrIdentityUnavailable):
+		writeAPIError(w, http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE", "identity service is unavailable", nil)
 	default:
 		writeAPIError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "room request failed", nil)
 	}

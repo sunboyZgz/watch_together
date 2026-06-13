@@ -56,6 +56,14 @@ func TestRPCClientMatchesLocalIdentityService(t *testing.T) {
 	if profile.ID != registered.User.ID || profile.Nickname != "Xingye" {
 		t.Fatalf("unexpected profile: %+v", profile)
 	}
+
+	profiles, err := client.BatchGetUserProfiles(context.Background(), []string{registered.User.ID, "missing-user"})
+	if err != nil {
+		t.Fatalf("batch profiles through rpc: %v", err)
+	}
+	if len(profiles) != 1 || profiles[0].ID != registered.User.ID {
+		t.Fatalf("unexpected batch profiles: %+v", profiles)
+	}
 }
 
 func TestRPCClientMapsIdentityErrors(t *testing.T) {

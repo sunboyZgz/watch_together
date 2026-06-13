@@ -41,6 +41,7 @@ func main() {
 		RoomRuntimeMode:     runtimeConfig.RoomRuntimeMode,
 		DatabaseURL:         runtimeConfig.DatabaseURL,
 		IdentityDatabaseURL: runtimeConfig.IdentityDatabaseURL,
+		RoomDatabaseURL:     runtimeConfig.RoomDatabaseURL,
 		MediaDatabaseURL:    runtimeConfig.MediaDatabaseURL,
 		ProgressDatabaseURL: runtimeConfig.ProgressDatabaseURL,
 		TimelineDatabaseURL: runtimeConfig.TimelineDatabaseURL,
