@@ -209,7 +209,7 @@ func NewServer(config Config) *Server {
 	mediaService := newMediaService(db, mediaDB, config, serviceConfig)
 	identityService := newIdentityService(db, identityDB, config, serviceConfig, tokenManager)
 	progressService := newProgressService(db, progressDB, identityService, mediaService, config, serviceConfig)
-	homeService := newHomeService(db, identityService, progressService, mediaService, config, serviceConfig)
+	homeService := newHomeService(identityService, progressService, mediaService, config, serviceConfig)
 	roomService, roomLifecycle := newRoomService(db, roomDB, mediaService, identityService, config, serviceConfig)
 	var timelineRecorder timeline.ResultRecorder = timeline.NoopRecorder{}
 	var timelineRecoveryReader timeline.RecoveryReader
@@ -728,7 +728,6 @@ func newIdentityService(
 
 // newHomeService connects home summary reads to local composition or the home RPC boundary.
 func newHomeService(
-	db *gorm.DB,
 	identityService auth.IdentityService,
 	progressService progress.BusinessService,
 	mediaService *media.Service,
@@ -741,10 +740,7 @@ func newHomeService(
 	if identityService != nil && progressService != nil && mediaService != nil {
 		return home.NewServiceWithComposition(identityService, progressService, mediaService)
 	}
-	if db == nil || mediaService == nil {
-		return nil
-	}
-	return home.NewServiceWithMediaSummaries(store.NewPostgresHomeStore(db), mediaService)
+	return nil
 }
 
 // newMediaService connects media catalog APIs to the shared PostgreSQL handle when available.

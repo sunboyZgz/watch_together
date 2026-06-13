@@ -163,7 +163,7 @@ MEDIA_STORAGE_FORCE_PATH_STYLE=true
 
 `ROOM_RUNTIME_MODE` supports `local_process` and `distributed_authority`. `local_process` keeps active room playback authority, WebSocket connection tables, control deduplication, and seek rate limiting in one Go process. `distributed_authority` requires `SERVER_INSTANCE_ID`, PostgreSQL, Redis, NATS, Kafka broker config, and `WS_CROSS_INSTANCE_BROADCAST_ENABLED=true`.
 
-If `DATABASE_URL` is empty or PostgreSQL cannot be opened, database-backed HTTP endpoints return `503`. If `IDENTITY_DATABASE_URL` is set, local identity mode and `cmd/identityservice` use it for identity-owned tables and `/readyz` reports that dependency as `identity_postgres`; if it is empty, identity uses the main `DATABASE_URL`. In `IDENTITY_SERVICE_MODE=rpc`, `roomserver` does not connect to the identity database directly. Identity data still uses the main `users` table by default.
+If `DATABASE_URL` is empty or PostgreSQL cannot be opened, database-backed HTTP endpoints return `503`. If `IDENTITY_DATABASE_URL` is set, local identity mode and `cmd/identityservice` use it for identity-owned tables and `/readyz` reports that dependency as `identity_postgres`; if it is empty, identity uses the main `DATABASE_URL`. In `IDENTITY_SERVICE_MODE=rpc`, `roomserver` does not connect to the identity database directly and rejects a non-empty `IDENTITY_DATABASE_URL`; compose app/prod paths pass the identity URL only to `cmd/identityservice`. Identity database migrations live under `server/identity_migrations`, and `cmd/identitydbsync` can copy/verify the main-database shadow table.
 
 If `ROOM_DATABASE_URL` is set, local room mode and `cmd/roomservice` use it for `rooms` and `room_members`; if it is empty, room storage uses the main `DATABASE_URL`. In `ROOM_SERVICE_MODE=rpc`, `roomserver` does not connect to the room database directly and rejects a non-empty `ROOM_DATABASE_URL`; compose app/prod paths pass the room URL only to `cmd/roomservice`. Room database migrations live under `server/room_migrations`, and `cmd/roomdbsync` can copy/verify the main-database shadow tables.
 
@@ -220,7 +220,7 @@ Service foundation settings:
 - `IDENTITY_SERVICE_MODE`, `ROOM_SERVICE_MODE`, `MEDIA_SERVICE_MODE`, `PROGRESS_SERVICE_MODE`, `HOME_SERVICE_MODE`, `TIMELINE_SERVICE_MODE`, and `AUTHORITY_SERVICE_MODE` accept `local` or `rpc`. `local` keeps current in-process adapters. `rpc` calls the matching `*_SERVICE_ADDR`.
 - `AUTHORITY_SERVICE_MODE=rpc` also requires `AUTHORITY_LEASE_INSTANCE_ID`, which is the Redis authority lease owner claimed during HTTP room bootstrap for the authority service.
 - `OTEL_TRACING_ENABLED` turns on OpenTelemetry tracing. `OTEL_EXPORTER_OTLP_ENDPOINT` points at the internal OTLP collector, and `OTEL_TRACE_SAMPLE_RATIO` must be between `0` and `1`.
-- Phase 9 keeps the old single-database fallback but can put media-owned tables in an independent PostgreSQL database through `MEDIA_DATABASE_URL`. Phase 10 does the same for timeline-owned outbox rows through `TIMELINE_DATABASE_URL`. Phase 11 makes timeline RPC the compose default while preserving `local` as an explicit single-process rollback path, Phase 12 moves result timeline ownership into `cmd/timelineservice`, Phase 13 documents the authority boundary, Phase 14 adds a non-default `roomauthorityservice` RPC pilot under `rpc-pilot`, Phase 15 hardens that pilot with dynamic readiness, metrics, stable failure tests, and lease identity naming, Phase 16 makes local compose `app` default to media/timeline/authority RPC, and Phase 17/18 adds identity RPC to the same local app baseline. Table owners and future split rules are documented in [Database Ownership](./database-ownership.md) and enforced from `server/internal/store/db_ownership.yaml`.
+- Phase 9 keeps the old single-database fallback but can put media-owned tables in an independent PostgreSQL database through `MEDIA_DATABASE_URL`. Phase 10 does the same for timeline-owned outbox rows through `TIMELINE_DATABASE_URL`. Phase 11 makes timeline RPC the compose default while preserving `local` as an explicit single-process rollback path, Phase 12 moves result timeline ownership into `cmd/timelineservice`, Phase 13 documents the authority boundary, Phase 14 adds a non-default `roomauthorityservice` RPC pilot under `rpc-pilot`, Phase 15 hardens that pilot with dynamic readiness, metrics, stable failure tests, and lease identity naming, Phase 16 makes local compose `app` default to media/timeline/authority RPC, Phase 17/18 adds identity RPC to the same local app baseline, and Phase 22 gives identity an independent database by default in compose. Table owners and future split rules are documented in [Database Ownership](./database-ownership.md) and enforced from `server/internal/store/db_ownership.yaml`.
 
 See [distributed-architecture.md](./distributed-architecture.md) for the current module map, business flows, and monitoring data flow.
 
@@ -234,6 +234,15 @@ APP_ENV=local INTERNAL_RPC_ADDR=:8093 go run ./cmd/identityservice
 APP_ENV=local INTERNAL_RPC_ADDR=:8094 IDENTITY_SERVICE_MODE=local MEDIA_SERVICE_MODE=local go run ./cmd/roomservice
 APP_ENV=local INTERNAL_RPC_ADDR=:8090 go run ./cmd/mediaservice
 APP_ENV=local INTERNAL_RPC_ADDR=:8091 go run ./cmd/timelineservice
+```
+
+Identity database helpers:
+
+```bash
+cd server
+IDENTITY_DATABASE_URL=postgres://app:app@127.0.0.1:5432/anime_watch_identity_dev?sslmode=disable make identity-migration-up
+go run ./cmd/identitydbsync --dry-run
+go run ./cmd/identitydbsync --verify-only
 ```
 
 Room database helpers:
@@ -374,7 +383,7 @@ OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4318 \
 docker compose --profile rpc-pilot up -d --build
 ```
 
-`rpc-pilot` starts `roomserver-rpc-pilot`, `identityservice`, `roomservice`, `mediaservice`, `timelineservice`, `roomauthorityservice`, an OTLP collector, and the media/timeline database init jobs. In this profile `roomserver-rpc-pilot` sets `ROOM_RUNTIME_MODE=distributed_authority`, `AUTHORITY_SERVICE_MODE=rpc`, `AUTHORITY_SERVICE_ADDR=http://roomauthorityservice:8090`, and `AUTHORITY_LEASE_INSTANCE_ID=roomauthorityservice-1`. `identityservice` and `roomservice` use the main database by default. `roomservice` calls `mediaservice` through `MEDIA_SERVICE_MODE=rpc` for media details. `mediaservice` uses `MEDIA_DATABASE_URL=postgres://app:app@postgres:5432/anime_watch_media_dev?sslmode=disable` in compose. `timelineservice` and `outboxworker` use `TIMELINE_DATABASE_URL=postgres://app:app@postgres:5432/anime_watch_timeline_dev?sslmode=disable`. The normal local compose `app` path uses the same identity, room, media, timeline, and authority RPC boundaries, while `rpc-pilot` remains useful for observability and load experiments. The code still supports local service modes for explicit rollback or bare single-process debugging.
+`rpc-pilot` starts `roomserver-rpc-pilot`, `identityservice`, `roomservice`, `mediaservice`, `timelineservice`, `roomauthorityservice`, an OTLP collector, and the identity/media/timeline database init jobs. In this profile `roomserver-rpc-pilot` sets `ROOM_RUNTIME_MODE=distributed_authority`, `AUTHORITY_SERVICE_MODE=rpc`, `AUTHORITY_SERVICE_ADDR=http://roomauthorityservice:8090`, and `AUTHORITY_LEASE_INSTANCE_ID=roomauthorityservice-1`. `identityservice` uses `IDENTITY_DATABASE_URL=postgres://app:app@postgres:5432/anime_watch_identity_dev?sslmode=disable` in compose. `roomservice` calls identity and media through RPC and uses `ROOM_DATABASE_URL=postgres://app:app@postgres:5432/anime_watch_room_dev?sslmode=disable`. `mediaservice` uses `MEDIA_DATABASE_URL=postgres://app:app@postgres:5432/anime_watch_media_dev?sslmode=disable` in compose. `timelineservice` and `outboxworker` use `TIMELINE_DATABASE_URL=postgres://app:app@postgres:5432/anime_watch_timeline_dev?sslmode=disable`. The normal local compose `app` path uses the same identity, room, media, timeline, and authority RPC boundaries, while `rpc-pilot` remains useful for observability and load experiments. The code still supports local service modes for explicit rollback or bare single-process debugging.
 
 Local app RPC smoke checks:
 
@@ -390,7 +399,7 @@ curl -H "Authorization: Bearer <token>" -H "Content-Type: application/json" \
   -d '{"mediaItemId":"<episode-id>"}' http://127.0.0.1:8080/rooms
 ```
 
-`roomserver` readiness actively probes identity, room, media, timeline, and authority RPC service readiness in RPC mode. `identityservice`, `roomservice`, `mediaservice`, and `timelineservice` readiness ping PostgreSQL at request time. `roomservice` also checks its media RPC dependency when configured for media RPC. `timelineservice` reports Kafka reader state as `ok`, `disabled`, or `unavailable` depending on broker configuration and reader initialization. `roomauthorityservice` readiness checks PostgreSQL, Redis, NATS, timeline RPC, and internal RPC availability.
+`roomserver` readiness actively probes identity, room, media, progress, home, timeline, and authority RPC service readiness in RPC mode. `identityservice`, `roomservice`, `mediaservice`, `progressservice`, and `timelineservice` readiness ping their selected PostgreSQL database at request time. `roomservice`, `progressservice`, and `homecompositionservice` also check their configured RPC dependencies. `timelineservice` reports Kafka reader state as `ok`, `disabled`, or `unavailable` depending on broker configuration and reader initialization. `roomauthorityservice` readiness checks Redis, NATS, room RPC, timeline RPC, and internal RPC availability.
 
 Start the server:
 

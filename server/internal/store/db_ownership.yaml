@@ -6,13 +6,12 @@ store_files:
   room_postgres.go: room-session
   progress_postgres.go: progress
   room_timeline_outbox.go: timeline
-  home_postgres.go: home-composition
 
 tables:
   users:
     owner: identity
     writers: [identity]
-    readers: [identity, home-composition]
+    readers: [identity]
   media_tags:
     owner: media
     writers: [media]
@@ -44,7 +43,7 @@ tables:
   user_media_progress:
     owner: progress
     writers: [progress]
-    readers: [progress, home-composition]
+    readers: [progress]
   room_timeline_outbox:
     owner: timeline
     writers: [timeline]
@@ -60,16 +59,4 @@ tables:
     readers: [media]
     status: retired
 
-cross_context_access:
-  - caller: home-composition
-    owner: identity
-    tables: [users]
-    access: read
-    path: home_postgres.go
-    reason: home profile summary read model
-  - caller: home-composition
-    owner: progress
-    tables: [user_media_progress]
-    access: read
-    path: home_postgres.go
-    reason: continue-watching progress read model
+cross_context_access: []

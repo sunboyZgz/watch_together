@@ -1,10 +1,11 @@
 MIGRATIONS_DIR := ./migrations
+IDENTITY_MIGRATIONS_DIR := ./identity_migrations
 MEDIA_MIGRATIONS_DIR := ./media_migrations
 TIMELINE_MIGRATIONS_DIR := ./timeline_migrations
 PROGRESS_MIGRATIONS_DIR := ./progress_migrations
 ROOM_MIGRATIONS_DIR := ./room_migrations
 
-.PHONY: migration-create migration-up migration-down migration-version media-migration-up media-migration-down media-migration-version timeline-migration-up timeline-migration-down timeline-migration-version progress-migration-up progress-migration-down progress-migration-version room-migration-up room-migration-down room-migration-version proto-lint proto-generate verify-phase8 verify-phase9 verify-phase10 verify-phase11 verify-phase16
+.PHONY: migration-create migration-up migration-down migration-version identity-migration-up identity-migration-down identity-migration-version media-migration-up media-migration-down media-migration-version timeline-migration-up timeline-migration-down timeline-migration-version progress-migration-up progress-migration-down progress-migration-version room-migration-up room-migration-down room-migration-version proto-lint proto-generate verify-phase8 verify-phase9 verify-phase10 verify-phase11 verify-phase16
 
 migration-create:
 	@test -n "$(name)" || (echo "usage: make migration-create name=create_users_table" && exit 1)
@@ -18,6 +19,18 @@ migration-down:
 
 migration-version:
 	@./scripts/migrate.sh version
+
+identity-migration-up:
+	@test -n "$$IDENTITY_DATABASE_URL" || (echo "IDENTITY_DATABASE_URL is required" && exit 1)
+	@MIGRATIONS_DIR=$(IDENTITY_MIGRATIONS_DIR) DATABASE_URL="$$IDENTITY_DATABASE_URL" ./scripts/migrate.sh up
+
+identity-migration-down:
+	@test -n "$$IDENTITY_DATABASE_URL" || (echo "IDENTITY_DATABASE_URL is required" && exit 1)
+	@MIGRATIONS_DIR=$(IDENTITY_MIGRATIONS_DIR) DATABASE_URL="$$IDENTITY_DATABASE_URL" ./scripts/migrate.sh down 1
+
+identity-migration-version:
+	@test -n "$$IDENTITY_DATABASE_URL" || (echo "IDENTITY_DATABASE_URL is required" && exit 1)
+	@MIGRATIONS_DIR=$(IDENTITY_MIGRATIONS_DIR) DATABASE_URL="$$IDENTITY_DATABASE_URL" ./scripts/migrate.sh version
 
 media-migration-up:
 	@test -n "$$MEDIA_DATABASE_URL" || (echo "MEDIA_DATABASE_URL is required" && exit 1)

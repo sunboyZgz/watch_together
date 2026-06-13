@@ -4,25 +4,24 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
+	"watch_together/server/internal/auth"
 	mediacatalog "watch_together/server/internal/media"
+	progressapi "watch_together/server/internal/progress"
 )
 
 func TestSummaryEnrichesAndSkipsMissingMediaSummaries(t *testing.T) {
 	coverURL := "https://example.com/cover.jpg"
-	service := NewServiceWithMediaSummaries(
-		&fakeSummaryStore{
-			summary: Summary{
-				User: UserSummary{Nickname: "Xingye", AvatarSeed: "xingye"},
-				LastWatched: &WatchProgressSummary{
-					MediaItemID:         "episode-missing",
-					LastPositionSeconds: 12,
-					DurationSeconds:     120,
-				},
-				ContinueWatching: []WatchProgressSummary{
-					{MediaItemID: "episode-1", LastPositionSeconds: 30, DurationSeconds: 300},
-					{MediaItemID: "episode-missing", LastPositionSeconds: 40, DurationSeconds: 400},
-				},
+	service := NewServiceWithComposition(
+		serviceHomeUserProfiles{},
+		serviceHomeProgress{
+			last: []progressapi.Summary{
+				{MediaItemID: "episode-missing", LastPositionSeconds: 12, DurationSeconds: 120, LastWatchedAt: time.Now()},
+			},
+			continueWatching: []progressapi.Summary{
+				{MediaItemID: "episode-1", LastPositionSeconds: 30, DurationSeconds: 300},
+				{MediaItemID: "episode-missing", LastPositionSeconds: 40, DurationSeconds: 400},
 			},
 		},
 		&fakeMediaSummaryProvider{
@@ -51,11 +50,11 @@ func TestSummaryEnrichesAndSkipsMissingMediaSummaries(t *testing.T) {
 
 func TestSummaryMapsMediaSummaryFailure(t *testing.T) {
 	mediaErr := errors.New("media rpc unavailable")
-	service := NewServiceWithMediaSummaries(
-		&fakeSummaryStore{
-			summary: Summary{
-				User:        UserSummary{Nickname: "Xingye", AvatarSeed: "xingye"},
-				LastWatched: &WatchProgressSummary{MediaItemID: "episode-1"},
+	service := NewServiceWithComposition(
+		serviceHomeUserProfiles{},
+		serviceHomeProgress{
+			last: []progressapi.Summary{
+				{MediaItemID: "episode-1", LastPositionSeconds: 1, DurationSeconds: 100, LastWatchedAt: time.Now()},
 			},
 		},
 		&fakeMediaSummaryProvider{err: mediaErr},
@@ -67,16 +66,26 @@ func TestSummaryMapsMediaSummaryFailure(t *testing.T) {
 	}
 }
 
-type fakeSummaryStore struct {
-	summary Summary
-	err     error
+type serviceHomeUserProfiles struct{}
+
+func (serviceHomeUserProfiles) GetUserProfile(context.Context, string) (auth.User, error) {
+	return auth.User{ID: "user-a", Nickname: "Xingye", AvatarSeed: "xingye"}, nil
 }
 
-func (s *fakeSummaryStore) GetHomeSummary(context.Context, string) (Summary, error) {
-	if s.err != nil {
-		return Summary{}, s.err
+type serviceHomeProgress struct {
+	last             []progressapi.Summary
+	continueWatching []progressapi.Summary
+	err              error
+}
+
+func (p serviceHomeProgress) ListRecentUserProgress(_ context.Context, params progressapi.RecentParams) ([]progressapi.Summary, error) {
+	if p.err != nil {
+		return nil, p.err
 	}
-	return s.summary, nil
+	if params.IncompleteOnly {
+		return p.continueWatching, nil
+	}
+	return p.last, nil
 }
 
 type fakeMediaSummaryProvider struct {

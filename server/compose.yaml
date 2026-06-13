@@ -11,6 +11,25 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+  identity-postgres-init:
+    profiles: ["app", "services", "rpc-pilot"]
+    image: postgres:16
+    container_name: anime-watch-identity-postgres-init
+    depends_on:
+      - postgres
+    restart: "no"
+    environment:
+      PGPASSWORD: app
+      IDENTITY_POSTGRES_DB: ${IDENTITY_POSTGRES_DB:-anime_watch_identity_dev}
+    entrypoint: >
+      /bin/sh -c "
+      until pg_isready -h postgres -U app -d anime_watch_dev; do
+        sleep 1;
+      done;
+      if ! psql -h postgres -U app -d postgres -tAc \"SELECT 1 FROM pg_database WHERE datname = '$${IDENTITY_POSTGRES_DB:-anime_watch_identity_dev}'\" | grep -q 1; then
+        createdb -h postgres -U app \"$${IDENTITY_POSTGRES_DB:-anime_watch_identity_dev}\";
+      fi;
+      "
   media-postgres-init:
     profiles: ["app", "services", "rpc-pilot"]
     image: postgres:16
@@ -291,6 +310,7 @@ services:
     restart: unless-stopped
     depends_on:
       - postgres
+      - identity-postgres-init
     env_file:
       - .env
     environment:
@@ -306,7 +326,7 @@ services:
       AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:-watch_together_local_dev_jwt_secret_change_me}
       AUTH_ACCESS_TOKEN_TTL_HOURS: ${AUTH_ACCESS_TOKEN_TTL_HOURS:-24}
       DATABASE_URL: postgres://app:app@postgres:5432/anime_watch_dev?sslmode=disable
-      IDENTITY_DATABASE_URL: ${IDENTITY_DATABASE_URL:-}
+      IDENTITY_DATABASE_URL: postgres://app:app@postgres:5432/${IDENTITY_POSTGRES_DB:-anime_watch_identity_dev}?sslmode=disable
       OTEL_TRACING_ENABLED: ${OTEL_TRACING_ENABLED:-false}
       OTEL_SERVICE_NAME: ${OTEL_SERVICE_NAME:-watch-together-identityservice}
       OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}

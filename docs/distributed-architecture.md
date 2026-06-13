@@ -34,31 +34,36 @@ Backend mode in `distributed_authority`:
 
 ## Service Evolution Architecture
 
-Phase 7 is not a full microservice split. Phase 8 keeps that constraint but hardens the pilot. Phase 9 adds a database-boundary pilot for media, Phase 10 adds the same database-boundary pilot for timeline outbox storage, Phase 11 makes timeline RPC the default compose path, Phase 12 gives `cmd/timelineservice` ownership of canonical result event construction, Phase 14 adds `cmd/roomauthorityservice` to `rpc-pilot`, Phase 15 hardens that authority RPC pilot, Phase 16 switches the local compose `app` path to full RPC, Phase 17/18 adds `cmd/identityservice`, Phase 19 adds `cmd/roomservice`, Phase 20 adds progress/home composition services plus a progress database boundary, and Phase 21 adds a room database boundary plus lifecycle/recovery room RPC. Android HTTP/WebSocket payloads remain unchanged. `IDENTITY_DATABASE_URL`, `ROOM_DATABASE_URL`, `MEDIA_DATABASE_URL`, `PROGRESS_DATABASE_URL`, and `TIMELINE_DATABASE_URL` are optional database-boundary URLs; identity currently falls back to the main database. In local compose `app`, `ROOMSERVER_IDENTITY_SERVICE_MODE`, `ROOMSERVER_ROOM_SERVICE_MODE`, `ROOMSERVER_MEDIA_SERVICE_MODE`, `ROOMSERVER_PROGRESS_SERVICE_MODE`, `ROOMSERVER_HOME_SERVICE_MODE`, `ROOMSERVER_TIMELINE_SERVICE_MODE`, and `ROOMSERVER_AUTHORITY_SERVICE_MODE` default to `rpc`; roomserver probes `identity_rpc`, `room_rpc`, `media_rpc`, `progress_rpc`, `home_rpc`, `timeline_rpc`, and `authority_rpc` through each service `/readyz`. Production compose defaults identity/room/media/progress/home/timeline RPC and keeps `AUTHORITY_SERVICE_MODE=local`. Bare single-process debugging still uses local config defaults. `AUTHORITY_LEASE_INSTANCE_ID` is the Redis authority lease owner used by the authority service path. The `.proto` files under `server/api/internal/v1` are the source contracts for implemented internal RPC; generated Go code lives under `server/internal/rpcgen/v1`.
+Phase 7 is not a full microservice split. Phase 8 keeps that constraint but hardens the pilot. Phase 9 adds a database-boundary pilot for media, Phase 10 adds the same database-boundary pilot for timeline outbox storage, Phase 11 makes timeline RPC the default compose path, Phase 12 gives `cmd/timelineservice` ownership of canonical result event construction, Phase 14 adds `cmd/roomauthorityservice` to `rpc-pilot`, Phase 15 hardens that authority RPC pilot, Phase 16 switches the local compose `app` path to full RPC, Phase 17/18 adds `cmd/identityservice`, Phase 19 adds `cmd/roomservice`, Phase 20 adds progress/home composition services plus a progress database boundary, Phase 21 adds a room database boundary plus lifecycle/recovery room RPC, and Phase 22 adds the identity database boundary while removing the home SQL read model. Android HTTP/WebSocket payloads remain unchanged. `IDENTITY_DATABASE_URL`, `ROOM_DATABASE_URL`, `MEDIA_DATABASE_URL`, `PROGRESS_DATABASE_URL`, and `TIMELINE_DATABASE_URL` are optional database-boundary URLs; compose app/prod set identity/room/media/progress/timeline URLs on their owning services while keeping roomserver on RPC. In local compose `app`, `ROOMSERVER_IDENTITY_SERVICE_MODE`, `ROOMSERVER_ROOM_SERVICE_MODE`, `ROOMSERVER_MEDIA_SERVICE_MODE`, `ROOMSERVER_PROGRESS_SERVICE_MODE`, `ROOMSERVER_HOME_SERVICE_MODE`, `ROOMSERVER_TIMELINE_SERVICE_MODE`, and `ROOMSERVER_AUTHORITY_SERVICE_MODE` default to `rpc`; roomserver probes `identity_rpc`, `room_rpc`, `media_rpc`, `progress_rpc`, `home_rpc`, `timeline_rpc`, and `authority_rpc` through each service `/readyz`. Production compose defaults identity/room/media/progress/home/timeline RPC and keeps `AUTHORITY_SERVICE_MODE=local`. Bare single-process debugging still uses local config defaults. `AUTHORITY_LEASE_INSTANCE_ID` is the Redis authority lease owner used by the authority service path. The `.proto` files under `server/api/internal/v1` are the source contracts for implemented internal RPC; generated Go code lives under `server/internal/rpcgen/v1`.
 
 ```mermaid
 flowchart LR
   Roomserver[roomserver]
   App[app composition root]
+  IdentityPort[identity port]
   MediaPort[media port]
   ProgressPort[progress port]
   HomePort[home port]
   TimelinePort[timeline port]
+  IdentityLocal[local identity adapter]
   MediaLocal[local media adapter]
   ProgressLocal[local progress adapter]
   HomeLocal[local home composition adapter]
   TimelineLocal[local timeline adapter]
+  IdentityRPC[identity RPC adapter]
   MediaRPC[media RPC adapter]
   ProgressRPC[progress RPC adapter]
   HomeRPC[home RPC adapter]
   TimelineRPC[timeline RPC adapter]
   AuthorityRPC[authority RPC adapter]
+  IdentityService[cmd/identityservice]
   MediaService[cmd/mediaservice]
   ProgressService[cmd/progressservice]
   HomeService[cmd/homecompositionservice]
   TimelineService[cmd/timelineservice]
   AuthorityService[cmd/roomauthorityservice]
   MainPG[(main PostgreSQL database)]
+  IdentityPG[(identity PostgreSQL database)]
   MediaPG[(media PostgreSQL database)]
   ProgressPG[(progress PostgreSQL database)]
   TimelinePG[(timeline PostgreSQL database)]
@@ -67,10 +72,13 @@ flowchart LR
   NATS[(NATS)]
 
   Roomserver --> App
+  App --> IdentityPort
   App --> MediaPort
   App --> ProgressPort
   App --> HomePort
   App --> TimelinePort
+  IdentityPort -->|IDENTITY_SERVICE_MODE=local| IdentityLocal
+  IdentityPort -->|IDENTITY_SERVICE_MODE=rpc| IdentityRPC
   MediaPort -->|MEDIA_SERVICE_MODE=local| MediaLocal
   MediaPort -->|MEDIA_SERVICE_MODE=rpc| MediaRPC
   ProgressPort -->|PROGRESS_SERVICE_MODE=local| ProgressLocal
@@ -85,12 +93,15 @@ flowchart LR
   HomeRPC --> HomeService
   TimelineRPC --> TimelineService
   AuthorityRPC --> AuthorityService
+  IdentityRPC --> IdentityService
+  IdentityLocal -->|IDENTITY_DATABASE_URL or DATABASE_URL| IdentityPG
+  IdentityService -->|IDENTITY_DATABASE_URL fallback DATABASE_URL| IdentityPG
   MediaLocal -->|MEDIA_DATABASE_URL or DATABASE_URL| MediaPG
   ProgressLocal -->|PROGRESS_DATABASE_URL or DATABASE_URL| ProgressPG
   TimelineLocal -->|TIMELINE_DATABASE_URL or DATABASE_URL| TimelinePG
   MediaService -->|MEDIA_DATABASE_URL fallback DATABASE_URL| MediaPG
   ProgressService -->|PROGRESS_DATABASE_URL fallback DATABASE_URL| ProgressPG
-  ProgressService -->|identity RPC| MainPG
+  ProgressService -->|identity RPC| IdentityService
   ProgressService -->|media RPC| MediaService
   HomeService -->|identity/progress/media RPC| ProgressService
   HomeService --> MediaService
@@ -105,11 +116,12 @@ flowchart LR
 
 ## Database Ownership
 
-Phase 7 keeps one PostgreSQL database and introduces logical ownership boundaries. Phase 8 makes those boundaries testable. Phase 9 gives `media` its own PostgreSQL database boundary when `MEDIA_DATABASE_URL` is configured. Phase 10 gives `timeline` its own PostgreSQL database boundary when `TIMELINE_DATABASE_URL` is configured. Phase 20 gives `progress` its own PostgreSQL database boundary when `PROGRESS_DATABASE_URL` is configured and moves `/home/summary` to service composition by default. Phase 21 gives `room-session` its own PostgreSQL database boundary when `ROOM_DATABASE_URL` is configured and keeps room lifecycle/recovery metadata behind room RPC. Table owners and cross-context access rules live in [Database Ownership](./database-ownership.md), with the CI source of truth in `server/internal/store/db_ownership.yaml`.
+Phase 7 keeps one PostgreSQL database and introduces logical ownership boundaries. Phase 8 makes those boundaries testable. Phase 9 gives `media` its own PostgreSQL database boundary when `MEDIA_DATABASE_URL` is configured. Phase 10 gives `timeline` its own PostgreSQL database boundary when `TIMELINE_DATABASE_URL` is configured. Phase 20 gives `progress` its own PostgreSQL database boundary when `PROGRESS_DATABASE_URL` is configured and moves `/home/summary` to service composition by default. Phase 21 gives `room-session` its own PostgreSQL database boundary when `ROOM_DATABASE_URL` is configured and keeps room lifecycle/recovery metadata behind room RPC. Phase 22 gives `identity` its own PostgreSQL database boundary when `IDENTITY_DATABASE_URL` is configured and removes home-composition direct SQL reads. Table owners and cross-context access rules live in [Database Ownership](./database-ownership.md), with the CI source of truth in `server/internal/store/db_ownership.yaml`.
 
 ```mermaid
 flowchart TD
   MainPG[(Main PostgreSQL database)]
+  IdentityPG[(Identity PostgreSQL database)]
   RoomPG[(Room PostgreSQL database)]
   MediaPG[(Media PostgreSQL database)]
   ProgressPG[(Progress PostgreSQL database)]
@@ -121,14 +133,14 @@ flowchart TD
   Timeline[timeline owns room_timeline_outbox]
   Home[home-composition owns no tables]
 
-  MainPG --> Identity
+  IdentityPG --> Identity
   MediaPG --> Media
   RoomPG --> RoomSession
   ProgressPG --> Progress
   TimelinePG --> Timeline
-  Home -->|read model/composition only| Identity
+  Home -->|identity port/RPC| Identity
   Home -->|media port/RPC summaries| Media
-  Home -->|progress RPC/composition only| Progress
+  Home -->|progress port/RPC| Progress
 ```
 
 ## Business Architecture
@@ -458,7 +470,7 @@ Home summary:
 2. `roomserver` calls the home port; compose app/prod default to `HomeCompositionInternalService.GetHomeSummary`.
 3. `cmd/homecompositionservice` loads the profile from identity RPC, recent progress from progress RPC, and title/cover summaries from media RPC.
 4. Missing media summaries are skipped, preserving the old inner-join behavior.
-5. `PostgresHomeStore` remains only an explicit local fallback read model.
+5. There is no home SQL read model fallback; `HOME_SERVICE_MODE=local` still composes through local identity/progress/media ports.
 
 Realtime fan-out:
 
@@ -494,7 +506,7 @@ Authority recovery:
 3. RPC adapters call `cmd/identityservice`, `cmd/roomservice`, `cmd/mediaservice`, `cmd/progressservice`, `cmd/homecompositionservice`, `cmd/timelineservice`, or `cmd/roomauthorityservice` through ConnectRPC.
 4. `servicekit` attaches request id, service name/version, deadline, internal auth, and trace metadata.
 5. OpenTelemetry tracing is opt-in and does not change Android payloads.
-6. `room-session -> media`, `progress -> media`, and `home-composition -> media/progress/identity` now cross through ports/RPC in the default compose path.
+6. `room-session -> media/identity`, `progress -> media/identity`, and `home-composition -> media/progress/identity` now cross through ports/RPC in the default compose path.
 7. `roomserver` create/join/detail/leave/member-check calls can cross the room RPC boundary; lifecycle cleanup and recovery scanner store hooks remain local rollback work until a later lifecycle RPC phase.
 8. `timeline` recorder failures, including timeline RPC timeout, unavailable errors, or explicit local timeline database failure, are fail-closed for accepted controls.
 
@@ -602,7 +614,7 @@ Phase 13 adds the design boundary for `room-authority-service`; see [Room Author
 Current ownership remains:
 
 - `roomserver` owns WebSocket ingress/egress, HTTP bootstrap, local connection tables, client-visible envelopes, NATS realtime fan-out, and local rollback authority decisions.
-- `identityservice` owns register/login/token verification/profile RPC in local compose `app`; it currently uses the main `users` table unless `IDENTITY_DATABASE_URL` is explicitly set.
+- `identityservice` owns register/login/token verification/profile RPC in local compose `app`; compose app/prod give it `IDENTITY_DATABASE_URL` for the identity database, while the main `users` table remains only a shadow/rollback source for bare local fallback and `identitydbsync`.
 - `roomservice` owns room metadata and membership RPC for create, join, detail, leave, and active-member checks; it currently uses the main room tables and calls media through the media port.
 - `roomauthorityservice` owns authority control apply in local compose `app` and `rpc-pilot`.
 - `timelineservice` owns canonical result event generation, timeline outbox writes, and recovery feed composition.

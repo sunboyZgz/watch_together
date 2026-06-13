@@ -61,6 +61,11 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
     CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
     -trimpath \
     -ldflags="-s -w" \
+    -o /out/identitydbsync \
+    ./cmd/identitydbsync && \
+    CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
+    -trimpath \
+    -ldflags="-s -w" \
     -o /out/roomdbsync \
     ./cmd/roomdbsync && \
     CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
@@ -86,6 +91,7 @@ COPY --from=builder /out/mediaservice /app/mediaservice
 COPY --from=builder /out/timelineservice /app/timelineservice
 COPY --from=builder /out/progressservice /app/progressservice
 COPY --from=builder /out/homecompositionservice /app/homecompositionservice
+COPY --from=builder /out/identitydbsync /app/identitydbsync
 COPY --from=builder /out/roomdbsync /app/roomdbsync
 COPY --from=builder /out/progressdbsync /app/progressdbsync
 COPY --from=builder /out/roomauthorityservice /app/roomauthorityservice

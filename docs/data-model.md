@@ -1,6 +1,8 @@
 # Data Model
 
-The durable schema is SQL-first. Main database migrations live under `server/migrations/`; media database migrations live under `server/media_migrations/`; timeline database migrations live under `server/timeline_migrations/`; progress database migrations live under `server/progress_migrations/`; room database migrations live under `server/room_migrations/`. GORM models in `server/internal/model/models.go` mirror the active tables. Table ownership is enforced by `server/internal/store/db_ownership.yaml` plus architecture tests; see [Database Ownership](./database-ownership.md) for the owner map and split checklist.
+The durable schema is SQL-first. Main database migrations live under `server/migrations/`; identity database migrations live under `server/identity_migrations/`; media database migrations live under `server/media_migrations/`; timeline database migrations live under `server/timeline_migrations/`; progress database migrations live under `server/progress_migrations/`; room database migrations live under `server/room_migrations/`. GORM models in `server/internal/model/models.go` mirror the active tables. Table ownership is enforced by `server/internal/store/db_ownership.yaml` plus architecture tests; see [Database Ownership](./database-ownership.md) for the owner map and split checklist.
+
+When `IDENTITY_DATABASE_URL` is empty, `users` continues to live in the main database for local fallback. When `IDENTITY_DATABASE_URL` is set, identity-owned rows are migrated and written in the independent identity database. The old main-database `users` table is kept as shadow/rollback data during the Phase 22 pilot.
 
 When `MEDIA_DATABASE_URL` is empty, media tables continue to live in the main database for local fallback. When `MEDIA_DATABASE_URL` is set, media-owned tables are migrated and read from the independent media database. The old main-database media tables are kept as shadow/rollback data during the Phase 9 pilot.
 

@@ -16,6 +16,24 @@ services:
       timeout: 5s
       retries: 5
 
+  identity-postgres-init:
+    image: postgres:16-alpine
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-watch_together}
+      PGPASSWORD: ${POSTGRES_PASSWORD:-change_me_postgres_password}
+      POSTGRES_DB: ${POSTGRES_DB:-watch_together_prod}
+      IDENTITY_POSTGRES_DB: ${IDENTITY_POSTGRES_DB:-watch_together_identity_prod}
+    entrypoint: >
+      /bin/sh -c "
+      if ! psql -h postgres -U \"$${POSTGRES_USER}\" -d postgres -tAc \"SELECT 1 FROM pg_database WHERE datname = '$${IDENTITY_POSTGRES_DB}'\" | grep -q 1; then
+        createdb -h postgres -U \"$${POSTGRES_USER}\" \"$${IDENTITY_POSTGRES_DB}\";
+      fi;
+      "
+
   media-postgres-init:
     image: postgres:16-alpine
     restart: "no"
@@ -345,6 +363,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      identity-postgres-init:
+        condition: service_completed_successfully
     env_file:
       - .env.prod
     environment:
@@ -360,7 +380,7 @@ services:
       AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:-change_me_to_a_long_random_secret}
       AUTH_ACCESS_TOKEN_TTL_HOURS: ${AUTH_ACCESS_TOKEN_TTL_HOURS:-24}
       DATABASE_URL: postgres://${POSTGRES_USER:-watch_together}:${POSTGRES_PASSWORD:-change_me_postgres_password}@postgres:5432/${POSTGRES_DB:-watch_together_prod}?sslmode=disable
-      IDENTITY_DATABASE_URL: ${IDENTITY_DATABASE_URL:-}
+      IDENTITY_DATABASE_URL: postgres://${POSTGRES_USER:-watch_together}:${POSTGRES_PASSWORD:-change_me_postgres_password}@postgres:5432/${IDENTITY_POSTGRES_DB:-watch_together_identity_prod}?sslmode=disable
       OTEL_TRACING_ENABLED: ${OTEL_TRACING_ENABLED:-false}
       OTEL_SERVICE_NAME: ${OTEL_SERVICE_NAME:-watch-together-identityservice}
       OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}

@@ -1,6 +1,6 @@
 # Runtime Boundaries
 
-This document records the runtime ownership boundaries for the room system. `local_process` remains the default runtime for bare `go run ./cmd/roomserver`. Phase 4 adds a `distributed_authority` MVP for multi-instance room authority, Phase 5 adds fenced authority recovery from the Kafka canonical timeline, Phase 6 adds distributed seek rate limiting plus observability, Phase 7 adds service foundation boundaries with optional media/timeline RPC adapters and logical database ownership, Phase 8 closes the media table access boundary for room/progress while making the RPC pilot verifiable, Phase 9 adds an optional independent media database boundary through `MEDIA_DATABASE_URL`, Phase 10 adds an optional independent timeline database boundary through `TIMELINE_DATABASE_URL`, Phase 11 makes timeline RPC the default compose path while keeping timeline workers as separate timeline-owned processes, Phase 12 moves result timeline ownership into `cmd/timelineservice`, Phase 13 documents the future `room-authority-service` boundary, Phase 14 implements a non-default authority RPC pilot in `rpc-pilot`, Phase 15 hardens that pilot with readiness, metrics, identity, and failure-semantics checks, Phase 16 makes local compose `app` default to media, timeline, and authority RPC, Phase 17/18 adds `cmd/identityservice`, Phase 19 adds `cmd/roomservice` for room metadata and membership RPC, Phase 20 adds progress/home composition RPC plus `PROGRESS_DATABASE_URL`, and Phase 21 adds `ROOM_DATABASE_URL` plus room lifecycle/recovery RPC. Production compose defaults room/media/progress/home/timeline to RPC and keeps authority local by default.
+This document records the runtime ownership boundaries for the room system. `local_process` remains the default runtime for bare `go run ./cmd/roomserver`. Phase 4 adds a `distributed_authority` MVP for multi-instance room authority, Phase 5 adds fenced authority recovery from the Kafka canonical timeline, Phase 6 adds distributed seek rate limiting plus observability, Phase 7 adds service foundation boundaries with optional media/timeline RPC adapters and logical database ownership, Phase 8 closes the media table access boundary for room/progress while making the RPC pilot verifiable, Phase 9 adds an optional independent media database boundary through `MEDIA_DATABASE_URL`, Phase 10 adds an optional independent timeline database boundary through `TIMELINE_DATABASE_URL`, Phase 11 makes timeline RPC the default compose path while keeping timeline workers as separate timeline-owned processes, Phase 12 moves result timeline ownership into `cmd/timelineservice`, Phase 13 documents the future `room-authority-service` boundary, Phase 14 implements a non-default authority RPC pilot in `rpc-pilot`, Phase 15 hardens that pilot with readiness, metrics, identity, and failure-semantics checks, Phase 16 makes local compose `app` default to media, timeline, and authority RPC, Phase 17/18 adds `cmd/identityservice`, Phase 19 adds `cmd/roomservice` for room metadata and membership RPC, Phase 20 adds progress/home composition RPC plus `PROGRESS_DATABASE_URL`, Phase 21 adds `ROOM_DATABASE_URL` plus room lifecycle/recovery RPC, and Phase 22 adds `IDENTITY_DATABASE_URL` plus home composition SQL read-model removal. Production compose defaults identity/room/media/progress/home/timeline to RPC and keeps authority local by default.
 
 ## Phase 1 Boundary Markers
 
@@ -178,7 +178,7 @@ OTEL_EXPORTER_OTLP_ENDPOINT=
 OTEL_TRACE_SAMPLE_RATIO=0.1
 ```
 
-`IDENTITY_SERVICE_MODE`, `ROOM_SERVICE_MODE`, `MEDIA_SERVICE_MODE`, `TIMELINE_SERVICE_MODE`, and `AUTHORITY_SERVICE_MODE` accept `local` or `rpc`. `local` keeps current in-process adapters. `rpc` calls `cmd/identityservice`, `cmd/roomservice`, `cmd/mediaservice`, `cmd/timelineservice`, or `cmd/roomauthorityservice` over ConnectRPC. Phase 8 uses generated typed ConnectRPC contracts from `server/api/internal/v1` into `server/internal/rpcgen/v1`; Android HTTP/WebSocket payloads are unchanged. Phase 11 makes timeline RPC the default compose path: roomserver records and reads timeline data through `cmd/timelineservice`, while `cmd/outboxworker` and `cmd/derivedworker` remain separate timeline-owned workers. Local compose `app` now defaults to `IDENTITY_SERVICE_MODE=rpc`, `ROOM_SERVICE_MODE=rpc`, `MEDIA_SERVICE_MODE=rpc`, `TIMELINE_SERVICE_MODE=rpc`, and `AUTHORITY_SERVICE_MODE=rpc`; roomserver `/readyz` actively probes `identity_rpc`, `room_rpc`, `media_rpc`, `timeline_rpc`, and `authority_rpc`. Production compose defaults room/media/timeline RPC but leaves authority local. Service discovery is static endpoint configuration in this phase; Consul, etcd, and Kubernetes service discovery integration are not required by the code.
+`IDENTITY_SERVICE_MODE`, `ROOM_SERVICE_MODE`, `MEDIA_SERVICE_MODE`, `PROGRESS_SERVICE_MODE`, `HOME_SERVICE_MODE`, `TIMELINE_SERVICE_MODE`, and `AUTHORITY_SERVICE_MODE` accept `local` or `rpc`. `local` keeps current in-process adapters. `rpc` calls `cmd/identityservice`, `cmd/roomservice`, `cmd/mediaservice`, `cmd/progressservice`, `cmd/homecompositionservice`, `cmd/timelineservice`, or `cmd/roomauthorityservice` over ConnectRPC. Phase 8 uses generated typed ConnectRPC contracts from `server/api/internal/v1` into `server/internal/rpcgen/v1`; Android HTTP/WebSocket payloads are unchanged. Phase 11 makes timeline RPC the default compose path: roomserver records and reads timeline data through `cmd/timelineservice`, while `cmd/outboxworker` and `cmd/derivedworker` remain separate timeline-owned workers. Local compose `app` now defaults to identity, room, media, progress, home, timeline, and authority RPC; roomserver `/readyz` actively probes `identity_rpc`, `room_rpc`, `media_rpc`, `progress_rpc`, `home_rpc`, `timeline_rpc`, and `authority_rpc`. Production compose defaults identity/room/media/progress/home/timeline RPC but leaves authority local. Service discovery is static endpoint configuration in this phase; Consul, etcd, and Kubernetes service discovery integration are not required by the code.
 
 `room-session` now calls the media port for episode detail during create/join/detail bootstrap. `progress` calls the media port for playable episode validation before writing `user_media_progress`. `PostgresRoomStore` and `PostgresProgressStore` no longer read `media_episodes` or `media_seasons` directly.
 
@@ -189,6 +189,19 @@ Accepted distributed controls fail closed when the timeline recorder fails. A lo
 OpenTelemetry tracing is opt-in. Trace metadata can cross internal RPC, NATS, and Kafka boundaries, but it is not exposed in Android HTTP/WebSocket payloads.
 
 Phase 8 database ownership is logical only. Table owners and cross-context access rules are documented in [Database Ownership](./database-ownership.md) and enforced from `server/internal/store/db_ownership.yaml`.
+
+## Phase 22 Identity Database Boundary
+
+Phase 22 adds:
+
+```text
+IDENTITY_DATABASE_URL=
+IDENTITY_POSTGRES_DB=anime_watch_identity_dev
+```
+
+When `IDENTITY_DATABASE_URL` is empty, identity storage continues to use the main `DATABASE_URL`. When it is set, local identity mode and `cmd/identityservice` use the independent identity database for `users`. In `IDENTITY_SERVICE_MODE=rpc`, `roomserver` calls `cmd/identityservice` and does not connect to the identity database directly.
+
+Identity schema migrations live in `server/identity_migrations`. The main database keeps the old `users` table as fallback/shadow data, but Phase 22 drops the main-database foreign keys from room and progress shadow tables to `users` because those FKs cannot work across PostgreSQL databases. `cmd/identitydbsync` copies `users` from the old main database shadow table to the identity database and can run `--verify-only` row count and content hash checks.
 
 ## Phase 9 Media Database Boundary
 
@@ -202,7 +215,7 @@ When `MEDIA_DATABASE_URL` is empty, the media store continues to use the main `D
 
 Media schema migrations live in `server/media_migrations`. Main-database migrations live in `server/migrations`; Phase 9 drops the main database foreign keys from `rooms.media_episode_id` and `user_media_progress.media_episode_id` to media tables because those FKs cannot work across PostgreSQL databases.
 
-`home-composition` no longer directly reads media tables. `PostgresHomeStore` reads user and progress episode ids from the main database, and the home service fills titles and covers through `BatchGetEpisodeSummaries` on the media port/RPC. Missing media summaries are skipped to preserve the previous inner-join behavior.
+`home-composition` no longer directly reads media, identity, or progress tables. It composes profile, recent progress, and media summaries through ports/RPC. Missing media summaries are skipped to preserve the previous inner-join behavior.
 
 `cmd/mediadbsync` copies media-owned tables from the main database shadow tables to the media database and can run `--verify-only` row count and content hash checks.
 

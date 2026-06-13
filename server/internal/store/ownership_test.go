@@ -230,6 +230,12 @@ func TestComposeAppUsesFullRPCBoundaryAndProdKeepsAuthorityLocal(t *testing.T) {
 	if !containsContext(localIdentity.Profiles, "app") {
 		t.Fatalf("identityservice profiles = %v, want app profile", localIdentity.Profiles)
 	}
+	if !dependsOnService(localIdentity.DependsOn, "identity-postgres-init") {
+		t.Fatalf("identityservice must depend on identity-postgres-init")
+	}
+	if identityDatabaseURL := envString(localIdentity.Environment, "IDENTITY_DATABASE_URL"); !strings.Contains(identityDatabaseURL, "anime_watch_identity_dev") {
+		t.Fatalf("identityservice IDENTITY_DATABASE_URL = %q, want local identity database", identityDatabaseURL)
+	}
 	if !containsContext(localRoom.Profiles, "app") {
 		t.Fatalf("roomservice profiles = %v, want app profile", localRoom.Profiles)
 	}
@@ -305,6 +311,7 @@ func TestComposeAppUsesFullRPCBoundaryAndProdKeepsAuthorityLocal(t *testing.T) {
 
 	prodCompose := readCompose(t, "../../compose.prod.yaml")
 	prodRoomserver := requireComposeService(t, prodCompose, "roomserver")
+	prodIdentity := requireComposeService(t, prodCompose, "identityservice")
 	prodRoom := requireComposeService(t, prodCompose, "roomservice")
 	prodMedia := requireComposeService(t, prodCompose, "mediaservice")
 	prodProgress := requireComposeService(t, prodCompose, "progressservice")
@@ -345,8 +352,20 @@ func TestComposeAppUsesFullRPCBoundaryAndProdKeepsAuthorityLocal(t *testing.T) {
 	if progressDatabaseURL := envString(prodRoomserver.Environment, "PROGRESS_DATABASE_URL"); strings.Contains(progressDatabaseURL, "${PROGRESS_DATABASE_URL") {
 		t.Fatalf("prod roomserver must not receive progress-owned PROGRESS_DATABASE_URL directly, got %q", progressDatabaseURL)
 	}
+	if identityDatabaseURL := envString(prodRoomserver.Environment, "IDENTITY_DATABASE_URL"); strings.Contains(identityDatabaseURL, "${IDENTITY_DATABASE_URL") {
+		t.Fatalf("prod roomserver must not receive identity-owned IDENTITY_DATABASE_URL directly, got %q", identityDatabaseURL)
+	}
+	if !dependsOnService(prodIdentity.DependsOn, "identity-postgres-init") {
+		t.Fatalf("prod identityservice must depend on identity-postgres-init")
+	}
+	if identityDatabaseURL := envString(prodIdentity.Environment, "IDENTITY_DATABASE_URL"); !strings.Contains(identityDatabaseURL, "watch_together_identity_prod") {
+		t.Fatalf("prod identityservice IDENTITY_DATABASE_URL = %q, want prod identity database", identityDatabaseURL)
+	}
 	if roomDatabaseURL := envString(prodRoom.Environment, "ROOM_DATABASE_URL"); !strings.Contains(roomDatabaseURL, "watch_together_room_prod") {
 		t.Fatalf("prod roomservice ROOM_DATABASE_URL = %q, want prod room database", roomDatabaseURL)
+	}
+	if len(prodIdentity.Profiles) != 0 {
+		t.Fatalf("prod identityservice should be a default service, got profiles %v", prodIdentity.Profiles)
 	}
 	if len(prodMedia.Profiles) != 0 {
 		t.Fatalf("prod mediaservice should be a default service, got profiles %v", prodMedia.Profiles)
@@ -438,6 +457,21 @@ func TestCrossContextSQLReadsAreRegistered(t *testing.T) {
 	}
 }
 
+func TestHomeCompositionDoesNotUseSQLReadModel(t *testing.T) {
+	registry := loadOwnershipRegistry(t)
+	if _, ok := registry.StoreFiles["home_postgres.go"]; ok {
+		t.Fatalf("home_postgres.go must not be registered after home composition moved to service ports")
+	}
+	for _, access := range registry.CrossContextAccess {
+		if access.Caller == "home-composition" {
+			t.Fatalf("home-composition must not keep direct SQL cross-context access: %+v", access)
+		}
+	}
+	if _, err := os.Stat("home_postgres.go"); !os.IsNotExist(err) {
+		t.Fatalf("home_postgres.go must be removed, stat err=%v", err)
+	}
+}
+
 func TestMigrationCreatedTablesDeclareOwners(t *testing.T) {
 	registry := loadOwnershipRegistry(t)
 	files, err := filepath.Glob("../../migrations/*.up.sql")
@@ -452,6 +486,32 @@ func TestMigrationCreatedTablesDeclareOwners(t *testing.T) {
 		for _, table := range createdTables(string(contentBytes)) {
 			if _, ok := registry.Tables[table]; !ok {
 				t.Fatalf("migration %s creates table %s without ownership registry entry", filepath.Base(file), table)
+			}
+		}
+	}
+}
+
+func TestIdentityMigrationCreatedTablesDeclareIdentityOwner(t *testing.T) {
+	registry := loadOwnershipRegistry(t)
+	files, err := filepath.Glob("../../identity_migrations/*.up.sql")
+	if err != nil {
+		t.Fatalf("glob identity migrations: %v", err)
+	}
+	if len(files) == 0 {
+		t.Fatalf("expected identity migrations to exist")
+	}
+	for _, file := range files {
+		contentBytes, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatalf("read identity migration %s: %v", file, err)
+		}
+		for _, table := range createdTables(string(contentBytes)) {
+			ownership, ok := registry.Tables[table]
+			if !ok {
+				t.Fatalf("identity migration %s creates table %s without ownership registry entry", filepath.Base(file), table)
+			}
+			if ownership.Owner != "identity" {
+				t.Fatalf("identity migration %s creates table %s owned by %q, want identity", filepath.Base(file), table, ownership.Owner)
 			}
 		}
 	}

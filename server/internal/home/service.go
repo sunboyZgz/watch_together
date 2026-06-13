@@ -39,10 +39,6 @@ type Summary struct {
 	ContinueWatching []WatchProgressSummary
 }
 
-type SummaryStore interface {
-	GetHomeSummary(ctx context.Context, userID string) (Summary, error)
-}
-
 type BusinessService interface {
 	Summary(ctx context.Context, userID string) (Summary, error)
 }
@@ -60,19 +56,9 @@ type MediaSummaryProvider interface {
 }
 
 type Service struct {
-	store          SummaryStore
 	userProfiles   UserProfileProvider
 	progress       ProgressProvider
 	mediaSummaries MediaSummaryProvider
-}
-
-// NewService wires home-page summary reads to a persistent store.
-func NewService(store SummaryStore) *Service {
-	return &Service{store: store}
-}
-
-func NewServiceWithMediaSummaries(store SummaryStore, mediaSummaries MediaSummaryProvider) *Service {
-	return &Service{store: store, mediaSummaries: mediaSummaries}
 }
 
 func NewServiceWithComposition(
@@ -96,17 +82,6 @@ func (s *Service) Summary(ctx context.Context, userID string) (Summary, error) {
 	if s == nil {
 		return Summary{}, ErrIdentityUnavailable
 	}
-	if s.store == nil {
-		return s.composedSummary(ctx, userID)
-	}
-	summary, err := s.store.GetHomeSummary(ctx, userID)
-	if err != nil || s.mediaSummaries == nil {
-		return summary, err
-	}
-	return s.enrichMedia(ctx, summary)
-}
-
-func (s *Service) composedSummary(ctx context.Context, userID string) (Summary, error) {
 	if s.userProfiles == nil || s.progress == nil || s.mediaSummaries == nil {
 		return Summary{}, ErrProgressUnavailable
 	}

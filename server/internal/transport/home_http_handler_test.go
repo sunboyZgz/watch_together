@@ -13,7 +13,7 @@ import (
 
 func TestHomeSummaryReturnsUserAndWatchingProgress(t *testing.T) {
 	coverURL := "https://example.com/cover.jpg"
-	handler := NewHomeHTTPHandler(home.NewService(&fakeHomeStore{
+	handler := NewHomeHTTPHandler(&fakeHomeService{
 		summary: home.Summary{
 			User: home.UserSummary{
 				Nickname:   "Xingye",
@@ -35,7 +35,7 @@ func TestHomeSummaryReturnsUserAndWatchingProgress(t *testing.T) {
 				},
 			},
 		},
-	}))
+	})
 
 	request := httptest.NewRequest(http.MethodGet, "/home/summary", nil)
 	request.Header.Set("Authorization", testAuthorizationHeader("user_001"))
@@ -69,14 +69,14 @@ func TestHomeSummaryReturnsUserAndWatchingProgress(t *testing.T) {
 }
 
 func TestHomeSummaryAllowsEmptyWatchingProgress(t *testing.T) {
-	handler := NewHomeHTTPHandler(home.NewService(&fakeHomeStore{
+	handler := NewHomeHTTPHandler(&fakeHomeService{
 		summary: home.Summary{
 			User: home.UserSummary{
 				Nickname:   "Xingye",
 				AvatarSeed: "xingye",
 			},
 		},
-	}))
+	})
 
 	request := httptest.NewRequest(http.MethodGet, "/home/summary", nil)
 	request.Header.Set("Authorization", testAuthorizationHeader("user_001"))
@@ -103,7 +103,7 @@ func TestHomeSummaryAllowsEmptyWatchingProgress(t *testing.T) {
 }
 
 func TestHomeSummaryRequiresDevAccessToken(t *testing.T) {
-	handler := NewHomeHTTPHandler(home.NewService(&fakeHomeStore{}))
+	handler := NewHomeHTTPHandler(&fakeHomeService{})
 	request := httptest.NewRequest(http.MethodGet, "/home/summary", nil)
 	recorder := httptest.NewRecorder()
 
@@ -115,7 +115,7 @@ func TestHomeSummaryRequiresDevAccessToken(t *testing.T) {
 }
 
 func TestHomeSummaryReturnsServiceUnavailableWhenMediaBoundaryFails(t *testing.T) {
-	handler := NewHomeHTTPHandler(home.NewService(&fakeHomeStore{err: home.ErrMediaUnavailable}))
+	handler := NewHomeHTTPHandler(&fakeHomeService{err: home.ErrMediaUnavailable})
 	request := httptest.NewRequest(http.MethodGet, "/home/summary", nil)
 	request.Header.Set("Authorization", testAuthorizationHeader("user_001"))
 	recorder := httptest.NewRecorder()
@@ -130,12 +130,12 @@ func TestHomeSummaryReturnsServiceUnavailableWhenMediaBoundaryFails(t *testing.T
 	}
 }
 
-type fakeHomeStore struct {
+type fakeHomeService struct {
 	summary home.Summary
 	err     error
 }
 
-func (s *fakeHomeStore) GetHomeSummary(_ context.Context, userID string) (home.Summary, error) {
+func (s *fakeHomeService) Summary(_ context.Context, userID string) (home.Summary, error) {
 	if userID != "user_001" {
 		return home.Summary{}, home.ErrUserNotFound
 	}
