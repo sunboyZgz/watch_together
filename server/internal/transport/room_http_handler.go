@@ -22,6 +22,10 @@ type RoomHTTPHandler struct {
 	playbackSigner    *mediaPlaybackSigner
 	delivery          *mediaDelivery
 	authorityRecovery roomAuthorityRecovery
+	authorityClaimer  roomAuthorityClaimer
+	authorityInstance string
+	runtimeRequired   bool
+	authorityRequired bool
 }
 
 type roomRuntimeRegistry interface {
@@ -43,10 +47,8 @@ type roomStateSnapshotter interface {
 }
 
 type roomManagerRuntime struct {
-	manager           *room.Manager
-	roomStateWriter   latestRoomStateWriter
-	authorityClaimer  roomAuthorityClaimer
-	authorityInstance string
+	manager         *room.Manager
+	roomStateWriter latestRoomStateWriter
 }
 
 func (r roomManagerRuntime) RegisterCreatedRoomWithMedia(
@@ -59,13 +61,6 @@ func (r roomManagerRuntime) RegisterCreatedRoomWithMedia(
 		return nil
 	}
 	runtimeRoom := r.manager.RegisterCreatedRoomWithMedia(roomID, hostUserID, mediaID, mediaDurationMs)
-	if r.authorityClaimer != nil && r.authorityInstance != "" && roomID != "" {
-		if _, claimed, err := r.authorityClaimer.ClaimAuthority(context.Background(), roomID, r.authorityInstance); err != nil {
-			log.Printf("room authority claim failed room=%s instance=%s err=%v", roomID, r.authorityInstance, err)
-		} else if !claimed {
-			log.Printf("room authority claim skipped room=%s instance=%s reason=another_authority", roomID, r.authorityInstance)
-		}
-	}
 	return runtimeRoom
 }
 
@@ -173,6 +168,23 @@ func NewRoomHTTPHandlerWithTokenVerifierAndRoomStateWriter(
 		roomRuntime,
 		roomService,
 		tokenVerifier,
+		roomRuntime != nil,
+		false,
+		playbackConfigs...,
+	)
+}
+
+func NewRoomHTTPGatewayHandler(
+	roomService roomapi.BusinessService,
+	tokenVerifier accessTokenVerifier,
+	playbackConfigs ...MediaPlaybackConfig,
+) *RoomHTTPHandler {
+	return newRoomHTTPHandlerWithRuntime(
+		nil,
+		roomService,
+		tokenVerifier,
+		false,
+		true,
 		playbackConfigs...,
 	)
 }
@@ -181,11 +193,8 @@ func (h *RoomHTTPHandler) SetRoomAuthorityClaimer(instanceID string, claimer roo
 	if h == nil {
 		return
 	}
-	if runtime, ok := h.roomRuntime.(roomManagerRuntime); ok {
-		runtime.authorityClaimer = claimer
-		runtime.authorityInstance = strings.TrimSpace(instanceID)
-		h.roomRuntime = runtime
-	}
+	h.authorityClaimer = claimer
+	h.authorityInstance = strings.TrimSpace(instanceID)
 }
 
 func (h *RoomHTTPHandler) SetRoomAuthorityRecovery(recoveryService roomAuthorityRecovery) {
@@ -199,6 +208,8 @@ func newRoomHTTPHandlerWithRuntime(
 	roomRuntime roomRuntimeRegistry,
 	roomService roomapi.BusinessService,
 	tokenVerifier accessTokenVerifier,
+	runtimeRequired bool,
+	authorityRequired bool,
 	playbackConfigs ...MediaPlaybackConfig,
 ) *RoomHTTPHandler {
 	playbackConfig := MediaPlaybackConfig{}
@@ -206,11 +217,13 @@ func newRoomHTTPHandlerWithRuntime(
 		playbackConfig = playbackConfigs[0]
 	}
 	return &RoomHTTPHandler{
-		roomRuntime:    roomRuntime,
-		roomService:    roomService,
-		tokenVerifier:  tokenVerifier,
-		playbackSigner: newMediaPlaybackSigner(playbackConfig),
-		delivery:       newMediaDelivery(playbackConfig),
+		roomRuntime:       roomRuntime,
+		roomService:       roomService,
+		tokenVerifier:     tokenVerifier,
+		playbackSigner:    newMediaPlaybackSigner(playbackConfig),
+		delivery:          newMediaDelivery(playbackConfig),
+		runtimeRequired:   runtimeRequired,
+		authorityRequired: authorityRequired,
 	}
 }
 
@@ -249,19 +262,14 @@ func (h *RoomHTTPHandler) CreateRoom(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	runtimeRoom := h.roomRuntime.RegisterCreatedRoomWithMedia(
-		result.Room.RoomCode,
-		result.Room.HostUserID,
-		result.Room.MediaItemID,
-		result.Media.DurationMs,
-	)
-	if runtimeRoom == nil {
-		writeAPIError(w, http.StatusServiceUnavailable, "INTERNAL_ERROR", "room runtime is unavailable", nil)
+	state, ok := h.prepareRoomRuntime(r.Context(), result.Room.RoomCode, result.Room.HostUserID, result.Room.MediaItemID, result.Media.DurationMs)
+	if !ok {
+		writeAPIError(w, http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE", "room runtime is unavailable", nil)
 		return
 	}
-	h.tryRecoverRoomAuthority(r.Context(), result.Room.RoomCode, "create_room")
-	state := runtimeRoom.StateSnapshot()
-	h.storeLatestRoomState(r.Context(), state)
+	if !h.claimRoomAuthority(w, r.Context(), result.Room.RoomCode) {
+		return
+	}
 	writeAPISuccess(w, http.StatusCreated, createRoomResponse{
 		Room:      roomToResponse(result.Room),
 		Media:     h.roomMediaToResponse(r, result.Media),
@@ -297,16 +305,16 @@ func (h *RoomHTTPHandler) JoinRoomByCode(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// Keep the runtime room available for the following WebSocket join_room call.
-	runtimeRoom := h.roomRuntime.RegisterCreatedRoomWithMedia(
+	state, _ := h.prepareRoomRuntime(
+		r.Context(),
 		result.Room.RoomCode,
 		result.Room.HostUserID,
 		result.Room.MediaItemID,
 		result.Media.DurationMs,
 	)
-	if runtimeRoom != nil {
-		h.tryRecoverRoomAuthority(r.Context(), result.Room.RoomCode, "join_room")
-		h.storeLatestRoomState(r.Context(), runtimeRoom.StateSnapshot())
+	_ = state
+	if !h.claimRoomAuthority(w, r.Context(), result.Room.RoomCode) {
+		return
 	}
 	writeAPISuccess(w, http.StatusOK, joinRoomResponse{
 		Room:   roomToResponse(result.Room),
@@ -357,16 +365,7 @@ func (h *RoomHTTPHandler) DetailByCode(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusForbidden, "FORBIDDEN", "room membership required", nil)
 		return
 	}
-	runtimeRoom := h.roomRuntime.RegisterCreatedRoomWithMedia(
-		result.Room.RoomCode,
-		result.Room.HostUserID,
-		result.Room.MediaItemID,
-		result.Media.DurationMs,
-	)
-	if runtimeRoom != nil {
-		h.tryRecoverRoomAuthority(r.Context(), result.Room.RoomCode, "room_detail")
-		h.storeLatestRoomState(r.Context(), runtimeRoom.StateSnapshot())
-	}
+	_, _ = h.prepareRoomRuntime(r.Context(), result.Room.RoomCode, result.Room.HostUserID, result.Room.MediaItemID, result.Media.DurationMs)
 	writeAPISuccess(w, http.StatusOK, roomDetailResponse{
 		Room:    roomToResponse(result.Room),
 		Media:   h.roomMediaToResponse(r, result.Media),
@@ -384,9 +383,56 @@ func roomDetailHasActiveMember(result roomapi.DetailResult, userID string) bool 
 }
 
 func (h *RoomHTTPHandler) ensureReady(w http.ResponseWriter) bool {
-	if h == nil || h.roomRuntime == nil || h.roomService == nil {
+	if h == nil || h.roomService == nil || (h.runtimeRequired && h.roomRuntime == nil) {
 		writeAPIError(w, http.StatusServiceUnavailable, "INTERNAL_ERROR", "room service is unavailable", nil)
 		return false
+	}
+	return true
+}
+
+func (h *RoomHTTPHandler) prepareRoomRuntime(
+	ctx context.Context,
+	roomCode string,
+	hostUserID string,
+	mediaItemID string,
+	mediaDurationMs *int64,
+) (room.State, bool) {
+	if h == nil || h.roomRuntime == nil {
+		state := room.NewCreatedRoomWithMedia(roomCode, hostUserID, mediaItemID, mediaDurationMs).StateSnapshot()
+		return state, !h.runtimeRequired
+	}
+	runtimeRoom := h.roomRuntime.RegisterCreatedRoomWithMedia(roomCode, hostUserID, mediaItemID, mediaDurationMs)
+	if runtimeRoom == nil {
+		return room.State{}, false
+	}
+	h.tryRecoverRoomAuthority(ctx, roomCode, "room_http")
+	state := runtimeRoom.StateSnapshot()
+	h.storeLatestRoomState(ctx, state)
+	return state, true
+}
+
+func (h *RoomHTTPHandler) claimRoomAuthority(w http.ResponseWriter, ctx context.Context, roomCode string) bool {
+	if h == nil || h.authorityClaimer == nil || h.authorityInstance == "" || roomCode == "" {
+		if h != nil && h.authorityRequired {
+			writeAPIError(w, http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE", "room authority is unavailable", nil)
+			return false
+		}
+		return true
+	}
+	claimCtx, cancel := context.WithTimeout(ctx, time.Second)
+	defer cancel()
+	if _, claimed, err := h.authorityClaimer.ClaimAuthority(claimCtx, roomCode, h.authorityInstance); err != nil {
+		log.Printf("room authority claim failed room=%s instance=%s err=%v", roomCode, h.authorityInstance, err)
+		if h.authorityRequired {
+			writeAPIError(w, http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE", "room authority is unavailable", nil)
+			return false
+		}
+	} else if !claimed {
+		log.Printf("room authority claim skipped room=%s instance=%s reason=another_authority", roomCode, h.authorityInstance)
+		if h.authorityRequired {
+			writeAPIError(w, http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE", "room authority is unavailable", nil)
+			return false
+		}
 	}
 	return true
 }

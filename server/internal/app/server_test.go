@@ -106,6 +106,7 @@ func TestGinRouterMetricsDisabled(t *testing.T) {
 		transport.NewHomeHTTPHandler(nil),
 		transport.NewMediaHTTPHandler(nil),
 		transport.NewProgressHTTPHandler(nil),
+		EdgeModeCombined,
 		runtimeBoundary{},
 		func(context.Context) observability.ReadinessSnapshot {
 			return testReadinessSnapshot("", "local_process")
@@ -123,6 +124,8 @@ func TestGinRouterMetricsDisabled(t *testing.T) {
 		nil,
 		nil,
 		nil,
+		nil,
+		nil,
 	)
 	recorder := httptest.NewRecorder()
 
@@ -130,6 +133,43 @@ func TestGinRouterMetricsDisabled(t *testing.T) {
 
 	if recorder.Code != http.StatusNotFound {
 		t.Fatalf("expected metrics disabled status %d, got %d", http.StatusNotFound, recorder.Code)
+	}
+}
+
+func TestGinRouterEdgeModesSplitPublicRESTAndWebSocket(t *testing.T) {
+	cases := []struct {
+		name           string
+		edgeMode       string
+		restWantServed bool
+		wsWantServed   bool
+	}{
+		{name: "api gateway serves REST only", edgeMode: EdgeModeAPIGateway, restWantServed: true},
+		{name: "session gateway serves websocket only", edgeMode: EdgeModeSessionGateway, wsWantServed: true},
+		{name: "combined fallback serves both", edgeMode: EdgeModeCombined, restWantServed: true, wsWantServed: true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			router := newTestGinRouterWithEdge(tc.edgeMode)
+
+			restRecorder := httptest.NewRecorder()
+			router.ServeHTTP(restRecorder, httptest.NewRequest(http.MethodPost, "/auth/register", strings.NewReader(`{}`)))
+			if tc.restWantServed && restRecorder.Code == http.StatusNotFound {
+				t.Fatalf("expected REST route to be registered in %s", tc.edgeMode)
+			}
+			if !tc.restWantServed && restRecorder.Code != http.StatusNotFound {
+				t.Fatalf("expected REST route to be absent in %s, got %d", tc.edgeMode, restRecorder.Code)
+			}
+
+			wsRecorder := httptest.NewRecorder()
+			router.ServeHTTP(wsRecorder, httptest.NewRequest(http.MethodGet, "/ws", nil))
+			if tc.wsWantServed && wsRecorder.Code == http.StatusNotFound {
+				t.Fatalf("expected websocket route to be registered in %s", tc.edgeMode)
+			}
+			if !tc.wsWantServed && wsRecorder.Code != http.StatusNotFound {
+				t.Fatalf("expected websocket route to be absent in %s, got %d", tc.edgeMode, wsRecorder.Code)
+			}
+		})
 	}
 }
 
@@ -560,6 +600,14 @@ func newTestGinRouter() http.Handler {
 }
 
 func newTestGinRouterWithRuntime(runtime runtimeBoundary) http.Handler {
+	return newTestGinRouterWithEdgeAndRuntime(EdgeModeCombined, runtime)
+}
+
+func newTestGinRouterWithEdge(edgeMode string) http.Handler {
+	return newTestGinRouterWithEdgeAndRuntime(edgeMode, runtimeBoundary{})
+}
+
+func newTestGinRouterWithEdgeAndRuntime(edgeMode string, runtime runtimeBoundary) http.Handler {
 	roomManager := room.NewManager()
 	return newGinRouter(
 		context.Background(),
@@ -573,6 +621,7 @@ func newTestGinRouterWithRuntime(runtime runtimeBoundary) http.Handler {
 		transport.NewHomeHTTPHandler(nil),
 		transport.NewMediaHTTPHandler(nil),
 		transport.NewProgressHTTPHandler(nil),
+		edgeMode,
 		runtime,
 		func(context.Context) observability.ReadinessSnapshot {
 			return testReadinessSnapshot(runtime.InstanceID, normalizeRoomRuntimeMode(runtime.RoomRuntimeMode))
@@ -582,6 +631,8 @@ func newTestGinRouterWithRuntime(runtime runtimeBoundary) http.Handler {
 		"",
 		eventbus.NewDisabledRoomBroadcastBus(),
 		eventbus.NewDisabledRoomControlBus(),
+		nil,
+		nil,
 		nil,
 		nil,
 		nil,

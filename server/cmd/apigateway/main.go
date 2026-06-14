@@ -15,26 +15,29 @@ import (
 	wtconfig "watch_together/server/internal/config"
 )
 
-// main wires config, server assembly, and the HTTP listen lifecycle together.
 func main() {
-	runtimeConfig, err := wtconfig.LoadRoomserverRuntimeConfig(".")
+	runtimeConfig, err := wtconfig.LoadServerRuntimeConfig(".")
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "load server config: %v\n", err)
+		fmt.Fprintf(os.Stderr, "load api gateway config: %v\n", err)
 		os.Exit(1)
 	}
+	runtimeConfig.EdgeMode = app.EdgeModeAPIGateway
+
 	log.Printf(
-		"room server config app_env=%s log_level=%s debug_sync=%t instance_id=%q room_runtime_mode=%s ws_cross_instance_broadcast=%t ws_event_bus=%s",
+		"api gateway config app_env=%s log_level=%s identity_mode=%s room_mode=%s media_mode=%s progress_mode=%s home_mode=%s authority_mode=%s",
 		runtimeConfig.AppEnv,
 		runtimeConfig.LogLevel,
-		runtimeConfig.DebugSync,
-		runtimeConfig.InstanceID,
-		runtimeConfig.RoomRuntimeMode,
-		runtimeConfig.WebSocket.CrossInstanceBroadcast,
-		runtimeConfig.WebSocket.EventBus,
+		runtimeConfig.ServiceClients.IdentityMode,
+		runtimeConfig.ServiceClients.RoomMode,
+		runtimeConfig.ServiceClients.MediaMode,
+		runtimeConfig.ServiceClients.ProgressMode,
+		runtimeConfig.ServiceClients.HomeMode,
+		runtimeConfig.ServiceClients.AuthorityMode,
 	)
-	server := app.NewServer(app.ConfigFromRuntime(runtimeConfig))
 
-	log.Printf("room server listening on %s", server.Address())
+	server := app.NewServer(app.ConfigFromRuntime(runtimeConfig))
+	log.Printf("api gateway listening on %s", server.Address())
+
 	errCh := make(chan error, 1)
 	go func() {
 		errCh <- server.ListenAndServe()
@@ -52,9 +55,9 @@ func main() {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		if err := server.Shutdown(shutdownCtx); err != nil {
-			log.Printf("room server graceful shutdown failed: %v", err)
+			log.Printf("api gateway graceful shutdown failed: %v", err)
 			if closeErr := server.Close(); closeErr != nil {
-				log.Printf("room server close failed: %v", closeErr)
+				log.Printf("api gateway close failed: %v", closeErr)
 			}
 		}
 	}

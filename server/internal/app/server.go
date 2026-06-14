@@ -39,6 +39,7 @@ type Config struct {
 	Port                string
 	LogLevel            string
 	InstanceID          string
+	EdgeMode            string
 	RoomRuntimeMode     string
 	DatabaseURL         string
 	IdentityDatabaseURL string
@@ -137,6 +138,9 @@ type accessTokenVerifier interface {
 const (
 	roomRuntimeModeLocalProcess         = "local_process"
 	roomRuntimeModeDistributedAuthority = "distributed_authority"
+	EdgeModeCombined                    = "combined"
+	EdgeModeAPIGateway                  = "api_gateway"
+	EdgeModeSessionGateway              = "session_gateway"
 )
 
 type runtimeBoundary struct {
@@ -146,8 +150,10 @@ type runtimeBoundary struct {
 
 // NewServer assembles the in-memory room manager and the HTTP routes around it.
 func NewServer(config Config) *Server {
+	config.EdgeMode = normalizeEdgeMode(config.EdgeMode)
 	config.RoomRuntimeMode = normalizeRoomRuntimeMode(config.RoomRuntimeMode)
 	distributedAuthority := config.RoomRuntimeMode == roomRuntimeModeDistributedAuthority
+	needsSession := config.EdgeMode == EdgeModeCombined || config.EdgeMode == EdgeModeSessionGateway
 	if distributedAuthority && len(config.Kafka.Brokers) == 0 {
 		log.Fatal("distributed_authority requires kafka brokers")
 	}
@@ -231,8 +237,10 @@ func NewServer(config Config) *Server {
 			timelineRecoveryReader = timelineClient
 		}
 	}
-	installRoomLifecycleHooks(roomManager, roomLifecycle, roomStateCache)
-	if roomLifecycle != nil {
+	if needsSession {
+		installRoomLifecycleHooks(roomManager, roomLifecycle, roomStateCache)
+	}
+	if needsSession && roomLifecycle != nil {
 		now := time.Now()
 		backfilled, err := roomLifecycle.MarkAllActiveRoomsGracePeriod(
 			context.Background(),
@@ -245,20 +253,33 @@ func NewServer(config Config) *Server {
 			log.Printf("backfilled %d active rooms into grace_period on startup", backfilled)
 		}
 	}
-	go roomManager.StartCleanupLoop(serverCtx, room.DefaultCleanupInterval())
-	if roomLifecycle != nil {
+	if needsSession {
+		go roomManager.StartCleanupLoop(serverCtx, room.DefaultCleanupInterval())
+	}
+	if needsSession && roomLifecycle != nil {
 		go startPersistentRoomCleanupLoop(serverCtx, room.DefaultCleanupInterval(), roomLifecycle, roomStateCache)
 	}
-	roomHTTPHandler := transport.NewRoomHTTPHandlerWithTokenVerifierAndRoomStateWriter(
-		roomManager,
-		roomService,
-		identityService,
-		roomStateCache,
-		config.Media,
-	)
+	var roomHTTPHandler *transport.RoomHTTPHandler
+	if config.EdgeMode == EdgeModeAPIGateway {
+		roomHTTPHandler = transport.NewRoomHTTPGatewayHandler(roomService, identityService, config.Media)
+	} else {
+		roomHTTPHandler = transport.NewRoomHTTPHandlerWithTokenVerifierAndRoomStateWriter(
+			roomManager,
+			roomService,
+			identityService,
+			roomStateCache,
+			config.Media,
+		)
+	}
 	broadcastInstanceID := roomBroadcastInstanceID(config.InstanceID)
-	if distributedAuthority {
+	var authorityRPCClient *authority.RPCClient
+	if isRPCMode(config.ServiceClients.AuthorityMode) {
+		authorityRPCClient = authority.NewRPCClient(config.ServiceClients.AuthorityAddr, internalRPCClientConfig(config, serviceConfig))
+	}
+	if distributedAuthority && authorityRegistry != nil {
 		roomHTTPHandler.SetRoomAuthorityClaimer(authorityClaimInstanceID(config, broadcastInstanceID), authorityRegistry)
+	} else if authorityRPCClient != nil {
+		roomHTTPHandler.SetRoomAuthorityClaimer(authorityClaimInstanceID(config, broadcastInstanceID), authorityRPCClient)
 	}
 	var authorityRecovery *recovery.Service
 	if distributedAuthority {
@@ -304,7 +325,7 @@ func NewServer(config Config) *Server {
 	roomControlBus := newRoomControlBus(config.WebSocket, config.NATS, distributedAuthority)
 	var authorityControl authority.ControlApplier
 	if distributedAuthority && isRPCMode(config.ServiceClients.AuthorityMode) {
-		authorityControl = authority.NewRPCClient(config.ServiceClients.AuthorityAddr, internalRPCClientConfig(config, serviceConfig))
+		authorityControl = authorityRPCClient
 	}
 	authHTTPHandler := transport.NewAuthHTTPHandler(identityService)
 	homeHTTPHandler := transport.NewHomeHTTPHandlerWithTokenVerifier(homeService, identityService)
@@ -322,6 +343,7 @@ func NewServer(config Config) *Server {
 		homeHTTPHandler,
 		mediaHTTPHandler,
 		progressHTTPHandler,
+		config.EdgeMode,
 		runtimeBoundaryFromConfig(config),
 		func(ctx context.Context) observability.ReadinessSnapshot {
 			return readinessSnapshotFromConfig(ctx, config, db, identityDB, roomDB, mediaDB, progressDB, timelineDB, redisClient, roomBroadcastBus, roomControlBus, timelineOutboxStore, authorityRecovery)
@@ -339,6 +361,8 @@ func NewServer(config Config) *Server {
 		presenceRegistry,
 		timelineRecorder,
 		authorityRecovery,
+		roomLifecycle,
+		timelineRecoveryReader,
 	)
 
 	httpServer := &http.Server{
@@ -390,6 +414,19 @@ func normalizeRoomRuntimeMode(mode string) string {
 		return roomRuntimeModeLocalProcess
 	}
 	return mode
+}
+
+func normalizeEdgeMode(mode string) string {
+	mode = strings.ToLower(strings.TrimSpace(mode))
+	if mode == "" {
+		return EdgeModeCombined
+	}
+	switch mode {
+	case EdgeModeCombined, EdgeModeAPIGateway, EdgeModeSessionGateway:
+		return mode
+	default:
+		return EdgeModeCombined
+	}
 }
 
 func runtimeBoundaryFromConfig(config Config) runtimeBoundary {
@@ -607,6 +644,7 @@ func newGinRouter(
 	homeHTTPHandler *transport.HomeHTTPHandler,
 	mediaHTTPHandler *transport.MediaHTTPHandler,
 	progressHTTPHandler *transport.ProgressHTTPHandler,
+	edgeMode string,
 	runtime runtimeBoundary,
 	readinessProvider func(context.Context) observability.ReadinessSnapshot,
 	observabilityConfig observability.Config,
@@ -622,6 +660,8 @@ func newGinRouter(
 	presenceRegistry *cache.PresenceRegistry,
 	timelineRecorder timeline.ResultRecorder,
 	authorityRecovery *recovery.Service,
+	roomBootstrap roomapi.BusinessService,
+	timelineRecoveryReader timeline.RecoveryReader,
 ) *gin.Engine {
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
@@ -655,16 +695,22 @@ func newGinRouter(
 	if observabilityConfig.MetricsEnabled {
 		router.GET(observabilityConfig.MetricsPath, gin.WrapH(metrics.Handler()))
 	}
-	router.Any("/auth/login", gin.WrapF(authHTTPHandler.Login))
-	router.Any("/auth/register", gin.WrapF(authHTTPHandler.Register))
-	router.Any("/home/summary", gin.WrapF(homeHTTPHandler.Summary))
-	router.Any("/media/tags", gin.WrapF(mediaHTTPHandler.Tags))
-	router.Any("/media/items", gin.WrapF(mediaHTTPHandler.Items))
-	router.Any("/media/internal/auth", gin.WrapF(mediaHTTPHandler.NginxAuth))
-	router.Any("/media/playback/*playbackPath", gin.WrapF(mediaHTTPHandler.Playback))
-	router.Any("/me/media-progress/*mediaPath", gin.WrapF(progressHTTPHandler.Update))
-	router.Any("/rooms", gin.WrapF(roomHTTPHandler.CreateRoom))
-	router.Any("/rooms/*roomPath", gin.WrapF(roomHTTPHandler.RoomRoute))
+	edgeMode = normalizeEdgeMode(edgeMode)
+	if edgeMode == EdgeModeCombined || edgeMode == EdgeModeAPIGateway {
+		router.Any("/auth/login", gin.WrapF(authHTTPHandler.Login))
+		router.Any("/auth/register", gin.WrapF(authHTTPHandler.Register))
+		router.Any("/home/summary", gin.WrapF(homeHTTPHandler.Summary))
+		router.Any("/media/tags", gin.WrapF(mediaHTTPHandler.Tags))
+		router.Any("/media/items", gin.WrapF(mediaHTTPHandler.Items))
+		router.Any("/media/internal/auth", gin.WrapF(mediaHTTPHandler.NginxAuth))
+		router.Any("/media/playback/*playbackPath", gin.WrapF(mediaHTTPHandler.Playback))
+		router.Any("/me/media-progress/*mediaPath", gin.WrapF(progressHTTPHandler.Update))
+		router.Any("/rooms", gin.WrapF(roomHTTPHandler.CreateRoom))
+		router.Any("/rooms/*roomPath", gin.WrapF(roomHTTPHandler.RoomRoute))
+	}
+	if edgeMode == EdgeModeAPIGateway {
+		return router
+	}
 	webSocketHandler := transport.NewWebSocketHandlerWithConfigAndRoomStateWriterAndTokenVerifierAndRoomLeaver(
 		roomManager,
 		debugSync,
@@ -674,6 +720,7 @@ func newGinRouter(
 		roomHTTPHandler.RoomLeaver(),
 	)
 	webSocketHandler.SetMetrics(metrics)
+	webSocketHandler.SetRoomRuntimeBootstrapper(roomBootstrap, timelineRecoveryReader)
 	webSocketHandler.SetRoomBroadcastBus(broadcastInstanceID, roomBroadcastBus)
 	webSocketHandler.SetAuthorityControlApplier(authorityControl)
 	if normalizeRoomRuntimeMode(runtime.RoomRuntimeMode) == roomRuntimeModeDistributedAuthority {

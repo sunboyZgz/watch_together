@@ -205,6 +205,7 @@ services:
       SERVER_PORT: 8080
       LOG_LEVEL: debug
       SERVER_INSTANCE_ID: ${SERVER_INSTANCE_ID:-local-roomserver-1}
+      SERVER_EDGE_MODE: ${ROOMSERVER_EDGE_MODE:-session_gateway}
       ROOM_RUNTIME_MODE: ${ROOMSERVER_RUNTIME_MODE:-distributed_authority}
       DEBUG_SYNC: "true"
       WS_CROSS_INSTANCE_BROADCAST_ENABLED: ${ROOMSERVER_WS_CROSS_INSTANCE_BROADCAST_ENABLED:-true}
@@ -275,6 +276,79 @@ services:
       MEDIA_STORAGE_ACCESS_KEY_ID: minioadmin
       MEDIA_STORAGE_SECRET_ACCESS_KEY: minioadmin
       MEDIA_STORAGE_FORCE_PATH_STYLE: "true"
+    ports:
+      - "8098:8080"
+
+  apigateway:
+    profiles: ["app"]
+    image: watch-together-roomserver:dev
+    container_name: anime-watch-apigateway
+    restart: unless-stopped
+    depends_on:
+      - identityservice
+      - roomservice
+      - mediaservice
+      - progressservice
+      - homecompositionservice
+      - roomauthorityservice
+      - minio-init
+    env_file:
+      - .env
+    environment:
+      APP_ENV: local
+      SERVER_HOST: 0.0.0.0
+      SERVER_PORT: 8080
+      SERVER_EDGE_MODE: api_gateway
+      ROOM_RUNTIME_MODE: local_process
+      DEBUG_SYNC: "true"
+      WS_CROSS_INSTANCE_BROADCAST_ENABLED: "false"
+      NATS_URL: ""
+      METRICS_ENABLED: ${METRICS_ENABLED:-true}
+      METRICS_ADDR: ${APIGATEWAY_METRICS_ADDR:-}
+      METRICS_PATH: ${METRICS_PATH:-/metrics}
+      READINESS_PATH: ${READINESS_PATH:-/readyz}
+      SERVICE_NAME: watch-together-apigateway
+      SERVICE_VERSION: ${SERVICE_VERSION:-dev}
+      INTERNAL_RPC_PATH_PREFIX: ${INTERNAL_RPC_PATH_PREFIX:-/internal.rpc}
+      INTERNAL_RPC_TIMEOUT_MS: ${INTERNAL_RPC_TIMEOUT_MS:-1000}
+      INTERNAL_RPC_AUTH_TOKEN: ${INTERNAL_RPC_AUTH_TOKEN:-}
+      SERVICE_DISCOVERY_MODE: ${SERVICE_DISCOVERY_MODE:-static}
+      IDENTITY_SERVICE_MODE: rpc
+      IDENTITY_SERVICE_ADDR: http://identityservice:8090
+      IDENTITY_DATABASE_URL: ""
+      ROOM_SERVICE_MODE: rpc
+      ROOM_SERVICE_ADDR: http://roomservice:8090
+      ROOM_DATABASE_URL: ""
+      MEDIA_SERVICE_MODE: rpc
+      MEDIA_SERVICE_ADDR: http://mediaservice:8090
+      MEDIA_DATABASE_URL: ""
+      PROGRESS_SERVICE_MODE: rpc
+      PROGRESS_SERVICE_ADDR: http://progressservice:8090
+      PROGRESS_DATABASE_URL: ""
+      HOME_SERVICE_MODE: rpc
+      HOME_SERVICE_ADDR: http://homecompositionservice:8090
+      TIMELINE_SERVICE_MODE: local
+      TIMELINE_SERVICE_ADDR: ""
+      TIMELINE_DATABASE_URL: ""
+      AUTHORITY_SERVICE_MODE: rpc
+      AUTHORITY_SERVICE_ADDR: http://roomauthorityservice:8090
+      AUTHORITY_LEASE_INSTANCE_ID: ${ROOMSERVER_AUTHORITY_LEASE_INSTANCE_ID:-roomauthorityservice-1}
+      AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:-watch_together_local_dev_jwt_secret_change_me}
+      DATABASE_URL: ""
+      REDIS_ADDR: ""
+      REDIS_REQUIRED: "false"
+      MEDIA_DELIVERY_MODE: ${MEDIA_DELIVERY_MODE:-nginx_auth_request}
+      MEDIA_PLAYBACK_SIGNING_SECRET: ${MEDIA_PLAYBACK_SIGNING_SECRET:-watch_together_local_dev_media_playback_secret_change_me}
+      MEDIA_INTERNAL_BASE_URL: http://minio:9000/watch-together-media
+      MEDIA_STORAGE_ENDPOINT: http://minio:9000
+      MEDIA_STORAGE_BUCKET: watch-together-media
+      MEDIA_STORAGE_REGION: auto
+      MEDIA_STORAGE_ACCESS_KEY_ID: minioadmin
+      MEDIA_STORAGE_SECRET_ACCESS_KEY: minioadmin
+      MEDIA_STORAGE_FORCE_PATH_STYLE: "true"
+    ports:
+      - "8097:8080"
+    command: ["/app/apigateway"]
 
   roomserver-rpc-pilot:
     <<: *roomserver_base
@@ -622,6 +696,7 @@ services:
     container_name: anime-watch-nginx
     restart: unless-stopped
     depends_on:
+      - apigateway
       - roomserver
       - minio
     ports:

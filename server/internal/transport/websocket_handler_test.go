@@ -13,6 +13,8 @@ import (
 	"watch_together/server/internal/protocol"
 	"watch_together/server/internal/realtime"
 	"watch_together/server/internal/room"
+	"watch_together/server/internal/roomapi"
+	"watch_together/server/internal/timeline"
 )
 
 func TestWebSocketJoinRoomFlow(t *testing.T) {
@@ -184,6 +186,90 @@ func TestWebSocketJoinRoomMissingRoomReturnsError(t *testing.T) {
 	}
 	if envelope.Payload.Message != "room not found" {
 		t.Fatalf("expected room not found, got %s", envelope.Payload.Message)
+	}
+}
+
+func TestWebSocketJoinRoomLazyBootstrapsGatewayCreatedRoom(t *testing.T) {
+	roomManager := room.NewManager()
+	membership := &fakeRoomMembershipStore{
+		active: map[string]bool{
+			roomMembershipKey("ROOM01", "user_b"): true,
+		},
+	}
+	handler := NewWebSocketHandlerWithConfigAndRoomStateWriterAndTokenVerifierAndRoomLeaver(
+		roomManager,
+		true,
+		WebSocketRuntimeConfig{},
+		nil,
+		nil,
+		membership,
+	)
+	handler.SetRoomRuntimeBootstrapper(
+		fakeRoomBootstrapper{
+			result: roomapi.RuntimeBootstrapResult{
+				Room: roomapi.Room{
+					ID:          "room_uuid",
+					RoomCode:    "ROOM01",
+					HostUserID:  "user_a",
+					MediaItemID: "media_001",
+					Status:      "active",
+				},
+				Media: roomapi.Media{ID: "media_001", Title: "Episode 1"},
+			},
+		},
+		fakeTimelineRecoveryReader{
+			events: []timeline.Event{{
+				EventID:      "event-accepted-play",
+				EventType:    timeline.EventTypeControlAccepted,
+				ControlType:  protocol.TypePlay,
+				RoomID:       "ROOM01",
+				UserID:       "user_a",
+				Seq:          2,
+				OccurredAtMs: time.Now().UnixMilli(),
+				Payload: mustJSONRaw(protocol.Envelope{
+					Type: protocol.TypePlay,
+					Payload: mustJSONRaw(protocol.PlayPayload{
+						RoomID:       "ROOM01",
+						UserID:       "user_a",
+						RequestID:    "req-play",
+						PositionMs:   42_000,
+						Velocity:     1,
+						ServerTimeMs: time.Now().UnixMilli(),
+						Reason:       "play",
+						Seq:          2,
+					}),
+				}),
+			}},
+		},
+	)
+	mux := http.NewServeMux()
+	mux.Handle("/ws", handler)
+
+	httpServer := httptest.NewServer(mux)
+	defer httpServer.Close()
+
+	wsURL := "ws" + httpServer.URL[len("http"):] + "/ws"
+	ctx := context.Background()
+	conn := mustDialWebSocket(t, ctx, wsURL, "user_b")
+	defer conn.Close(websocket.StatusNormalClosure, "test done")
+
+	mustJoinRoom(t, ctx, conn, "ROOM01", "user_b")
+	envelope := mustReadEnvelope(t, ctx, conn)
+	if envelope.Type != protocol.TypeRoomState {
+		t.Fatalf("expected room_state after lazy bootstrap, got %s", envelope.Type)
+	}
+	var payload protocol.RoomStatePayload
+	if err := json.Unmarshal(envelope.Payload, &payload); err != nil {
+		t.Fatalf("unmarshal room_state payload: %v", err)
+	}
+	if payload.RoomID != "ROOM01" || payload.HostUserID != "user_a" {
+		t.Fatalf("unexpected bootstrapped room identity room=%s host=%s", payload.RoomID, payload.HostUserID)
+	}
+	if payload.Seq != 2 || payload.PositionMs != 42_000 || payload.Paused {
+		t.Fatalf("expected recovered playing state seq=2 pos=42000 paused=false, got seq=%d pos=%d paused=%t", payload.Seq, payload.PositionMs, payload.Paused)
+	}
+	if got := roomManager.ClientCount("ROOM01"); got != 1 {
+		t.Fatalf("expected lazy bootstrapped room to accept client, got %d clients", got)
 	}
 }
 
@@ -1867,4 +1953,28 @@ func (s *fakeRoomMembershipStore) IsActiveMemberByCode(ctx context.Context, room
 
 func roomMembershipKey(roomCode string, userID string) string {
 	return roomCode + "\x00" + userID
+}
+
+type fakeRoomBootstrapper struct {
+	result roomapi.RuntimeBootstrapResult
+	err    error
+}
+
+func (f fakeRoomBootstrapper) RuntimeBootstrapByCode(context.Context, string) (roomapi.RuntimeBootstrapResult, error) {
+	if f.err != nil {
+		return roomapi.RuntimeBootstrapResult{}, f.err
+	}
+	return f.result, nil
+}
+
+type fakeTimelineRecoveryReader struct {
+	events []timeline.Event
+	err    error
+}
+
+func (f fakeTimelineRecoveryReader) ReadRoomRecoveryEvents(context.Context, string) ([]timeline.Event, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f.events, nil
 }

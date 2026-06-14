@@ -103,6 +103,7 @@ Invoke-Step 'Go Phase 23 target tests' {
             ./cmd/mediaservice `
             ./cmd/progressservice `
             ./cmd/homecompositionservice `
+            ./cmd/apigateway `
             ./cmd/timelineservice `
             ./cmd/roomauthorityservice `
             ./cmd/identitydbsync `

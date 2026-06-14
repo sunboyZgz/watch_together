@@ -36,6 +36,8 @@ type WebSocketHandler struct {
 	roomStateWriter     latestRoomStateWriter
 	roomLeaver          roomMembershipLeaver
 	roomMemberChecker   roomMembershipChecker
+	roomBootstrapper    roomRuntimeBootstrapper
+	timelineRecovery    timeline.RecoveryReader
 	controlDeduper      *controlRequestDeduper
 	seekRateLimiter     *controlRateLimiter
 	tokenVerifier       accessTokenVerifier
@@ -98,6 +100,10 @@ type roomMembershipLeaver interface {
 
 type roomMembershipChecker interface {
 	IsActiveMemberByCode(ctx context.Context, roomCode string, userID string) (bool, error)
+}
+
+type roomRuntimeBootstrapper interface {
+	RuntimeBootstrapByCode(ctx context.Context, roomCode string) (roomapi.RuntimeBootstrapResult, error)
 }
 
 type roomAuthorityLookup interface {
@@ -231,6 +237,17 @@ func (h *WebSocketHandler) SetRoomAuthorityRecovery(authorityRecovery roomAuthor
 		return
 	}
 	h.authorityRecovery = authorityRecovery
+}
+
+func (h *WebSocketHandler) SetRoomRuntimeBootstrapper(
+	bootstrapper roomRuntimeBootstrapper,
+	timelineRecovery timeline.RecoveryReader,
+) {
+	if h == nil {
+		return
+	}
+	h.roomBootstrapper = bootstrapper
+	h.timelineRecovery = timelineRecovery
 }
 
 func (h *WebSocketHandler) SetAuthorityControlApplier(applier authority.ControlApplier) {
@@ -649,6 +666,12 @@ func (h *WebSocketHandler) handleRoomStateRequest(
 			}
 		}
 	}
+	if err := h.ensureLocalRoomRuntime(ctx, payload.RoomID, "room_state.request"); err != nil {
+		return protocolMessageError{
+			roomID:  payload.RoomID,
+			message: err.Error(),
+		}
+	}
 
 	existingRoom, ok := h.roomManager.Get(payload.RoomID)
 	if !ok {
@@ -706,6 +729,12 @@ func (h *WebSocketHandler) handleJoinRoom(
 				roomID:  payload.RoomID,
 				message: authorityRecoveryErrorMessage(err),
 			}
+		}
+	}
+	if err := h.ensureLocalRoomRuntime(ctx, payload.RoomID, "join_room"); err != nil {
+		return protocolMessageError{
+			roomID:  payload.RoomID,
+			message: err.Error(),
 		}
 	}
 
@@ -1709,6 +1738,49 @@ func (h *WebSocketHandler) currentRoomAuthorityOrRecover(
 	}
 	h.seedRecoveredControlRequests(ctx, roomID, result.Lease.Epoch, result.Requests, result.RequestIDs)
 	return result.Lease, result.Lease.InstanceID != "", nil
+}
+
+func (h *WebSocketHandler) ensureLocalRoomRuntime(ctx context.Context, roomID string, reason string) error {
+	if h == nil || h.roomManager == nil || roomID == "" {
+		return errors.New("room not found")
+	}
+	if _, ok := h.roomManager.Get(roomID); ok {
+		return nil
+	}
+	if h.roomBootstrapper == nil {
+		return nil
+	}
+	bootstrapCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	bootstrap, err := h.roomBootstrapper.RuntimeBootstrapByCode(bootstrapCtx, roomID)
+	if err != nil {
+		return fmtRoomRuntimeBootstrapError(err)
+	}
+	state := recovery.BaseStateFromRoomBootstrap(bootstrap, h.clock.Now())
+	if h.timelineRecovery != nil {
+		events, err := h.timelineRecovery.ReadRoomRecoveryEvents(bootstrapCtx, roomID)
+		if err != nil {
+			return errors.New("room recovery timeline unavailable")
+		}
+		recoveredState, _, err := recovery.RecoverStateFromEvents(state, events)
+		if err != nil {
+			return err
+		}
+		state = recoveredState
+	}
+	h.roomManager.RegisterRecoveredRoom(state)
+	h.cacheRoomState(state)
+	if h.debugSync {
+		log.Printf("lazy room runtime bootstrap room=%s reason=%s seq=%d", roomID, reason, state.Seq)
+	}
+	return nil
+}
+
+func fmtRoomRuntimeBootstrapError(err error) error {
+	if errors.Is(err, roomapi.ErrRoomNotFound) {
+		return errors.New("room not found")
+	}
+	return errors.New("room runtime bootstrap unavailable")
 }
 
 func (h *WebSocketHandler) ensureLocalAuthorityEpoch(

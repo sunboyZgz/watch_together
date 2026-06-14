@@ -317,6 +317,23 @@ func TestLoadRoomserverRuntimeConfigRequiresDistributedRuntimeForAuthorityRPC(t 
 	}
 }
 
+func TestLoadServerRuntimeConfigAllowsAPIGatewayAuthorityRPCWithoutSessionRuntime(t *testing.T) {
+	configDir := t.TempDir()
+	mustWriteConfigFile(
+		t,
+		filepath.Join(configDir, ".env"),
+		"SERVER_EDGE_MODE=api_gateway\nROOM_RUNTIME_MODE=local_process\nAUTHORITY_SERVICE_MODE=rpc\nAUTHORITY_SERVICE_ADDR=http://roomauthorityservice:8090\nAUTHORITY_LEASE_INSTANCE_ID=roomauthorityservice-1\n",
+	)
+
+	cfg, err := LoadServerRuntimeConfig(configDir)
+	if err != nil {
+		t.Fatalf("expected api gateway authority RPC config to load: %v", err)
+	}
+	if cfg.EdgeMode != "api_gateway" || cfg.RoomRuntimeMode != "local_process" {
+		t.Fatalf("unexpected edge/runtime config: edge=%q runtime=%q", cfg.EdgeMode, cfg.RoomRuntimeMode)
+	}
+}
+
 func TestLoadServerRuntimeConfigDoesNotReadDeprecatedAuthorityServiceInstanceID(t *testing.T) {
 	configDir := t.TempDir()
 	mustWriteConfigFile(

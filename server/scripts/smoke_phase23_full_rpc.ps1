@@ -11,6 +11,8 @@ $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ServerRoot = (Resolve-Path (Join-Path $ScriptDir '..')).Path
 
 $BaseUrl = 'http://127.0.0.1:8080'
+$APIGatewayReadyUrl = 'http://127.0.0.1:8097/readyz'
+$RoomserverReadyUrl = 'http://127.0.0.1:8098/readyz'
 $IdentityServiceReadyUrl = 'http://127.0.0.1:8093/readyz'
 $MediaServiceReadyUrl = 'http://127.0.0.1:8090/readyz'
 $TimelineServiceReadyUrl = 'http://127.0.0.1:8091/readyz'
@@ -61,6 +63,40 @@ function Invoke-Compose {
         if ($LASTEXITCODE -ne 0) {
             throw "docker compose $($Arguments -join ' ') failed"
         }
+    } finally {
+        Pop-Location
+    }
+}
+
+function Write-SmokeDiagnostics {
+    Write-Host '==> compose diagnostics'
+    Push-Location $ServerRoot
+    try {
+        & docker compose --profile app ps
+        $services = @(
+            'postgres',
+            'identity-postgres-init',
+            'room-postgres-init',
+            'media-postgres-init',
+            'progress-postgres-init',
+            'timeline-postgres-init',
+            'apigateway',
+            'roomserver',
+            'identityservice',
+            'roomservice',
+            'mediaservice',
+            'progressservice',
+            'homecompositionservice',
+            'timelineservice',
+            'roomauthorityservice',
+            'nginx'
+        )
+        foreach ($service in $services) {
+            Write-Host "---- logs: $service ----"
+            & docker compose --profile app logs --tail 80 $service
+        }
+    } catch {
+        Write-Host "failed to collect diagnostics: $($_.Exception.Message)"
     } finally {
         Pop-Location
     }
@@ -406,17 +442,19 @@ try {
         if ($ResetVolumes) {
             Invoke-Compose -Arguments @('--profile', 'app', 'down', '-v', '--remove-orphans')
         }
-        Invoke-Compose -Arguments @(
-            '--profile', 'app', 'up', '-d',
-            'postgres',
+        Invoke-Compose -Arguments @('--profile', 'app', 'up', '-d', 'postgres', 'redis', 'nats', 'kafka', 'minio')
+        $composeStarted = $true
+        Wait-PostgresDatabase -Database 'anime_watch_dev'
+        foreach ($job in @(
             'identity-postgres-init',
             'room-postgres-init',
             'media-postgres-init',
             'progress-postgres-init',
-            'timeline-postgres-init'
-        )
-        $composeStarted = $true
-        Wait-PostgresDatabase -Database 'anime_watch_dev'
+            'timeline-postgres-init',
+            'minio-init'
+        )) {
+            Invoke-Compose -Arguments @('--profile', 'app', 'up', '--no-deps', $job)
+        }
         Wait-PostgresDatabase -Database 'anime_watch_identity_dev'
         Wait-PostgresDatabase -Database 'anime_watch_room_dev'
         Wait-PostgresDatabase -Database 'anime_watch_media_dev'
@@ -445,8 +483,10 @@ try {
         Invoke-Compose -Arguments $composeArgs
     }
 
-    Invoke-Step 'wait for roomserver and internal service readiness' {
-        Wait-HttpReady -Url "$BaseUrl/readyz" -Name 'roomserver'
+    Invoke-Step 'wait for gateway, roomserver, and internal service readiness' {
+        Wait-HttpReady -Url "$BaseUrl/readyz" -Name 'public nginx gateway'
+        Wait-HttpReady -Url $APIGatewayReadyUrl -Name 'apigateway'
+        Wait-HttpReady -Url $RoomserverReadyUrl -Name 'roomserver'
         Wait-HttpReady -Url $IdentityServiceReadyUrl -Name 'identityservice'
         Wait-HttpReady -Url $RoomServiceReadyUrl -Name 'roomservice'
         Wait-HttpReady -Url $MediaServiceReadyUrl -Name 'mediaservice'
@@ -588,6 +628,9 @@ try {
     }
 
     Write-Host 'Phase 23 full RPC multi database smoke completed.'
+} catch {
+    Write-SmokeDiagnostics
+    throw
 } finally {
     Close-SmokeWebSocket -Socket $hostSocket
     Close-SmokeWebSocket -Socket $viewerSocket

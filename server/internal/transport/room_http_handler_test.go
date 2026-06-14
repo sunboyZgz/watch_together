@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"watch_together/server/internal/cache"
 	"watch_together/server/internal/room"
 	"watch_together/server/internal/roomapi"
 )
@@ -122,7 +123,7 @@ func TestCreateRoomUsesRuntimeRegistryBoundary(t *testing.T) {
 				DurationMs: &durationMs,
 			},
 		},
-	}), nil)
+	}), nil, true, false)
 	request := httptest.NewRequest(http.MethodPost, "/rooms", strings.NewReader(`{"mediaItemId":"media_001"}`))
 	request.Header.Set("Authorization", testAuthorizationHeader("user_a"))
 	request.Header.Set("Content-Type", "application/json")
@@ -160,6 +161,54 @@ func TestCreateRoomUsesRuntimeRegistryBoundary(t *testing.T) {
 	}
 	if runtime.storedState.Seq != 7 {
 		t.Fatalf("expected stored runtime seq 7, got %d", runtime.storedState.Seq)
+	}
+}
+
+func TestCreateRoomGatewayClaimsAuthorityWithoutLocalRuntime(t *testing.T) {
+	durationMs := int64(1_458_000)
+	claimer := &fakeRoomAuthorityClaimer{}
+	handler := NewRoomHTTPGatewayHandler(roomapi.NewService(&fakeRoomStore{
+		createResult: roomapi.CreateRoomResult{
+			Room: roomapi.Room{
+				ID:          "room_uuid",
+				RoomCode:    "A7K2M9",
+				HostUserID:  "user_a",
+				MediaItemID: "media_001",
+				Status:      "active",
+			},
+			Media: roomapi.Media{
+				ID:         "media_001",
+				Title:      "Violet Evergarden",
+				MediaURL:   "https://example.com/index.m3u8",
+				DurationMs: &durationMs,
+			},
+		},
+	}), nil)
+	handler.SetRoomAuthorityClaimer("roomauthorityservice-1", claimer)
+	request := httptest.NewRequest(http.MethodPost, "/rooms", strings.NewReader(`{"mediaItemId":"media_001"}`))
+	request.Header.Set("Authorization", testAuthorizationHeader("user_a"))
+	request.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+
+	handler.CreateRoom(recorder, request)
+
+	if recorder.Code != http.StatusCreated {
+		t.Fatalf("expected status %d, got %d body=%s", http.StatusCreated, recorder.Code, recorder.Body.String())
+	}
+	if claimer.roomID != "A7K2M9" || claimer.instanceID != "roomauthorityservice-1" {
+		t.Fatalf("expected authority claim for A7K2M9 by roomauthorityservice-1, got room=%q instance=%q", claimer.roomID, claimer.instanceID)
+	}
+	var response struct {
+		Data createRoomResponse `json:"data"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if !response.Data.RoomState.Paused || response.Data.RoomState.PlaybackRate != 1 {
+		t.Fatalf("expected gateway to return initial paused room state, got %+v", response.Data.RoomState)
+	}
+	if response.Data.RoomState.MediaDurationMs == nil || *response.Data.RoomState.MediaDurationMs != durationMs {
+		t.Fatalf("expected roomState mediaDurationMs %d, got %v", durationMs, response.Data.RoomState.MediaDurationMs)
 	}
 }
 
@@ -471,4 +520,26 @@ type fakeRoomSnapshot struct {
 
 func (s fakeRoomSnapshot) StateSnapshot() room.State {
 	return s.state
+}
+
+type fakeRoomAuthorityClaimer struct {
+	roomID     string
+	instanceID string
+	err        error
+	claimed    bool
+}
+
+func (c *fakeRoomAuthorityClaimer) ClaimAuthority(_ context.Context, roomID string, instanceID string) (cache.RoomAuthorityLease, bool, error) {
+	c.roomID = roomID
+	c.instanceID = instanceID
+	if c.err != nil {
+		return cache.RoomAuthorityLease{}, false, c.err
+	}
+	claimed := true
+	if !c.claimed {
+		c.claimed = true
+	} else {
+		claimed = c.claimed
+	}
+	return cache.RoomAuthorityLease{InstanceID: instanceID, Epoch: 1, Status: cache.RoomAuthorityStatusActive}, claimed, nil
 }

@@ -80,6 +80,7 @@ SERVER_HOST=0.0.0.0
 SERVER_PORT=8080
 LOG_LEVEL=debug
 SERVER_INSTANCE_ID=
+SERVER_EDGE_MODE=combined
 ROOM_RUNTIME_MODE=local_process
 DATABASE_URL=postgres://app:app@127.0.0.1:5432/anime_watch_dev?sslmode=disable
 MEDIA_DATABASE_URL=
@@ -327,6 +328,20 @@ cd server
 .\scripts\verify_phase25.ps1 -RunSmoke -ResetVolumes -DownAfterRun
 ```
 
+Run the Phase 26 verification loop after gateway/session edge changes. The default run keeps the Phase 23 baseline and adds API gateway/session gateway route and compose guards:
+
+```powershell
+cd server
+.\scripts\verify_phase26.ps1
+```
+
+Add `-RunSmoke` to run the full-RPC smoke through nginx public REST -> `apigateway` and `/ws` -> `roomserver`:
+
+```powershell
+cd server
+.\scripts\verify_phase26.ps1 -RunSmoke -ResetVolumes -DownAfterRun
+```
+
 Media database sync:
 
 ```bash
@@ -355,9 +370,10 @@ cd server
 docker compose --profile app up -d --build
 ```
 
-The `app` profile starts `roomserver`, `identityservice`, `roomservice`, `mediaservice`, `progressservice`, `homecompositionservice`, `timelineservice`, `roomauthorityservice`, the timeline workers, and the local infrastructure. `roomserver` uses compose-only override variables so `.env` files copied for bare `go run` do not silently change the compose default:
+The `app` profile starts `apigateway`, `roomserver`, `identityservice`, `roomservice`, `mediaservice`, `progressservice`, `homecompositionservice`, `timelineservice`, `roomauthorityservice`, the timeline workers, and the local infrastructure. Nginx routes public REST to `apigateway` and `/ws` to `roomserver`. `roomserver` uses compose-only override variables so `.env` files copied for bare `go run` do not silently change the compose default:
 
 ```text
+ROOMSERVER_EDGE_MODE=session_gateway
 ROOMSERVER_RUNTIME_MODE=distributed_authority
 ROOMSERVER_IDENTITY_SERVICE_MODE=rpc
 ROOMSERVER_ROOM_SERVICE_MODE=rpc
@@ -372,7 +388,9 @@ ROOMSERVER_AUTHORITY_LEASE_INSTANCE_ID=roomauthorityservice-1
 Local service readiness endpoints:
 
 ```text
-http://127.0.0.1:8080/readyz  roomserver through nginx
+http://127.0.0.1:8080/readyz  public nginx -> apigateway
+http://127.0.0.1:8097/readyz  apigateway
+http://127.0.0.1:8098/readyz  roomserver session gateway
 http://127.0.0.1:8090/readyz  mediaservice
 http://127.0.0.1:8091/readyz  timelineservice
 http://127.0.0.1:8092/readyz  roomauthorityservice
@@ -397,7 +415,7 @@ docker compose --profile app up -d --build
 
 Existing main-database media data is not copied into the media database automatically. Use `go run ./cmd/mediadbsync`, or use the Phase 16 smoke script which seeds a deterministic local episode into `anime_watch_media_dev`.
 
-Phase 23's smoke script is the preferred end-to-end local validation. It applies main, identity, room, media, progress, and timeline migrations, writes users/rooms/progress/timeline data through the public Android-facing routes, and asserts those writes landed in the owning databases rather than the main shadow tables. Phase 25 wraps that baseline with authority engine checks for accepted controls, duplicate idempotency, timeline failure rollback, recovery feed failure, and production RPC/default plus rollback compose wiring.
+Phase 23's smoke script is the preferred end-to-end local validation. It applies main, identity, room, media, progress, and timeline migrations, writes users/rooms/progress/timeline data through the public Android-facing routes, and asserts those writes landed in the owning databases rather than the main shadow tables. Phase 26 keeps that smoke as the full-RPC baseline and runs it through `apigateway + roomserver(ws)`; the script starts infrastructure, init jobs, migrations, and services in separate steps and prints compose diagnostics on failure.
 
 Run the optional RPC pilot stack through compose for observability, load, and service experiments:
 
@@ -426,7 +444,7 @@ curl -H "Authorization: Bearer <token>" -H "Content-Type: application/json" \
   -d '{"mediaItemId":"<episode-id>"}' http://127.0.0.1:8080/rooms
 ```
 
-`roomserver` readiness actively probes identity, room, media, progress, home, timeline, and authority RPC service readiness in RPC mode. `identityservice`, `roomservice`, `mediaservice`, `progressservice`, and `timelineservice` readiness ping their selected PostgreSQL database at request time. `roomservice`, `progressservice`, and `homecompositionservice` also check their configured RPC dependencies. `timelineservice` reports Kafka reader state as `ok`, `disabled`, or `unavailable` depending on broker configuration and reader initialization. `roomauthorityservice` readiness checks Redis, NATS, room RPC, timeline RPC, and internal RPC availability.
+`apigateway` readiness actively probes identity, room, media, progress, home, and authority RPC. `roomserver` readiness actively probes identity, room, media, progress, home, timeline, and authority RPC service readiness in RPC mode. `identityservice`, `roomservice`, `mediaservice`, `progressservice`, and `timelineservice` readiness ping their selected PostgreSQL database at request time. `roomservice`, `progressservice`, and `homecompositionservice` also check their configured RPC dependencies. `timelineservice` reports Kafka reader state as `ok`, `disabled`, or `unavailable` depending on broker configuration and reader initialization. `roomauthorityservice` readiness checks Redis, NATS, room RPC, timeline RPC, and internal RPC availability.
 
 Start the server:
 
@@ -515,7 +533,8 @@ Production deployment uses `server/compose.prod.yaml`. Its intended boundary is:
 - `/metrics` should be scraped from an internal network or blocked at the public reverse proxy.
 - Media delivery defaults to `MEDIA_DELIVERY_MODE=nginx_auth_request`.
 - Production compose defaults identity, room, media, progress, home, timeline, and authority to RPC services.
-- `roomauthorityservice` runs by default and owns authority decisions through `authority.Engine`; `roomserver` remains the Android-facing HTTP/WebSocket edge and keeps local WebSocket connection tables.
+- `apigateway` runs by default and owns Android-facing REST/BFF routing.
+- `roomauthorityservice` runs by default and owns authority decisions through `authority.Engine`; `roomserver` remains the WebSocket/session gateway and keeps local WebSocket connection tables.
 - Authority rollback is explicit: set `AUTHORITY_SERVICE_MODE=local`, `ROOM_RUNTIME_MODE=local_process`, and `WS_CROSS_INSTANCE_BROADCAST_ENABLED=false`. No Android HTTP/WebSocket payload changes are involved.
 
 See [server/deploy/README.md](../server/deploy/README.md) for deployment-specific commands and Nginx details.

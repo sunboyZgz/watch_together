@@ -1,6 +1,6 @@
 # Room Authority Service Design
 
-Phase 13 defines the target `room-authority-service` boundary. Phase 14 implements a non-default RPC pilot under `rpc-pilot`. Phase 15 hardens that pilot with dynamic readiness, metrics, stable failure tests, and explicit lease-owner identity. Phase 16 promotes authority RPC into the local compose `app` development path. Phase 17/18 adds identity RPC to the same local app baseline; Phase 19 adds room metadata and membership RPC through `cmd/roomservice`; Phase 21 moves room lifecycle and recovery bootstrap reads behind room RPC. Phase 24 adds a production authority RPC canary. Phase 25 moves authority decisions into `authority.Engine` inside `cmd/roomauthorityservice` and makes production compose default to authority RPC. These changes do not change the authority contract. Android HTTP/WebSocket contracts remain unchanged.
+Phase 13 defines the target `room-authority-service` boundary. Phase 14 implements a non-default RPC pilot under `rpc-pilot`. Phase 15 hardens that pilot with dynamic readiness, metrics, stable failure tests, and explicit lease-owner identity. Phase 16 promotes authority RPC into the local compose `app` development path. Phase 17/18 adds identity RPC to the same local app baseline; Phase 19 adds room metadata and membership RPC through `cmd/roomservice`; Phase 21 moves room lifecycle and recovery bootstrap reads behind room RPC. Phase 24 adds a production authority RPC canary. Phase 25 moves authority decisions into `authority.Engine` inside `cmd/roomauthorityservice` and makes production compose default to authority RPC. Phase 26 moves public REST/BFF routes to `cmd/apigateway`; HTTP room create/join claims authority through authority RPC for the authority service identity, while WebSocket connections and session delivery remain in `roomserver`. These changes do not change the authority contract. Android HTTP/WebSocket contracts remain unchanged.
 
 ## Goals
 
@@ -76,7 +76,8 @@ Phase 25 makes the authority RPC path the production compose default and removes
 
 Today, `distributed_authority` uses these ownership boundaries:
 
-- `roomserver` owns WebSocket ingress/egress, HTTP room bootstrap, the local connection table, and client delivery. In authority RPC mode it forwards control application to `roomauthorityservice`; in local rollback mode it still owns the authoritative `room.Manager` instance for rooms whose Redis lease points to the local instance.
+- `apigateway` owns public HTTP room create/join/detail in compose and claims the authority lease through authority RPC without registering local room runtime.
+- `roomserver` owns WebSocket ingress/egress, lazy session runtime bootstrap, the local connection table, and client delivery. In authority RPC mode it forwards control application to `roomauthorityservice`; in local rollback mode it still owns the authoritative `room.Manager` instance for rooms whose Redis lease points to the local instance.
 - `roomservice` owns room metadata and membership RPC in compose app/prod paths, while realtime room runtime stays in `roomserver`.
 - Phase 21 also routes authority recovery bootstrap reads and recoverable-room metadata through `roomservice`; `roomauthorityservice` does not directly read room tables.
 - Redis stores authority leases, active-device leases, control request idempotency, seek rate limits, latest room snapshots, and user-level presence.

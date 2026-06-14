@@ -19,6 +19,7 @@ type ServerRuntimeConfig struct {
 	Port                string
 	LogLevel            string
 	InstanceID          string
+	EdgeMode            string
 	RoomRuntimeMode     string
 	DatabaseURL         string
 	IdentityDatabaseURL string
@@ -167,6 +168,7 @@ func LoadServerRuntimeConfig(configDir string) (ServerRuntimeConfig, error) {
 		"SERVER_PORT":                           "8080",
 		"LOG_LEVEL":                             "debug",
 		"SERVER_INSTANCE_ID":                    "",
+		"SERVER_EDGE_MODE":                      "combined",
 		"ROOM_RUNTIME_MODE":                     "local_process",
 		"DEBUG_SYNC":                            true,
 		"AUTH_ACCESS_TOKEN_TTL_HOURS":           24,
@@ -241,6 +243,7 @@ func LoadServerRuntimeConfig(configDir string) (ServerRuntimeConfig, error) {
 		"SERVER_PORT",
 		"LOG_LEVEL",
 		"SERVER_INSTANCE_ID",
+		"SERVER_EDGE_MODE",
 		"ROOM_RUNTIME_MODE",
 		"DATABASE_URL",
 		"IDENTITY_DATABASE_URL",
@@ -349,6 +352,7 @@ func LoadServerRuntimeConfig(configDir string) (ServerRuntimeConfig, error) {
 		Port:                trimmedString(loader, "SERVER_PORT"),
 		LogLevel:            trimmedString(loader, "LOG_LEVEL"),
 		InstanceID:          trimmedString(loader, "SERVER_INSTANCE_ID"),
+		EdgeMode:            strings.ToLower(trimmedString(loader, "SERVER_EDGE_MODE")),
 		RoomRuntimeMode:     roomRuntimeMode,
 		DatabaseURL:         trimmedString(loader, "DATABASE_URL"),
 		IdentityDatabaseURL: trimmedString(loader, "IDENTITY_DATABASE_URL"),
@@ -558,6 +562,9 @@ func validateServerRuntimeConfig(config ServerRuntimeConfig) error {
 }
 
 func validateServiceConfig(config ServerRuntimeConfig) error {
+	if mode := strings.ToLower(strings.TrimSpace(config.EdgeMode)); mode != "" && mode != "combined" && mode != "api_gateway" && mode != "session_gateway" {
+		return fmt.Errorf("unsupported SERVER_EDGE_MODE %q; supported values: combined, api_gateway, session_gateway", config.EdgeMode)
+	}
 	if config.InternalRPC.Enabled && strings.TrimSpace(config.InternalRPC.Addr) == "" {
 		return fmt.Errorf("INTERNAL_RPC_ADDR is required when INTERNAL_RPC_ENABLED=true")
 	}

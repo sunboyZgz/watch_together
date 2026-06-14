@@ -149,10 +149,51 @@ func TestComposeAppAndProdUseFullRPCBoundary(t *testing.T) {
 	localHome := requireComposeService(t, localCompose, "homecompositionservice")
 	localTimeline := requireComposeService(t, localCompose, "timelineservice")
 	localAuthority := requireComposeService(t, localCompose, "roomauthorityservice")
+	localGateway := requireComposeService(t, localCompose, "apigateway")
 
 	for _, serviceName := range []string{"identityservice", "roomservice", "mediaservice", "progressservice", "homecompositionservice", "timelineservice", "roomauthorityservice"} {
 		if !dependsOnService(localRoomserver.DependsOn, serviceName) {
 			t.Fatalf("app roomserver must depend on %s by default", serviceName)
+		}
+	}
+	if mode := envString(localRoomserver.Environment, "SERVER_EDGE_MODE"); !strings.Contains(mode, "session_gateway") {
+		t.Fatalf("app roomserver SERVER_EDGE_MODE = %q, want session_gateway default", mode)
+	}
+	if !containsContext(localGateway.Profiles, "app") {
+		t.Fatalf("apigateway profiles = %v, want app profile", localGateway.Profiles)
+	}
+	for _, serviceName := range []string{"identityservice", "roomservice", "mediaservice", "progressservice", "homecompositionservice", "roomauthorityservice"} {
+		if !dependsOnService(localGateway.DependsOn, serviceName) {
+			t.Fatalf("app apigateway must depend on %s", serviceName)
+		}
+	}
+	if mode := envString(localGateway.Environment, "SERVER_EDGE_MODE"); mode != "api_gateway" {
+		t.Fatalf("app apigateway SERVER_EDGE_MODE = %q, want api_gateway", mode)
+	}
+	if mode := envString(localGateway.Environment, "ROOM_RUNTIME_MODE"); mode != "local_process" {
+		t.Fatalf("app apigateway ROOM_RUNTIME_MODE = %q, want local_process", mode)
+	}
+	if enabled := envString(localGateway.Environment, "WS_CROSS_INSTANCE_BROADCAST_ENABLED"); enabled != "false" {
+		t.Fatalf("app apigateway must not enable websocket broadcast, got %q", enabled)
+	}
+	if natsURL := envString(localGateway.Environment, "NATS_URL"); natsURL != "" {
+		t.Fatalf("app apigateway must not receive NATS_URL, got %q", natsURL)
+	}
+	for _, key := range []string{"DATABASE_URL", "IDENTITY_DATABASE_URL", "ROOM_DATABASE_URL", "MEDIA_DATABASE_URL", "PROGRESS_DATABASE_URL", "TIMELINE_DATABASE_URL"} {
+		if value := envString(localGateway.Environment, key); value != "" {
+			t.Fatalf("app apigateway must not receive direct %s, got %q", key, value)
+		}
+	}
+	for key, want := range map[string]string{
+		"IDENTITY_SERVICE_MODE":  "rpc",
+		"ROOM_SERVICE_MODE":      "rpc",
+		"MEDIA_SERVICE_MODE":     "rpc",
+		"PROGRESS_SERVICE_MODE":  "rpc",
+		"HOME_SERVICE_MODE":      "rpc",
+		"AUTHORITY_SERVICE_MODE": "rpc",
+	} {
+		if value := envString(localGateway.Environment, key); value != want {
+			t.Fatalf("app apigateway %s = %q, want %q", key, value, want)
 		}
 	}
 	if mode := envString(localRoomserver.Environment, "ROOM_RUNTIME_MODE"); !strings.Contains(mode, "distributed_authority") {
@@ -348,6 +389,7 @@ func TestComposeAppAndProdUseFullRPCBoundary(t *testing.T) {
 
 	prodCompose := readCompose(t, "../../compose.prod.yaml")
 	prodRoomserver := requireComposeService(t, prodCompose, "roomserver")
+	prodGateway := requireComposeService(t, prodCompose, "apigateway")
 	prodIdentity := requireComposeService(t, prodCompose, "identityservice")
 	prodRoom := requireComposeService(t, prodCompose, "roomservice")
 	prodMedia := requireComposeService(t, prodCompose, "mediaservice")
@@ -375,6 +417,31 @@ func TestComposeAppAndProdUseFullRPCBoundary(t *testing.T) {
 	}
 	if !dependsOnService(prodRoomserver.DependsOn, "roomauthorityservice") {
 		t.Fatalf("prod roomserver must depend on roomauthorityservice by default")
+	}
+	if mode := envString(prodRoomserver.Environment, "SERVER_EDGE_MODE"); !strings.Contains(mode, "session_gateway") {
+		t.Fatalf("prod roomserver SERVER_EDGE_MODE = %q, want session_gateway default", mode)
+	}
+	for _, serviceName := range []string{"identityservice", "roomservice", "mediaservice", "progressservice", "homecompositionservice", "roomauthorityservice"} {
+		if !dependsOnService(prodGateway.DependsOn, serviceName) {
+			t.Fatalf("prod apigateway must depend on %s", serviceName)
+		}
+	}
+	if mode := envString(prodGateway.Environment, "SERVER_EDGE_MODE"); mode != "api_gateway" {
+		t.Fatalf("prod apigateway SERVER_EDGE_MODE = %q, want api_gateway", mode)
+	}
+	if mode := envString(prodGateway.Environment, "ROOM_RUNTIME_MODE"); mode != "local_process" {
+		t.Fatalf("prod apigateway ROOM_RUNTIME_MODE = %q, want local_process", mode)
+	}
+	if enabled := envString(prodGateway.Environment, "WS_CROSS_INSTANCE_BROADCAST_ENABLED"); enabled != "false" {
+		t.Fatalf("prod apigateway must not enable websocket broadcast, got %q", enabled)
+	}
+	if natsURL := envString(prodGateway.Environment, "NATS_URL"); natsURL != "" {
+		t.Fatalf("prod apigateway must not receive NATS_URL, got %q", natsURL)
+	}
+	for _, key := range []string{"DATABASE_URL", "IDENTITY_DATABASE_URL", "ROOM_DATABASE_URL", "MEDIA_DATABASE_URL", "PROGRESS_DATABASE_URL", "TIMELINE_DATABASE_URL"} {
+		if value := envString(prodGateway.Environment, key); value != "" {
+			t.Fatalf("prod apigateway must not receive direct %s, got %q", key, value)
+		}
 	}
 	if mode := envString(prodRoomserver.Environment, "ROOM_RUNTIME_MODE"); !strings.Contains(mode, "distributed_authority") {
 		t.Fatalf("prod roomserver ROOM_RUNTIME_MODE = %q, want distributed_authority default", mode)
@@ -506,17 +573,24 @@ func TestComposeAppAndProdUseFullRPCBoundary(t *testing.T) {
 	}
 }
 
-func TestNginxExposesRoomserverReadinessForAppSmoke(t *testing.T) {
+func TestNginxRoutesRESTToAPIGatewayAndWebSocketToRoomserver(t *testing.T) {
 	content, err := os.ReadFile("../../deploy/nginx/default.conf")
 	if err != nil {
 		t.Fatalf("read nginx config: %v", err)
 	}
 	text := string(content)
 	for _, expected := range []string{
+		"upstream watch_together_api",
+		"server apigateway:8080;",
+		"upstream watch_together_ws",
+		"server roomserver:8080;",
 		"location = /healthz",
 		"location = /readyz",
 		"location = /metrics",
-		"proxy_pass http://watch_together_api",
+		"location /auth/",
+		"proxy_pass http://watch_together_api;",
+		"location /ws",
+		"proxy_pass http://watch_together_ws;",
 	} {
 		if !strings.Contains(text, expected) {
 			t.Fatalf("expected nginx config to contain %q", expected)
