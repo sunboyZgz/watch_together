@@ -481,6 +481,10 @@ func LoadRoomserverRuntimeConfig(configDir string) (ServerRuntimeConfig, error) 
 }
 
 func validateRoomserverRuntimeConfig(config ServerRuntimeConfig) error {
+	if normalizeServiceMode(config.ServiceClients.AuthorityMode) == "rpc" &&
+		config.RoomRuntimeMode != roomRuntimeModeDistributedAuthority {
+		return fmt.Errorf("AUTHORITY_SERVICE_MODE=rpc requires ROOM_RUNTIME_MODE=%s", roomRuntimeModeDistributedAuthority)
+	}
 	if normalizeServiceMode(config.ServiceClients.IdentityMode) == "rpc" &&
 		strings.TrimSpace(config.IdentityDatabaseURL) != "" {
 		return fmt.Errorf("IDENTITY_DATABASE_URL must be empty for roomserver when IDENTITY_SERVICE_MODE=rpc; use ROOMSERVER_IDENTITY_DATABASE_URL only with IDENTITY_SERVICE_MODE=local")

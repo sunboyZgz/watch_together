@@ -25,7 +25,6 @@ import (
 	"watch_together/server/internal/servicekit"
 	"watch_together/server/internal/telemetry"
 	"watch_together/server/internal/timeline"
-	"watch_together/server/internal/transport"
 )
 
 func main() {
@@ -131,34 +130,6 @@ func main() {
 	}
 	defer broadcastBus.Close()
 
-	handler := transport.NewWebSocketHandlerWithConfigAndRoomStateWriter(
-		roomManager,
-		runtimeConfig.DebugSync,
-		transport.WebSocketRuntimeConfig{
-			BroadcastConcurrencyLimit: runtimeConfig.WebSocket.BroadcastConcurrencyLimit,
-			BroadcastTimeout:          time.Duration(runtimeConfig.WebSocket.BroadcastTimeoutMs) * time.Millisecond,
-			BroadcastEnqueueTimeout:   time.Duration(runtimeConfig.WebSocket.BroadcastEnqueueTimeoutMs) * time.Millisecond,
-			ClientOutboxCapacity:      runtimeConfig.WebSocket.ClientOutboxCapacity,
-			SeekMinInterval:           time.Duration(runtimeConfig.WebSocket.SeekMinIntervalMs) * time.Millisecond,
-			ControlIdempotencyTTL:     time.Duration(runtimeConfig.WebSocket.ControlIdempotencyTTLms) * time.Millisecond,
-			PresenceLeaseTTL:          time.Duration(runtimeConfig.WebSocket.PresenceLeaseTTLms) * time.Millisecond,
-			PresenceRefreshInterval:   time.Duration(runtimeConfig.WebSocket.PresenceRefreshIntervalMs) * time.Millisecond,
-			CrossInstanceBroadcast:    true,
-			EventBus:                  runtimeConfig.WebSocket.EventBus,
-		},
-		roomStateCache,
-	)
-	handler.SetRoomBroadcastBus(runtimeConfig.InstanceID, broadcastBus)
-	handler.SetDistributedAuthorityRuntime(
-		runtimeConfig.InstanceID,
-		authorityRegistry,
-		activeDeviceRegistry,
-		eventbus.NewDisabledRoomControlBus(),
-		timelineClient,
-	)
-	handler.SetDistributedControlHardening(controlRequestRegistry, nil, 0)
-	handler.SetDistributedControlRateRegistry(controlRateRegistry)
-
 	recoveryService := recovery.NewService(
 		recovery.Config{
 			InstanceID:      runtimeConfig.InstanceID,
@@ -170,9 +141,25 @@ func main() {
 		timelineClient,
 		roomStateCache,
 	)
-	handler.SetRoomAuthorityRecovery(recoveryService)
 	go startAuthorityRenewLoop(ctx, time.Duration(runtimeConfig.AuthorityRecovery.RenewIntervalMs)*time.Millisecond, roomManager, authorityRegistry, runtimeConfig.InstanceID)
 	go recoveryService.RunScanner(ctx, time.Duration(runtimeConfig.AuthorityRecovery.TakeoverScanIntervalMs)*time.Millisecond)
+	engine := authority.NewEngine(
+		authority.EngineConfig{
+			InstanceID:      runtimeConfig.InstanceID,
+			SeekMinInterval: time.Duration(runtimeConfig.WebSocket.SeekMinIntervalMs) * time.Millisecond,
+			DebugSync:       runtimeConfig.DebugSync,
+		},
+		roomManager,
+		authorityRegistry,
+		activeDeviceRegistry,
+		controlRequestRegistry,
+		controlRateRegistry,
+		roomClient,
+		timelineClient,
+		roomStateCache,
+		broadcastBus,
+		recoveryService,
+	)
 
 	metrics := observability.NewMetrics()
 	mux := http.NewServeMux()
@@ -182,16 +169,7 @@ func main() {
 		runtimeConfig.InternalRPC.PathPrefix,
 		runtimeConfig.InternalRPC.AuthToken,
 		authorityRegistry,
-		&loadingApplier{
-			next:           handler,
-			roomManager:    roomManager,
-			roomStore:      roomClient,
-			timelineReader: timelineClient,
-			handler:        handler,
-			instanceID:     runtimeConfig.InstanceID,
-			authority:      authorityRegistry,
-			recoverer:      recoveryService,
-		},
+		engine,
 		metrics,
 	)
 
@@ -218,79 +196,6 @@ func main() {
 			log.Printf("roomauthorityservice graceful shutdown failed: %v", err)
 		}
 	}
-}
-
-type loadingApplier struct {
-	next           authority.ControlApplier
-	roomManager    *room.Manager
-	roomStore      recovery.RoomDetailStore
-	timelineReader timeline.RecoveryReader
-	handler        *transport.WebSocketHandler
-	instanceID     string
-	authority      *cache.RoomAuthorityRegistry
-	recoverer      *recovery.Service
-}
-
-func (a *loadingApplier) ApplyRoomControl(ctx context.Context, request authority.ApplyControlRequest) (authority.ApplyControlResponse, error) {
-	if err := a.ensureAuthority(ctx, request.RoomID); err != nil {
-		return authority.ApplyControlResponse{Error: authorityRecoveryMessage(err)}, nil
-	}
-	if _, ok := a.roomManager.Get(request.RoomID); !ok {
-		if err := a.ensureRoomState(ctx, request.RoomID); err != nil {
-			return authority.ApplyControlResponse{Error: "room authority unavailable"}, nil
-		}
-	}
-	return a.next.ApplyRoomControl(ctx, request)
-}
-
-func (a *loadingApplier) ensureAuthority(ctx context.Context, roomID string) error {
-	if a.authority == nil || a.recoverer == nil {
-		return nil
-	}
-	lease, found, err := a.authority.GetAuthority(ctx, roomID)
-	if err != nil {
-		return err
-	}
-	if found && lease.IsActive() && !lease.ExpiredAt(time.Now()) {
-		return nil
-	}
-	result, err := a.recoverer.TryRecoverRoomAuthority(ctx, roomID, "authority_rpc_control")
-	if result.Recovered {
-		a.handler.SeedRecoveredControlRequests(ctx, roomID, result.Lease.Epoch, result.Requests, result.RequestIDs)
-	}
-	if err != nil && !errors.Is(err, recovery.ErrAuthorityActive) {
-		return err
-	}
-	return nil
-}
-
-func (a *loadingApplier) ensureRoomState(ctx context.Context, roomID string) error {
-	bootstrap, err := a.roomStore.RuntimeBootstrapByCode(ctx, roomID)
-	if err != nil {
-		return err
-	}
-	base := recovery.BaseStateFromRoomBootstrap(bootstrap, time.Now())
-	events, err := a.timelineReader.ReadRoomRecoveryEvents(ctx, roomID)
-	if err != nil {
-		return err
-	}
-	state, requests, err := recovery.RecoverStateFromEvents(base, events)
-	if err != nil {
-		return err
-	}
-	a.roomManager.RegisterRecoveredRoom(state)
-	lease, found, err := a.authority.GetAuthority(ctx, roomID)
-	if err == nil && found {
-		a.handler.SeedRecoveredControlRequests(ctx, roomID, lease.Epoch, requests, nil)
-	}
-	return nil
-}
-
-func authorityRecoveryMessage(err error) string {
-	if errors.Is(err, recovery.ErrAuthorityRecovering) {
-		return "room authority recovering"
-	}
-	return "room authority unavailable"
 }
 
 func installServiceEndpoints(

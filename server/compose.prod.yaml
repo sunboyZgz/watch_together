@@ -194,6 +194,8 @@ services:
         condition: service_started
       timelineservice:
         condition: service_started
+      roomauthorityservice:
+        condition: service_started
       minio-init:
         condition: service_completed_successfully
     env_file:
@@ -204,9 +206,9 @@ services:
       SERVER_PORT: 8080
       LOG_LEVEL: info
       SERVER_INSTANCE_ID: ${SERVER_INSTANCE_ID:-roomserver-prod-1}
-      ROOM_RUNTIME_MODE: ${ROOM_RUNTIME_MODE:-local_process}
+      ROOM_RUNTIME_MODE: ${ROOM_RUNTIME_MODE:-distributed_authority}
       DEBUG_SYNC: "false"
-      WS_CROSS_INSTANCE_BROADCAST_ENABLED: ${WS_CROSS_INSTANCE_BROADCAST_ENABLED:-false}
+      WS_CROSS_INSTANCE_BROADCAST_ENABLED: ${WS_CROSS_INSTANCE_BROADCAST_ENABLED:-true}
       WS_EVENT_BUS: ${WS_EVENT_BUS:-nats_core}
       NATS_URL: ${NATS_URL:-nats://nats:4222}
       NATS_NAME: ${NATS_NAME:-watch-together-roomserver}
@@ -252,9 +254,9 @@ services:
       TIMELINE_SERVICE_MODE: ${TIMELINE_SERVICE_MODE:-rpc}
       TIMELINE_SERVICE_ADDR: ${TIMELINE_SERVICE_ADDR:-http://timelineservice:8090}
       TIMELINE_DATABASE_URL: ${ROOMSERVER_TIMELINE_DATABASE_URL:-}
-      AUTHORITY_SERVICE_MODE: ${AUTHORITY_SERVICE_MODE:-local}
-      AUTHORITY_SERVICE_ADDR: ${AUTHORITY_SERVICE_ADDR:-}
-      AUTHORITY_LEASE_INSTANCE_ID: ${AUTHORITY_LEASE_INSTANCE_ID:-}
+      AUTHORITY_SERVICE_MODE: ${AUTHORITY_SERVICE_MODE:-rpc}
+      AUTHORITY_SERVICE_ADDR: ${AUTHORITY_SERVICE_ADDR:-http://roomauthorityservice:8090}
+      AUTHORITY_LEASE_INSTANCE_ID: ${AUTHORITY_LEASE_INSTANCE_ID:-roomauthorityservice-prod-1}
       OTEL_TRACING_ENABLED: ${OTEL_TRACING_ENABLED:-false}
       OTEL_SERVICE_NAME: ${OTEL_SERVICE_NAME:-watch-together-roomserver}
       OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
@@ -530,7 +532,6 @@ services:
   roomauthorityservice:
     image: watch-together-roomserver:${WATCH_TOGETHER_IMAGE_TAG:-prod}
     restart: unless-stopped
-    profiles: ["authority-rpc-canary"]
     depends_on:
       redis:
         condition: service_healthy

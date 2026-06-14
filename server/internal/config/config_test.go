@@ -303,6 +303,20 @@ func TestLoadServerRuntimeConfigLoadsAuthorityLeaseInstanceID(t *testing.T) {
 	}
 }
 
+func TestLoadRoomserverRuntimeConfigRequiresDistributedRuntimeForAuthorityRPC(t *testing.T) {
+	configDir := t.TempDir()
+	mustWriteConfigFile(
+		t,
+		filepath.Join(configDir, ".env"),
+		"AUTHORITY_SERVICE_MODE=rpc\nAUTHORITY_SERVICE_ADDR=http://roomauthorityservice:8090\nAUTHORITY_LEASE_INSTANCE_ID=roomauthorityservice-1\n",
+	)
+
+	if _, err := LoadRoomserverRuntimeConfig(configDir); err == nil ||
+		!strings.Contains(err.Error(), "AUTHORITY_SERVICE_MODE=rpc requires ROOM_RUNTIME_MODE=distributed_authority") {
+		t.Fatalf("expected authority rpc to require distributed room runtime, got %v", err)
+	}
+}
+
 func TestLoadServerRuntimeConfigDoesNotReadDeprecatedAuthorityServiceInstanceID(t *testing.T) {
 	configDir := t.TempDir()
 	mustWriteConfigFile(

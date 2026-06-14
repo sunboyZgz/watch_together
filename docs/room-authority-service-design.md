@@ -1,6 +1,6 @@
 # Room Authority Service Design
 
-Phase 13 defines the target `room-authority-service` boundary. Phase 14 implements a non-default RPC pilot under `rpc-pilot`. Phase 15 hardens that pilot with dynamic readiness, metrics, stable failure tests, and explicit lease-owner identity. Phase 16 promotes authority RPC into the local compose `app` development path, while production compose still keeps room authority inside `roomserver` by default. Phase 17/18 adds identity RPC to the same local app baseline; Phase 19 adds room metadata and membership RPC through `cmd/roomservice`; Phase 21 moves room lifecycle and recovery bootstrap reads behind room RPC. Phase 24 adds a production `authority-rpc-canary` profile without changing the production default. These changes do not change the authority contract. Android HTTP/WebSocket contracts remain unchanged.
+Phase 13 defines the target `room-authority-service` boundary. Phase 14 implements a non-default RPC pilot under `rpc-pilot`. Phase 15 hardens that pilot with dynamic readiness, metrics, stable failure tests, and explicit lease-owner identity. Phase 16 promotes authority RPC into the local compose `app` development path. Phase 17/18 adds identity RPC to the same local app baseline; Phase 19 adds room metadata and membership RPC through `cmd/roomservice`; Phase 21 moves room lifecycle and recovery bootstrap reads behind room RPC. Phase 24 adds a production authority RPC canary. Phase 25 moves authority decisions into `authority.Engine` inside `cmd/roomauthorityservice` and makes production compose default to authority RPC. These changes do not change the authority contract. Android HTTP/WebSocket contracts remain unchanged.
 
 ## Goals
 
@@ -16,7 +16,6 @@ Phase 13 defines the target `room-authority-service` boundary. Phase 14 implemen
 - Do not route production or local compose traffic through a new authority service in Phase 13.
 - Do not route app/prod default traffic through authority RPC in Phase 14.
 - Do not route production default traffic through authority RPC in Phase 16.
-- Do not route production default traffic through authority RPC in Phase 24; only the explicit canary profile may do that.
 - Do not move WebSocket connection objects, send queues, heartbeat state, or local client tables out of `roomserver`.
 - Do not change Android HTTP/WebSocket request or response shapes.
 
@@ -50,24 +49,34 @@ Phase 16 makes local compose `app` the default full-RPC serviceized development 
 - App `roomserver` sets `ROOM_SERVICE_MODE=rpc`, so room create/join/detail and WebSocket membership checks can cross the room service boundary.
 - App `roomserver` uses `AUTHORITY_LEASE_INSTANCE_ID=roomauthorityservice-1` by default so HTTP bootstrap claims Redis authority leases for the service identity.
 - App `roomserver /readyz` actively probes `authority_rpc` through `roomauthorityservice /readyz`; unavailable authority RPC makes roomserver readiness `not_ready`.
-- `server/compose.prod.yaml` still keeps `AUTHORITY_SERVICE_MODE=local` by default.
 - Bare `go run ./cmd/roomserver` keeps local adapters by default for fast single-process debugging.
 
 ## Phase 24 Production Canary Status
 
-Phase 24 adds a production canary path without making authority RPC the production default.
+Phase 24 added a production canary path without making authority RPC the production default. Phase 25 supersedes that deployment shape by making the service default in production compose.
 
-- `server/compose.prod.yaml --profile authority-rpc-canary` can start `roomauthorityservice`.
+- The old canary profile is no longer required after Phase 25.
 - A canary run must explicitly set `AUTHORITY_SERVICE_MODE=rpc`, `AUTHORITY_SERVICE_ADDR=http://roomauthorityservice:8090`, `AUTHORITY_LEASE_INSTANCE_ID=roomauthorityservice-prod-1`, `ROOM_RUNTIME_MODE=distributed_authority`, and `WS_CROSS_INSTANCE_BROADCAST_ENABLED=true`.
 - `roomauthorityservice` depends on Redis, NATS, `roomservice`, and `timelineservice`; it does not receive `DATABASE_URL` or `ROOM_DATABASE_URL`.
 - `server/scripts/verify_phase24.ps1` validates the Phase 23 full-RPC baseline, prod canary compose wiring, and authority failure semantics. `-RunSmoke` also runs the full-RPC multi-database HTTP/WebSocket smoke.
-- Rollback remains explicit and simple: set `AUTHORITY_SERVICE_MODE=local` and stop the canary profile.
+- Phase 25 rollback is explicit and simple: set `AUTHORITY_SERVICE_MODE=local`, `ROOM_RUNTIME_MODE=local_process`, and `WS_CROSS_INSTANCE_BROADCAST_ENABLED=false`.
+
+## Phase 25 Production RPC Status
+
+Phase 25 makes the authority RPC path the production compose default and removes the implementation dependency on `transport.WebSocketHandler` inside `cmd/roomauthorityservice`.
+
+- `cmd/roomauthorityservice` registers `authority.Engine` as the `RoomAuthorityInternalService` control applier.
+- `authority.Engine` owns a service-local `room.Manager`, ensures the Redis authority lease is local, lazy-loads room bootstrap data through room RPC, recovers playback state through timeline recovery feeds, validates active-device ownership, idempotency, seek rate limits, host permission, and `seq`, writes timeline results first, then returns the accepted envelope.
+- Timeline write failure is fail-closed: Engine restores the previous room state, does not finalize accepted idempotency, and does not publish an accepted broadcast.
+- Duplicate accepted `requestId` returns the original accepted envelope; duplicate pending returns `room authority processing` without advancing state.
+- `server/compose.prod.yaml` starts `roomauthorityservice` by default. Prod `roomserver` defaults to `ROOM_RUNTIME_MODE=distributed_authority`, `WS_CROSS_INSTANCE_BROADCAST_ENABLED=true`, `AUTHORITY_SERVICE_MODE=rpc`, `AUTHORITY_SERVICE_ADDR=http://roomauthorityservice:8090`, and `AUTHORITY_LEASE_INSTANCE_ID=roomauthorityservice-prod-1`.
+- Explicit production rollback sets `AUTHORITY_SERVICE_MODE=local`, `ROOM_RUNTIME_MODE=local_process`, and `WS_CROSS_INSTANCE_BROADCAST_ENABLED=false`.
 
 ## Current Baseline
 
 Today, `distributed_authority` uses these ownership boundaries:
 
-- `roomserver` owns WebSocket ingress/egress, HTTP room bootstrap, the local connection table, accepted envelope broadcast, NATS control forwarding, and the authoritative `room.Manager` instance for rooms whose Redis lease points to the local instance.
+- `roomserver` owns WebSocket ingress/egress, HTTP room bootstrap, the local connection table, and client delivery. In authority RPC mode it forwards control application to `roomauthorityservice`; in local rollback mode it still owns the authoritative `room.Manager` instance for rooms whose Redis lease points to the local instance.
 - `roomservice` owns room metadata and membership RPC in compose app/prod paths, while realtime room runtime stays in `roomserver`.
 - Phase 21 also routes authority recovery bootstrap reads and recoverable-room metadata through `roomservice`; `roomauthorityservice` does not directly read room tables.
 - Redis stores authority leases, active-device leases, control request idempotency, seek rate limits, latest room snapshots, and user-level presence.
@@ -87,7 +96,7 @@ This baseline is the parity target for Phase 14 and the production rollback path
 - Publish accepted envelopes to local clients and NATS broadcast.
 - Forward control intent to the authority boundary and return stable protocol errors to clients.
 
-Future `room-authority-service` owns authority decisions:
+In RPC mode, `roomauthorityservice` owns authority decisions:
 
 - Route each room to one logical `roomId` actor.
 - Maintain authoritative playback state for actor-owned rooms.
@@ -221,22 +230,27 @@ Phase 16:
 - Add an app full-RPC smoke gate that verifies HTTP bootstrap, WebSocket join, accepted controls, authority metrics, and timeline outbox writes.
 - Keep production compose on local authority by default.
 
-Phase 17+:
+Phase 17-24:
 
 - Decide whether command inbox or command ingress is necessary.
 - Introduce durable command audit only if product or operations requirements justify it.
 
 Phase 24:
 
-- Keep production authority local by default.
-- Add the `authority-rpc-canary` prod profile and verify it with compose guards.
+- Kept production authority local by default during the canary phase.
+- Added the `authority-rpc-canary` prod profile and verified it with compose guards.
 - Prove timeout, unavailable, stale response, timeline failure, and stale-epoch semantics before any production default cutover.
+
+Phase 25:
+
+- Replace the service's WebSocket handler-backed applier with `authority.Engine`.
+- Make production compose start and use `roomauthorityservice` by default.
+- Keep `transport.WebSocketHandler` local authority logic as the bare/local rollback path.
 
 ## Acceptance Criteria
 
-- Documentation clearly states that `room authority` is still in `roomserver` today.
-- Documentation clearly states that Phase 13 is design-only.
-- Local compose app and rpc-pilot include `roomauthorityservice`; production compose does not include it by default.
-- No generated authority proto or runtime service skeleton is added in Phase 13.
+- Documentation clearly states that RPC-mode authority decisions live in `roomauthorityservice`, while WebSocket connections remain in `roomserver`.
+- Documentation clearly states that bare/local rollback still uses `transport.WebSocketHandler`.
+- Local compose app, rpc-pilot, and production compose include `roomauthorityservice` by default.
 - Kafka is consistently described as a result log, not command ingress.
 - Android HTTP/WebSocket contracts remain unchanged.

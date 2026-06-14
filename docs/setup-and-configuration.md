@@ -218,9 +218,9 @@ Service foundation settings:
 - `INTERNAL_RPC_*` configures optional ConnectRPC service endpoints. `INTERNAL_RPC_AUTH_TOKEN` protects internal calls when configured and is required for production internal RPC.
 - `SERVICE_DISCOVERY_MODE=static` is the only supported discovery mode in the current serviceized path.
 - `IDENTITY_SERVICE_MODE`, `ROOM_SERVICE_MODE`, `MEDIA_SERVICE_MODE`, `PROGRESS_SERVICE_MODE`, `HOME_SERVICE_MODE`, `TIMELINE_SERVICE_MODE`, and `AUTHORITY_SERVICE_MODE` accept `local` or `rpc`. `local` keeps current in-process adapters. `rpc` calls the matching `*_SERVICE_ADDR`.
-- `AUTHORITY_SERVICE_MODE=rpc` also requires `AUTHORITY_LEASE_INSTANCE_ID`, which is the Redis authority lease owner claimed during HTTP room bootstrap for the authority service.
+- `AUTHORITY_SERVICE_MODE=rpc` also requires `AUTHORITY_LEASE_INSTANCE_ID`, which is the Redis authority lease owner claimed during HTTP room bootstrap for the authority service. In `roomserver`, authority RPC must run with `ROOM_RUNTIME_MODE=distributed_authority`.
 - `OTEL_TRACING_ENABLED` turns on OpenTelemetry tracing. `OTEL_EXPORTER_OTLP_ENDPOINT` points at the internal OTLP collector, and `OTEL_TRACE_SAMPLE_RATIO` must be between `0` and `1`.
-- Phase 9 keeps the old single-database fallback but can put media-owned tables in an independent PostgreSQL database through `MEDIA_DATABASE_URL`. Phase 10 does the same for timeline-owned outbox rows through `TIMELINE_DATABASE_URL`. Phase 11 makes timeline RPC the compose default while preserving `local` as an explicit single-process rollback path, Phase 12 moves result timeline ownership into `cmd/timelineservice`, Phase 13 documents the authority boundary, Phase 14 adds a non-default `roomauthorityservice` RPC pilot under `rpc-pilot`, Phase 15 hardens that pilot with dynamic readiness, metrics, stable failure tests, and lease identity naming, Phase 16 makes local compose `app` default to media/timeline/authority RPC, Phase 17/18 adds identity RPC to the same local app baseline, and Phase 22 gives identity an independent database by default in compose. Table owners and future split rules are documented in [Database Ownership](./database-ownership.md) and enforced from `server/internal/store/db_ownership.yaml`.
+- Phase 9 keeps the old single-database fallback but can put media-owned tables in an independent PostgreSQL database through `MEDIA_DATABASE_URL`. Phase 10 does the same for timeline-owned outbox rows through `TIMELINE_DATABASE_URL`. Phase 11 makes timeline RPC the compose default while preserving `local` as an explicit single-process rollback path, Phase 12 moves result timeline ownership into `cmd/timelineservice`, Phase 13 documents the authority boundary, Phase 14 adds a non-default `roomauthorityservice` RPC pilot under `rpc-pilot`, Phase 15 hardens that pilot with dynamic readiness, metrics, stable failure tests, and lease identity naming, Phase 16 makes local compose `app` default to media/timeline/authority RPC, Phase 17/18 adds identity RPC to the same local app baseline, Phase 22 gives identity an independent database by default in compose, and Phase 25 makes production compose default to authority RPC through `authority.Engine`. Table owners and future split rules are documented in [Database Ownership](./database-ownership.md) and enforced from `server/internal/store/db_ownership.yaml`.
 
 See [distributed-architecture.md](./distributed-architecture.md) for the current module map, business flows, and monitoring data flow.
 
@@ -313,18 +313,18 @@ cd server
 .\scripts\verify_phase23.ps1 -RunSmoke -ResetVolumes -DownAfterRun
 ```
 
-Run the Phase 24 authority canary verification before any production authority RPC cutover. The default run keeps the Phase 23 baseline and adds prod canary compose validation plus authority RPC failure-semantics tests:
+Run the Phase 25 verification loop after authority RPC changes. The default run keeps the Phase 23 baseline and adds authority engine tests plus prod RPC/default and local rollback compose validation:
 
 ```powershell
 cd server
-.\scripts\verify_phase24.ps1
+.\scripts\verify_phase25.ps1
 ```
 
-Add `-RunSmoke` to run the full-RPC multi-database E2E smoke after the canary checks:
+Add `-RunSmoke` to run the full-RPC multi-database E2E smoke after the authority engine and compose checks:
 
 ```powershell
 cd server
-.\scripts\verify_phase24.ps1 -RunSmoke -ResetVolumes -DownAfterRun
+.\scripts\verify_phase25.ps1 -RunSmoke -ResetVolumes -DownAfterRun
 ```
 
 Media database sync:
@@ -397,7 +397,7 @@ docker compose --profile app up -d --build
 
 Existing main-database media data is not copied into the media database automatically. Use `go run ./cmd/mediadbsync`, or use the Phase 16 smoke script which seeds a deterministic local episode into `anime_watch_media_dev`.
 
-Phase 23's smoke script is the preferred end-to-end local validation. It applies main, identity, room, media, progress, and timeline migrations, writes users/rooms/progress/timeline data through the public Android-facing routes, and asserts those writes landed in the owning databases rather than the main shadow tables. Phase 24 wraps that baseline with authority canary checks for RPC timeout, unavailable, stale response, timeline failure, and prod canary compose wiring.
+Phase 23's smoke script is the preferred end-to-end local validation. It applies main, identity, room, media, progress, and timeline migrations, writes users/rooms/progress/timeline data through the public Android-facing routes, and asserts those writes landed in the owning databases rather than the main shadow tables. Phase 25 wraps that baseline with authority engine checks for accepted controls, duplicate idempotency, timeline failure rollback, recovery feed failure, and production RPC/default plus rollback compose wiring.
 
 Run the optional RPC pilot stack through compose for observability, load, and service experiments:
 
@@ -514,8 +514,8 @@ Production deployment uses `server/compose.prod.yaml`. Its intended boundary is:
 - Kafka stays on the Docker network and stores durable timeline result events.
 - `/metrics` should be scraped from an internal network or blocked at the public reverse proxy.
 - Media delivery defaults to `MEDIA_DELIVERY_MODE=nginx_auth_request`.
-- Production compose defaults identity, room, media, progress, home, and timeline to RPC services, but keeps `AUTHORITY_SERVICE_MODE=local`.
-- `roomauthorityservice` is available only behind the explicit `authority-rpc-canary` profile. A canary run must set `AUTHORITY_SERVICE_MODE=rpc`, `AUTHORITY_SERVICE_ADDR=http://roomauthorityservice:8090`, `AUTHORITY_LEASE_INSTANCE_ID=roomauthorityservice-prod-1`, `ROOM_RUNTIME_MODE=distributed_authority`, and `WS_CROSS_INSTANCE_BROADCAST_ENABLED=true`.
-- Rollback is setting `AUTHORITY_SERVICE_MODE=local` and stopping the `authority-rpc-canary` profile. No Android HTTP/WebSocket payload changes are involved.
+- Production compose defaults identity, room, media, progress, home, timeline, and authority to RPC services.
+- `roomauthorityservice` runs by default and owns authority decisions through `authority.Engine`; `roomserver` remains the Android-facing HTTP/WebSocket edge and keeps local WebSocket connection tables.
+- Authority rollback is explicit: set `AUTHORITY_SERVICE_MODE=local`, `ROOM_RUNTIME_MODE=local_process`, and `WS_CROSS_INSTANCE_BROADCAST_ENABLED=false`. No Android HTTP/WebSocket payload changes are involved.
 
 See [server/deploy/README.md](../server/deploy/README.md) for deployment-specific commands and Nginx details.
