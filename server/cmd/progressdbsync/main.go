@@ -49,7 +49,7 @@ func main() {
 
 func parseOptions() options {
 	var opts options
-	flag.StringVar(&opts.sourceURL, "source-database-url", strings.TrimSpace(os.Getenv("DATABASE_URL")), "source PostgreSQL URL; defaults to DATABASE_URL")
+	flag.StringVar(&opts.sourceURL, "source-database-url", "", "legacy source PostgreSQL URL; must be explicit")
 	flag.StringVar(&opts.targetURL, "target-database-url", strings.TrimSpace(os.Getenv("PROGRESS_DATABASE_URL")), "target progress PostgreSQL URL; defaults to PROGRESS_DATABASE_URL")
 	flag.BoolVar(&opts.dryRun, "dry-run", false, "read source table and print planned row count without writing target")
 	flag.BoolVar(&opts.verifyOnly, "verify-only", false, "compare source and target table counts plus stable row hash without writing")
@@ -60,7 +60,7 @@ func parseOptions() options {
 
 func run(ctx context.Context, opts options) error {
 	if strings.TrimSpace(opts.sourceURL) == "" {
-		return fmt.Errorf("--source-database-url or DATABASE_URL is required")
+		return fmt.Errorf("--source-database-url is required")
 	}
 	if !opts.dryRun && strings.TrimSpace(opts.targetURL) == "" {
 		return fmt.Errorf("--target-database-url or PROGRESS_DATABASE_URL is required")

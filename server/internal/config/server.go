@@ -541,9 +541,6 @@ func validateServerRuntimeConfig(config ServerRuntimeConfig) error {
 	if !config.WebSocket.CrossInstanceBroadcast {
 		return fmt.Errorf("WS_CROSS_INSTANCE_BROADCAST_ENABLED=true is required when ROOM_RUNTIME_MODE=%s", roomRuntimeModeDistributedAuthority)
 	}
-	if strings.TrimSpace(config.DatabaseURL) == "" {
-		return fmt.Errorf("DATABASE_URL is required when ROOM_RUNTIME_MODE=%s", roomRuntimeModeDistributedAuthority)
-	}
 	if strings.TrimSpace(config.Redis.Addr) == "" {
 		return fmt.Errorf("REDIS_ADDR is required when ROOM_RUNTIME_MODE=%s", roomRuntimeModeDistributedAuthority)
 	}

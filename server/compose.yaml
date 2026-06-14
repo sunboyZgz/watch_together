@@ -262,7 +262,7 @@ services:
       OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
       OTEL_TRACE_SAMPLE_RATIO: ${OTEL_TRACE_SAMPLE_RATIO:-0.1}
       AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:-watch_together_local_dev_jwt_secret_change_me}
-      DATABASE_URL: postgres://app:app@postgres:5432/anime_watch_dev?sslmode=disable
+      DATABASE_URL: ""
       REDIS_ADDR: redis:6380
       REDIS_PASSWORD: ${REDIS_PASSWORD:-watch_together_redis_dev}
       REDIS_DB: 0
@@ -399,7 +399,7 @@ services:
       READINESS_PATH: ${READINESS_PATH:-/readyz}
       AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:-watch_together_local_dev_jwt_secret_change_me}
       AUTH_ACCESS_TOKEN_TTL_HOURS: ${AUTH_ACCESS_TOKEN_TTL_HOURS:-24}
-      DATABASE_URL: postgres://app:app@postgres:5432/anime_watch_dev?sslmode=disable
+      DATABASE_URL: ""
       IDENTITY_DATABASE_URL: postgres://app:app@postgres:5432/${IDENTITY_POSTGRES_DB:-anime_watch_identity_dev}?sslmode=disable
       OTEL_TRACING_ENABLED: ${OTEL_TRACING_ENABLED:-false}
       OTEL_SERVICE_NAME: ${OTEL_SERVICE_NAME:-watch-together-identityservice}
@@ -432,7 +432,7 @@ services:
       METRICS_ENABLED: ${METRICS_ENABLED:-true}
       METRICS_PATH: ${METRICS_PATH:-/metrics}
       READINESS_PATH: ${READINESS_PATH:-/readyz}
-      DATABASE_URL: postgres://app:app@postgres:5432/anime_watch_dev?sslmode=disable
+      DATABASE_URL: ""
       ROOM_DATABASE_URL: postgres://app:app@postgres:5432/${ROOM_POSTGRES_DB:-anime_watch_room_dev}?sslmode=disable
       IDENTITY_SERVICE_MODE: rpc
       IDENTITY_SERVICE_ADDR: http://identityservice:8090
@@ -460,7 +460,7 @@ services:
     environment:
       APP_ENV: local
       ROOM_RUNTIME_MODE: ${ROOM_RUNTIME_MODE:-local_process}
-      DATABASE_URL: postgres://app:app@postgres:5432/anime_watch_dev?sslmode=disable
+      DATABASE_URL: ""
       TIMELINE_DATABASE_URL: postgres://app:app@postgres:5432/${TIMELINE_POSTGRES_DB:-anime_watch_timeline_dev}?sslmode=disable
       KAFKA_BROKERS: ${KAFKA_BROKERS:-kafka:9092}
       KAFKA_CLIENT_ID: ${KAFKA_CLIENT_ID:-watch-together-outboxworker}
@@ -518,7 +518,7 @@ services:
       METRICS_ENABLED: ${METRICS_ENABLED:-true}
       METRICS_PATH: ${METRICS_PATH:-/metrics}
       READINESS_PATH: ${READINESS_PATH:-/readyz}
-      DATABASE_URL: postgres://app:app@postgres:5432/anime_watch_dev?sslmode=disable
+      DATABASE_URL: ""
       MEDIA_DATABASE_URL: postgres://app:app@postgres:5432/anime_watch_media_dev?sslmode=disable
       MEDIA_STORAGE_ENDPOINT: http://minio:9000
       MEDIA_STORAGE_BUCKET: watch-together-media
@@ -551,7 +551,7 @@ services:
       METRICS_ENABLED: ${METRICS_ENABLED:-true}
       METRICS_PATH: ${METRICS_PATH:-/metrics}
       READINESS_PATH: ${READINESS_PATH:-/readyz}
-      DATABASE_URL: postgres://app:app@postgres:5432/anime_watch_dev?sslmode=disable
+      DATABASE_URL: ""
       TIMELINE_DATABASE_URL: postgres://app:app@postgres:5432/${TIMELINE_POSTGRES_DB:-anime_watch_timeline_dev}?sslmode=disable
       KAFKA_BROKERS: ${KAFKA_BROKERS:-kafka:9092}
       KAFKA_CLIENT_ID: ${KAFKA_CLIENT_ID:-watch-together-timelineservice}
@@ -584,7 +584,7 @@ services:
       METRICS_ENABLED: ${METRICS_ENABLED:-true}
       METRICS_PATH: ${METRICS_PATH:-/metrics}
       READINESS_PATH: ${READINESS_PATH:-/readyz}
-      DATABASE_URL: postgres://app:app@postgres:5432/anime_watch_dev?sslmode=disable
+      DATABASE_URL: ""
       PROGRESS_DATABASE_URL: postgres://app:app@postgres:5432/${PROGRESS_POSTGRES_DB:-anime_watch_progress_dev}?sslmode=disable
       IDENTITY_SERVICE_MODE: rpc
       IDENTITY_SERVICE_ADDR: http://identityservice:8090
@@ -620,7 +620,7 @@ services:
       METRICS_ENABLED: ${METRICS_ENABLED:-true}
       METRICS_PATH: ${METRICS_PATH:-/metrics}
       READINESS_PATH: ${READINESS_PATH:-/readyz}
-      DATABASE_URL: postgres://app:app@postgres:5432/anime_watch_dev?sslmode=disable
+      DATABASE_URL: ""
       IDENTITY_SERVICE_MODE: rpc
       IDENTITY_SERVICE_ADDR: http://identityservice:8090
       PROGRESS_SERVICE_MODE: rpc

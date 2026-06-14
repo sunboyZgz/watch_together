@@ -492,7 +492,7 @@ func TestReadinessSnapshotProbesRPCDependencies(t *testing.T) {
 	}
 }
 
-func TestNewTimelineOutboxStoreDoesNotFallbackWhenConfiguredTimelineDatabaseIsUnavailable(t *testing.T) {
+func TestNewTimelineOutboxStoreNeverFallsBackToMainDatabase(t *testing.T) {
 	mainDB := &gorm.DB{}
 	store := newTimelineOutboxStore(
 		mainDB,
@@ -511,12 +511,12 @@ func TestNewTimelineOutboxStoreDoesNotFallbackWhenConfiguredTimelineDatabaseIsUn
 		nil,
 		Config{ServiceClients: ServiceClientsConfig{TimelineMode: "local"}},
 	)
-	if store == nil {
-		t.Fatalf("expected main database fallback when TIMELINE_DATABASE_URL is empty")
+	if store != nil {
+		t.Fatalf("expected nil timeline outbox store when TIMELINE_DATABASE_URL is empty; main database fallback is removed")
 	}
 }
 
-func TestNewMediaServiceDoesNotFallbackWhenConfiguredMediaDatabaseIsUnavailable(t *testing.T) {
+func TestNewMediaServiceNeverFallsBackToMainDatabase(t *testing.T) {
 	mainDB := &gorm.DB{}
 	service := newMediaService(
 		mainDB,
@@ -537,8 +537,8 @@ func TestNewMediaServiceDoesNotFallbackWhenConfiguredMediaDatabaseIsUnavailable(
 		Config{ServiceClients: ServiceClientsConfig{MediaMode: "local"}},
 		servicekit.Config{},
 	)
-	if service == nil {
-		t.Fatalf("expected main database fallback when MEDIA_DATABASE_URL is empty")
+	if service != nil {
+		t.Fatalf("expected nil media service when MEDIA_DATABASE_URL is empty; main database fallback is removed")
 	}
 }
 

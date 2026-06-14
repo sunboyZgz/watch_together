@@ -33,7 +33,7 @@ func main() {
 	}
 	databaseURL := progressDatabaseURL(runtimeConfig)
 	if strings.TrimSpace(databaseURL) == "" {
-		fmt.Fprintln(os.Stderr, "PROGRESS_DATABASE_URL or DATABASE_URL is required for progressservice")
+		fmt.Fprintln(os.Stderr, "PROGRESS_DATABASE_URL is required for progressservice")
 		os.Exit(1)
 	}
 	if strings.EqualFold(strings.TrimSpace(runtimeConfig.AppEnv), "prod") &&
@@ -120,22 +120,7 @@ func newIdentityBoundary(config wtconfig.ServerRuntimeConfig, service servicekit
 	if strings.EqualFold(strings.TrimSpace(config.ServiceClients.IdentityMode), "rpc") {
 		return auth.NewRPCClient(config.ServiceClients.IdentityAddr, internalRPCClientConfig(config, service))
 	}
-	databaseURL := strings.TrimSpace(config.IdentityDatabaseURL)
-	if databaseURL == "" {
-		databaseURL = strings.TrimSpace(config.DatabaseURL)
-	}
-	if databaseURL == "" {
-		return nil
-	}
-	db, err := store.OpenPostgres(context.Background(), databaseURL)
-	if err != nil {
-		log.Printf("failed to connect identity postgres for progressservice: %v", err)
-		return nil
-	}
-	return auth.NewServiceWithTokenManager(store.NewPostgresUserStore(db), auth.NewTokenManager(auth.TokenConfig{
-		JWTSecret:      config.Auth.JWTSecret,
-		AccessTokenTTL: time.Duration(config.Auth.AccessTokenTTLHours) * time.Hour,
-	}))
+	return nil
 }
 
 func newMediaBoundary(config wtconfig.ServerRuntimeConfig, service servicekit.Config) *media.Service {
@@ -146,19 +131,7 @@ func newMediaBoundary(config wtconfig.ServerRuntimeConfig, service servicekit.Co
 		}
 		return media.NewService(rpcStore)
 	}
-	databaseURL := strings.TrimSpace(config.MediaDatabaseURL)
-	if databaseURL == "" {
-		databaseURL = strings.TrimSpace(config.DatabaseURL)
-	}
-	if databaseURL == "" {
-		return nil
-	}
-	db, err := store.OpenPostgres(context.Background(), databaseURL)
-	if err != nil {
-		log.Printf("failed to connect media postgres for progressservice: %v", err)
-		return nil
-	}
-	return media.NewService(store.NewPostgresMediaStore(db))
+	return nil
 }
 
 func installServiceEndpoints(
@@ -281,8 +254,5 @@ func serviceName(configured string, fallback string) string {
 }
 
 func progressDatabaseURL(config wtconfig.ServerRuntimeConfig) string {
-	if strings.TrimSpace(config.ProgressDatabaseURL) != "" {
-		return strings.TrimSpace(config.ProgressDatabaseURL)
-	}
-	return strings.TrimSpace(config.DatabaseURL)
+	return strings.TrimSpace(config.ProgressDatabaseURL)
 }

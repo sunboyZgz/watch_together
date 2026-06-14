@@ -1,3 +1,2 @@
-DROP INDEX IF EXISTS idx_media_episode_variants_height;
-DROP INDEX IF EXISTS idx_media_episode_variants_episode_sort;
-DROP TABLE IF EXISTS media_episode_variants;
+-- Phase 27: main database migration intentionally has no business schema.
+-- Owner schemas are managed by their dedicated migration directories.

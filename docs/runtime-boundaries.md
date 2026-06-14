@@ -1,6 +1,6 @@
 # Runtime Boundaries
 
-This document records the runtime ownership boundaries for the room system. `local_process` remains the default runtime for bare `go run ./cmd/roomserver`. Phase 4 adds a `distributed_authority` MVP for multi-instance room authority, Phase 5 adds fenced authority recovery from the Kafka canonical timeline, Phase 6 adds distributed seek rate limiting plus observability, Phase 7 adds service foundation boundaries with optional media/timeline RPC adapters and logical database ownership, Phase 8 closes the media table access boundary for room/progress while making the RPC pilot verifiable, Phase 9 adds an optional independent media database boundary through `MEDIA_DATABASE_URL`, Phase 10 adds an optional independent timeline database boundary through `TIMELINE_DATABASE_URL`, Phase 11 makes timeline RPC the default compose path while keeping timeline workers as separate timeline-owned processes, Phase 12 moves result timeline ownership into `cmd/timelineservice`, Phase 13 documents the future `room-authority-service` boundary, Phase 14 implements a non-default authority RPC pilot in `rpc-pilot`, Phase 15 hardens that pilot with readiness, metrics, identity, and failure-semantics checks, Phase 16 makes local compose `app` default to media, timeline, and authority RPC, Phase 17/18 adds `cmd/identityservice`, Phase 19 adds `cmd/roomservice` for room metadata and membership RPC, Phase 20 adds progress/home composition RPC plus `PROGRESS_DATABASE_URL`, Phase 21 adds `ROOM_DATABASE_URL` plus room lifecycle/recovery RPC, Phase 22 adds `IDENTITY_DATABASE_URL` plus home composition SQL read-model removal, Phase 23 adds the full-RPC multi-database smoke gate, Phase 24 adds an explicit production authority RPC canary profile, Phase 25 promotes authority decisions into `authority.Engine` and makes production compose default to authority RPC, and Phase 26 adds `cmd/apigateway` as the public REST/BFF edge while keeping `roomserver` as the WebSocket/session gateway. Production compose defaults identity/room/media/progress/home/timeline/authority to RPC and keeps explicit local rollback support.
+This document records the runtime ownership boundaries for the room system. Phase 4 adds a `distributed_authority` MVP for multi-instance room authority, Phase 5 adds fenced authority recovery from the Kafka canonical timeline, Phase 6 adds distributed seek rate limiting plus observability, Phase 7 adds service foundation boundaries with optional media/timeline RPC adapters and logical database ownership, Phase 8 closes the media table access boundary for room/progress while making the RPC pilot verifiable, Phase 9 adds an independent media database boundary through `MEDIA_DATABASE_URL`, Phase 10 adds an independent timeline database boundary through `TIMELINE_DATABASE_URL`, Phase 11 makes timeline RPC the default compose path while keeping timeline workers as separate timeline-owned processes, Phase 12 moves result timeline ownership into `cmd/timelineservice`, Phase 13 documents the future `room-authority-service` boundary, Phase 14 implements a non-default authority RPC pilot in `rpc-pilot`, Phase 15 hardens that pilot with readiness, metrics, identity, and failure-semantics checks, Phase 16 makes local compose `app` default to media, timeline, and authority RPC, Phase 17/18 adds `cmd/identityservice`, Phase 19 adds `cmd/roomservice` for room metadata and membership RPC, Phase 20 adds progress/home composition RPC plus `PROGRESS_DATABASE_URL`, Phase 21 adds `ROOM_DATABASE_URL` plus room lifecycle/recovery RPC, Phase 22 adds `IDENTITY_DATABASE_URL` plus home composition SQL read-model removal, Phase 23 adds the full-RPC multi-database smoke gate, Phase 25 promotes authority decisions into `authority.Engine`, Phase 26 adds `cmd/apigateway` as the public REST/BFF edge, and Phase 27 removes the main-database shadow-table path. Local compose and production now use the same RPC-only service shape: `apigateway` owns public REST, `roomserver` owns WebSocket/session gateway behavior, and owner services own their databases.
 
 ## Phase 1 Boundary Markers
 
@@ -41,12 +41,12 @@ X-Watch-Together-Room-Runtime: local_process
 | Seek rate limiting | Local memory or Redis control rate registry | `local_process` uses process-local throttling. `distributed_authority` uses Redis `wt:room:control_rate:{roomId}:seek:v1`. |
 | Observability | `internal/observability` | `/healthz`, `/readyz`, `/metrics`, Prometheus metrics, and worker metric hooks. |
 | Service foundation metadata | `internal/servicekit` | Request id, service name/version, deadlines, internal auth, and trace metadata. |
-| Internal RPC | ConnectRPC helper layer | Bare runs keep local adapters by default; local compose app defaults identity, room, media, timeline, and authority to RPC with local retained for explicit rollback. |
+| Internal RPC | ConnectRPC helper layer | Local compose app and production default identity, room, media, progress, home, timeline, and authority to RPC. Local adapters are compatibility paths only and still require owner databases when they touch durable state. |
 | OpenTelemetry tracing | `internal/telemetry` | Optional traces across HTTP, WebSocket control, RPC, Redis, NATS, Kafka, and PostgreSQL. |
-| Database ownership | Main PostgreSQL database plus optional media and timeline PostgreSQL databases | Phase 9 can place media-owned tables in a separate database; Phase 10 can place timeline-owned outbox rows in a separate database. Both are databases inside the same PostgreSQL server/container by default. |
-| Room metadata and membership | Room service + room PostgreSQL database or fallback main PostgreSQL database | Durable business state selected by `ROOM_DATABASE_URL`; lifecycle and recovery metadata go through `RoomInternalService` in compose RPC mode. |
-| Media metadata | Media PostgreSQL database or fallback main PostgreSQL database | Durable catalog state selected by `MEDIA_DATABASE_URL`. |
-| Timeline outbox | Timeline PostgreSQL database or fallback main PostgreSQL database | Durable outbox state selected by `TIMELINE_DATABASE_URL`; default compose access is through `cmd/timelineservice` and timeline-owned workers. |
+| Database ownership | Owner PostgreSQL databases | Main database migrations no longer create owner tables. Identity, room, media, progress, and timeline tables live only in their owner databases. |
+| Room metadata and membership | Room service + room PostgreSQL database | Durable business state selected by required `ROOM_DATABASE_URL`; lifecycle and recovery metadata go through `RoomInternalService` in compose RPC mode. |
+| Media metadata | Media PostgreSQL database | Durable catalog state selected by required `MEDIA_DATABASE_URL`. |
+| Timeline outbox | Timeline PostgreSQL database | Durable outbox state selected by required `TIMELINE_DATABASE_URL`; default compose access is through `cmd/timelineservice` and timeline-owned workers. |
 | HLS files | Local/object storage via mediactl | Served through signed playback paths and Nginx/object storage depending on delivery mode. |
 
 Current note: local compose `app` and production compose run `cmd/apigateway`, `cmd/identityservice`, `cmd/roomservice`, `cmd/mediaservice`, `cmd/progressservice`, `cmd/homecompositionservice`, `cmd/timelineservice`, and `cmd/roomauthorityservice` by default. `apigateway` owns Android-facing REST/BFF routes and does not receive business database URLs. `roomserver` owns `/ws`, WebSocket connection tables, heartbeat, send queues, and session runtime mirrors. In authority RPC mode, `roomauthorityservice` owns the control decision engine and broadcasts accepted envelopes through NATS; WebSocket connections remain inside `roomserver`.
@@ -114,7 +114,7 @@ The control rate registry stores the current seek throttle reservation for a roo
 
 The presence registry stores one online entry per room user. Internal values may include `deviceId`, `connectionId`, and `instanceId`, but WebSocket `room_presence` exposes only user-level fields: `userId`, `role`, `isHost`, and per-recipient `isSelf`.
 
-PostgreSQL `room_timeline_outbox` stores canonical timeline result events. In Phase 10 it may live in the independent timeline database selected by `TIMELINE_DATABASE_URL`; otherwise it remains in the main database fallback. `cmd/outboxworker` publishes it to Kafka, and `cmd/derivedworker` derives control-result and membership topics. Online WebSocket fan-out remains NATS + local connection tables.
+Timeline PostgreSQL `room_timeline_outbox` stores canonical timeline result events. It lives in the timeline database selected by `TIMELINE_DATABASE_URL`. `cmd/outboxworker` publishes it to Kafka, and `cmd/derivedworker` derives control-result and membership topics. Online WebSocket fan-out remains NATS + local connection tables.
 
 ## Phase 5 Authority Recovery Boundary
 
@@ -136,7 +136,7 @@ Recovery uses Kafka as the result log. It replays `room.control.accepted` events
 
 Old authority results are fenced by epoch. Local apply, NATS control replies, and NATS broadcasts are accepted only when the observed Redis authority lease is still active for the expected instance and epoch. A recovering room returns `room authority recovering` or a current snapshot; WebSocket connections are never moved between instances.
 
-Phase 5 hardening requires accepted controls in `distributed_authority` to write `room_timeline_outbox` before Redis snapshot writes or WebSocket/NATS broadcast. If the outbox write fails, the accepted envelope is not broadcast and the client receives an error or current `room_state`. Rejected controls remain best-effort outbox writes. Phase 10 keeps the same fail-closed behavior when `TIMELINE_DATABASE_URL` is configured but unavailable.
+Phase 5 hardening requires accepted controls in `distributed_authority` to write `room_timeline_outbox` before Redis snapshot writes or WebSocket/NATS broadcast. If the outbox write fails, the accepted envelope is not broadcast and the client receives an error or current `room_state`. Rejected controls remain best-effort outbox writes. The timeline boundary is fail-closed when timeline RPC or `TIMELINE_DATABASE_URL` is unavailable.
 
 Heartbeat acks refresh Redis presence leases at `PRESENCE_REFRESH_INTERVAL_MS`. Join, leave, disconnect, active-device lease loss, and device switch publish a fresh user-level `room_presence` snapshot. Presence is runtime state only; it is not PostgreSQL membership and is not written to Kafka.
 
@@ -178,7 +178,7 @@ OTEL_EXPORTER_OTLP_ENDPOINT=
 OTEL_TRACE_SAMPLE_RATIO=0.1
 ```
 
-`IDENTITY_SERVICE_MODE`, `ROOM_SERVICE_MODE`, `MEDIA_SERVICE_MODE`, `PROGRESS_SERVICE_MODE`, `HOME_SERVICE_MODE`, `TIMELINE_SERVICE_MODE`, and `AUTHORITY_SERVICE_MODE` accept `local` or `rpc`. `local` keeps current in-process adapters. `rpc` calls `cmd/identityservice`, `cmd/roomservice`, `cmd/mediaservice`, `cmd/progressservice`, `cmd/homecompositionservice`, `cmd/timelineservice`, or `cmd/roomauthorityservice` over ConnectRPC. `SERVER_EDGE_MODE` selects `combined`, `api_gateway`, or `session_gateway`; bare `roomserver` defaults to `combined`, while compose runs `apigateway` in `api_gateway` mode and `roomserver` in `session_gateway` mode. Phase 8 uses generated typed ConnectRPC contracts from `server/api/internal/v1` into `server/internal/rpcgen/v1`; Android HTTP/WebSocket payloads are unchanged. Phase 11 makes timeline RPC the default compose path: roomserver records and reads timeline data through `cmd/timelineservice`, while `cmd/outboxworker` and `cmd/derivedworker` remain separate timeline-owned workers. Local compose `app` and production compose now default to identity, room, media, progress, home, timeline, and authority RPC; roomserver `/readyz` actively probes `identity_rpc`, `room_rpc`, `media_rpc`, `progress_rpc`, `home_rpc`, `timeline_rpc`, and `authority_rpc`. Phase 23 makes this path executable from clean volumes: migrations for main/identity/room/media/progress/timeline are applied before the app stack starts, and smoke assertions verify owner DB writes plus empty main shadow rows for the smoke data. Phase 25 makes the production authority RPC path use `authority.Engine` rather than `transport.WebSocketHandler`. Phase 26 routes public REST through `apigateway` and `/ws` through `roomserver`; service discovery is static endpoint configuration in this phase.
+`IDENTITY_SERVICE_MODE`, `ROOM_SERVICE_MODE`, `MEDIA_SERVICE_MODE`, `PROGRESS_SERVICE_MODE`, `HOME_SERVICE_MODE`, `TIMELINE_SERVICE_MODE`, and `AUTHORITY_SERVICE_MODE` accept `local` or `rpc`. `local` keeps in-process compatibility adapters, but durable adapters still use owner database URLs. `rpc` calls `cmd/identityservice`, `cmd/roomservice`, `cmd/mediaservice`, `cmd/progressservice`, `cmd/homecompositionservice`, `cmd/timelineservice`, or `cmd/roomauthorityservice` over ConnectRPC. `SERVER_EDGE_MODE` selects `combined`, `api_gateway`, or `session_gateway`; compose runs `apigateway` in `api_gateway` mode and `roomserver` in `session_gateway` mode. Phase 8 uses generated typed ConnectRPC contracts from `server/api/internal/v1` into `server/internal/rpcgen/v1`; Android HTTP/WebSocket payloads are unchanged. Phase 11 makes timeline RPC the default compose path: roomserver records and reads timeline data through `cmd/timelineservice`, while `cmd/outboxworker` and `cmd/derivedworker` remain separate timeline-owned workers. Local compose `app` and production compose now default to identity, room, media, progress, home, timeline, and authority RPC; roomserver `/readyz` actively probes `identity_rpc`, `room_rpc`, `media_rpc`, `progress_rpc`, `home_rpc`, `timeline_rpc`, and `authority_rpc`. Phase 27 makes this path executable from clean volumes with owner-only schema: migrations for main/identity/room/media/progress/timeline are applied before the app stack starts, and smoke assertions verify owner DB writes plus absent main-database owner tables. Phase 25 makes the production authority RPC path use `authority.Engine` rather than `transport.WebSocketHandler`. Phase 26 routes public REST through `apigateway` and `/ws` through `roomserver`; service discovery is static endpoint configuration in this phase.
 
 `room-session` now calls the media port for episode detail during create/join/detail bootstrap. `progress` calls the media port for playable episode validation before writing `user_media_progress`. `PostgresRoomStore` and `PostgresProgressStore` no longer read `media_episodes` or `media_seasons` directly.
 
@@ -188,7 +188,7 @@ Accepted distributed controls fail closed when the timeline recorder fails. A lo
 
 OpenTelemetry tracing is opt-in. Trace metadata can cross internal RPC, NATS, and Kafka boundaries, but it is not exposed in Android HTTP/WebSocket payloads.
 
-Phase 8 database ownership is logical only. Table owners and cross-context access rules are documented in [Database Ownership](./database-ownership.md) and enforced from `server/internal/store/db_ownership.yaml`.
+Table owners and cross-context access rules are documented in [Database Ownership](./database-ownership.md) and enforced from `server/internal/store/db_ownership.yaml`. Phase 27 additionally requires main migrations to avoid owner tables.
 
 ## Phase 22 Identity Database Boundary
 
@@ -199,9 +199,9 @@ IDENTITY_DATABASE_URL=
 IDENTITY_POSTGRES_DB=anime_watch_identity_dev
 ```
 
-When `IDENTITY_DATABASE_URL` is empty, identity storage continues to use the main `DATABASE_URL`. When it is set, local identity mode and `cmd/identityservice` use the independent identity database for `users`. In `IDENTITY_SERVICE_MODE=rpc`, `roomserver` calls `cmd/identityservice` and does not connect to the identity database directly.
+`IDENTITY_DATABASE_URL` is required by `cmd/identityservice` and by any explicit local identity adapter that touches durable identity data. In `IDENTITY_SERVICE_MODE=rpc`, `roomserver` and `apigateway` call `cmd/identityservice` and do not connect to the identity database directly.
 
-Identity schema migrations live in `server/identity_migrations`. The main database keeps the old `users` table as fallback/shadow data, but Phase 22 drops the main-database foreign keys from room and progress shadow tables to `users` because those FKs cannot work across PostgreSQL databases. `cmd/identitydbsync` copies `users` from the old main database shadow table to the identity database and can run `--verify-only` row count and content hash checks.
+Identity schema migrations live in `server/identity_migrations`. The main database does not create `users`. `cmd/identitydbsync` is a legacy explicit import tool and requires `--source-database-url`.
 
 ## Phase 9 Media Database Boundary
 
@@ -211,13 +211,13 @@ Phase 9 adds:
 MEDIA_DATABASE_URL=
 ```
 
-When `MEDIA_DATABASE_URL` is empty, the media store continues to use the main `DATABASE_URL`. When it is set, local media mode opens a separate `media_postgres` connection and `cmd/mediaservice` prefers that database over the main database. In `MEDIA_SERVICE_MODE=rpc`, `roomserver` calls `cmd/mediaservice` and does not connect to the media database directly.
+`MEDIA_DATABASE_URL` is required by `cmd/mediaservice` and by any explicit local media adapter that touches durable media data. In `MEDIA_SERVICE_MODE=rpc`, `roomserver` and `apigateway` call `cmd/mediaservice` and do not connect to the media database directly.
 
-Media schema migrations live in `server/media_migrations`. Main-database migrations live in `server/migrations`; Phase 9 drops the main database foreign keys from `rooms.media_episode_id` and `user_media_progress.media_episode_id` to media tables because those FKs cannot work across PostgreSQL databases.
+Media schema migrations live in `server/media_migrations`. Main-database migrations live in `server/migrations` and do not create or reference media owner tables.
 
 `home-composition` no longer directly reads media, identity, or progress tables. It composes profile, recent progress, and media summaries through ports/RPC. Missing media summaries are skipped to preserve the previous inner-join behavior.
 
-`cmd/mediadbsync` copies media-owned tables from the main database shadow tables to the media database and can run `--verify-only` row count and content hash checks.
+`cmd/mediadbsync` is a legacy explicit import tool and requires `--source-database-url`.
 
 ## Phase 10 Timeline Database Boundary
 
@@ -228,11 +228,11 @@ TIMELINE_DATABASE_URL=
 TIMELINE_POSTGRES_DB=anime_watch_timeline_dev
 ```
 
-When `TIMELINE_DATABASE_URL` is empty, timeline storage continues to use the main `DATABASE_URL`. When it is set, local timeline mode opens a separate `timeline_postgres` connection, `cmd/timelineservice` prefers that database over the main database, and `cmd/outboxworker` claims/publishes rows from that database. In `TIMELINE_SERVICE_MODE=rpc`, `roomserver` calls `cmd/timelineservice` and does not connect to the timeline database directly.
+`TIMELINE_DATABASE_URL` is required by `cmd/timelineservice`, `cmd/outboxworker`, and any explicit local timeline adapter that touches durable timeline data. In `TIMELINE_SERVICE_MODE=rpc`, `roomserver` and `cmd/roomauthorityservice` call `cmd/timelineservice` and do not connect to the timeline database directly.
 
-Timeline schema migrations live in `server/timeline_migrations`. Main-database migrations live in `server/migrations`; the old main-database `room_timeline_outbox` table is retained as fallback/shadow data. Development-stage Phase 10 does not migrate old timeline outbox history.
+Timeline schema migrations live in `server/timeline_migrations`. Main-database migrations live in `server/migrations` and do not create `room_timeline_outbox`. Development-stage timeline databases start empty unless explicitly imported.
 
-Timeline availability is fail-closed. If `TIMELINE_DATABASE_URL` is configured but the timeline database cannot be opened, accepted distributed controls do not fall back to the main database, do not finalize accepted request idempotency, and do not broadcast accepted WebSocket envelopes. Recovery also must not complete an authority epoch from an unavailable timeline recovery feed.
+Timeline availability is fail-closed. If `TIMELINE_DATABASE_URL` or timeline RPC is unavailable, accepted distributed controls do not finalize accepted request idempotency and do not broadcast accepted WebSocket envelopes. Recovery also must not complete an authority epoch from an unavailable timeline recovery feed.
 
 `pending` and `publishing` outbox rows are recovery-gap data and must not be removed by cleanup tasks. Published-row retention can be designed later, but no automatic retention job is introduced in Phase 10.
 
@@ -245,9 +245,9 @@ ROOM_DATABASE_URL=
 ROOM_POSTGRES_DB=anime_watch_room_dev
 ```
 
-When `ROOM_DATABASE_URL` is empty, room storage continues to use the main `DATABASE_URL`. When it is set, local room mode and `cmd/roomservice` use the independent room database for `rooms` and `room_members`. In `ROOM_SERVICE_MODE=rpc`, `roomserver` calls `cmd/roomservice` and does not connect to the room database directly.
+`ROOM_DATABASE_URL` is required by `cmd/roomservice` and by any explicit local room adapter that touches durable room data. In `ROOM_SERVICE_MODE=rpc`, `roomserver`, `apigateway`, and `cmd/roomauthorityservice` call `cmd/roomservice` and do not connect to the room database directly.
 
-Room schema migrations live in `server/room_migrations`. The room database keeps `host_user_id` and `media_episode_id` as durable ids but does not define cross-database foreign keys to identity or media tables. `cmd/roomdbsync` copies `rooms` and `room_members` from the old main database shadow tables to the room database and can run `--verify-only` row count and content hash checks.
+Room schema migrations live in `server/room_migrations`. The room database keeps `host_user_id` and `media_episode_id` as durable ids but does not define cross-database foreign keys to identity or media tables. `cmd/roomdbsync` is a legacy explicit import tool and requires `--source-database-url`.
 
 ## Phase 11 Timeline Service-Family Boundary
 
@@ -260,7 +260,7 @@ TIMELINE_SERVICE_ADDR=http://timelineservice:8090
 
 In local and production compose, `roomserver` depends on `timelineservice`, does not receive the timeline-owned `TIMELINE_DATABASE_URL`, and reports `timeline_rpc` readiness instead of requiring `timeline_postgres`. Phase 12 moves default roomserver calls to typed result APIs: `RecordControlResult`, `RecordMembershipResult`, and `ListRoomRecoveryEvents`. `cmd/timelineservice` owns canonical result event generation, outbox writes, and recovery feed composition. `cmd/outboxworker` owns outbox publish retry, and `cmd/derivedworker` owns derived topic projection. These processes share the timeline bounded context but keep separate failure domains and scaling knobs.
 
-For explicit rollback, set `ROOMSERVER_TIMELINE_SERVICE_MODE=local` and provide `ROOMSERVER_TIMELINE_DATABASE_URL` in compose so only roomserver receives the direct timeline DB URL. Bare single-process debugging can still use the code default local adapter.
+For explicit compatibility testing, set `ROOMSERVER_TIMELINE_SERVICE_MODE=local` and provide `ROOMSERVER_TIMELINE_DATABASE_URL` in compose so only roomserver receives the direct timeline DB URL. This is still owner-DB-backed; it is not a main-database fallback.
 
 Phase 12 is not command ingress. Kafka remains the canonical result log for accepted/rejected controls and membership results, while NATS remains the realtime fan-out and control request/reply transport. `room authority` remains in `roomserver`.
 
@@ -290,7 +290,7 @@ ROOMSERVER_AUTHORITY_SERVICE_MODE=rpc
 ROOMSERVER_AUTHORITY_LEASE_INSTANCE_ID=roomauthorityservice-1
 ```
 
-Rollback in compose is explicit:
+Compatibility mode in compose is explicit and still needs owner DB URLs:
 
 ```text
 ROOMSERVER_RUNTIME_MODE=local_process
@@ -299,6 +299,10 @@ ROOMSERVER_ROOM_SERVICE_MODE=local
 ROOMSERVER_MEDIA_SERVICE_MODE=local
 ROOMSERVER_TIMELINE_SERVICE_MODE=local
 ROOMSERVER_AUTHORITY_SERVICE_MODE=local
+ROOMSERVER_IDENTITY_DATABASE_URL=postgres://app:app@postgres:5432/anime_watch_identity_dev?sslmode=disable
+ROOMSERVER_ROOM_DATABASE_URL=postgres://app:app@postgres:5432/anime_watch_room_dev?sslmode=disable
+ROOMSERVER_MEDIA_DATABASE_URL=postgres://app:app@postgres:5432/anime_watch_media_dev?sslmode=disable
+ROOMSERVER_TIMELINE_DATABASE_URL=postgres://app:app@postgres:5432/anime_watch_timeline_dev?sslmode=disable
 ```
 
 See [Room Authority Service Design](./room-authority-service-design.md) for the proposed lifecycle and control-apply contract shape.

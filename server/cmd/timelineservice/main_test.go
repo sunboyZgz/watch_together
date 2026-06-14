@@ -6,7 +6,7 @@ import (
 	wtconfig "watch_together/server/internal/config"
 )
 
-func TestTimelineDatabaseURLPrefersTimelineDatabaseAndFallsBackToMain(t *testing.T) {
+func TestTimelineDatabaseURLRequiresTimelineDatabase(t *testing.T) {
 	cases := []struct {
 		name string
 		cfg  wtconfig.ServerRuntimeConfig
@@ -21,11 +21,11 @@ func TestTimelineDatabaseURLPrefersTimelineDatabaseAndFallsBackToMain(t *testing
 			want: "postgres://timeline",
 		},
 		{
-			name: "fallback main database",
+			name: "main database ignored",
 			cfg: wtconfig.ServerRuntimeConfig{
 				DatabaseURL: "postgres://main",
 			},
-			want: "postgres://main",
+			want: "",
 		},
 	}
 	for _, tc := range cases {

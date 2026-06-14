@@ -262,7 +262,7 @@ services:
       OTEL_SERVICE_NAME: ${OTEL_SERVICE_NAME:-watch-together-roomserver}
       OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
       OTEL_TRACE_SAMPLE_RATIO: ${OTEL_TRACE_SAMPLE_RATIO:-0.1}
-      DATABASE_URL: postgres://${POSTGRES_USER:-watch_together}:${POSTGRES_PASSWORD:-change_me_postgres_password}@postgres:5432/${POSTGRES_DB:-watch_together_prod}?sslmode=disable
+      DATABASE_URL: ""
       REDIS_ADDR: redis:6380
       REDIS_PASSWORD: ${REDIS_PASSWORD:-change_me_redis_password}
       REDIS_DB: 0
@@ -366,7 +366,7 @@ services:
     environment:
       APP_ENV: prod
       ROOM_RUNTIME_MODE: ${ROOM_RUNTIME_MODE:-local_process}
-      DATABASE_URL: postgres://${POSTGRES_USER:-watch_together}:${POSTGRES_PASSWORD:-change_me_postgres_password}@postgres:5432/${POSTGRES_DB:-watch_together_prod}?sslmode=disable
+      DATABASE_URL: ""
       TIMELINE_DATABASE_URL: postgres://${POSTGRES_USER:-watch_together}:${POSTGRES_PASSWORD:-change_me_postgres_password}@postgres:5432/${TIMELINE_POSTGRES_DB:-watch_together_timeline_prod}?sslmode=disable
       KAFKA_BROKERS: ${KAFKA_BROKERS:-kafka:9092}
       KAFKA_CLIENT_ID: ${KAFKA_CLIENT_ID:-watch-together-outboxworker}
@@ -424,7 +424,7 @@ services:
       METRICS_ENABLED: ${METRICS_ENABLED:-true}
       METRICS_PATH: ${METRICS_PATH:-/metrics}
       READINESS_PATH: ${READINESS_PATH:-/readyz}
-      DATABASE_URL: postgres://${POSTGRES_USER:-watch_together}:${POSTGRES_PASSWORD:-change_me_postgres_password}@postgres:5432/${POSTGRES_DB:-watch_together_prod}?sslmode=disable
+      DATABASE_URL: ""
       MEDIA_DATABASE_URL: postgres://${POSTGRES_USER:-watch_together}:${POSTGRES_PASSWORD:-change_me_postgres_password}@postgres:5432/${MEDIA_POSTGRES_DB:-watch_together_media_prod}?sslmode=disable
       MEDIA_STORAGE_ENDPOINT: http://minio:9000
       MEDIA_STORAGE_BUCKET: ${MEDIA_STORAGE_BUCKET:-watch-together-media}
@@ -456,7 +456,7 @@ services:
       READINESS_PATH: ${READINESS_PATH:-/readyz}
       AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:-change_me_to_a_long_random_secret}
       AUTH_ACCESS_TOKEN_TTL_HOURS: ${AUTH_ACCESS_TOKEN_TTL_HOURS:-24}
-      DATABASE_URL: postgres://${POSTGRES_USER:-watch_together}:${POSTGRES_PASSWORD:-change_me_postgres_password}@postgres:5432/${POSTGRES_DB:-watch_together_prod}?sslmode=disable
+      DATABASE_URL: ""
       IDENTITY_DATABASE_URL: postgres://${POSTGRES_USER:-watch_together}:${POSTGRES_PASSWORD:-change_me_postgres_password}@postgres:5432/${IDENTITY_POSTGRES_DB:-watch_together_identity_prod}?sslmode=disable
       OTEL_TRACING_ENABLED: ${OTEL_TRACING_ENABLED:-false}
       OTEL_SERVICE_NAME: ${OTEL_SERVICE_NAME:-watch-together-identityservice}
@@ -489,7 +489,7 @@ services:
       METRICS_ENABLED: ${METRICS_ENABLED:-true}
       METRICS_PATH: ${METRICS_PATH:-/metrics}
       READINESS_PATH: ${READINESS_PATH:-/readyz}
-      DATABASE_URL: postgres://${POSTGRES_USER:-watch_together}:${POSTGRES_PASSWORD:-change_me_postgres_password}@postgres:5432/${POSTGRES_DB:-watch_together_prod}?sslmode=disable
+      DATABASE_URL: ""
       ROOM_DATABASE_URL: postgres://${POSTGRES_USER:-watch_together}:${POSTGRES_PASSWORD:-change_me_postgres_password}@postgres:5432/${ROOM_POSTGRES_DB:-watch_together_room_prod}?sslmode=disable
       IDENTITY_SERVICE_MODE: rpc
       IDENTITY_SERVICE_ADDR: http://identityservice:8090
@@ -526,7 +526,7 @@ services:
       METRICS_ENABLED: ${METRICS_ENABLED:-true}
       METRICS_PATH: ${METRICS_PATH:-/metrics}
       READINESS_PATH: ${READINESS_PATH:-/readyz}
-      DATABASE_URL: postgres://${POSTGRES_USER:-watch_together}:${POSTGRES_PASSWORD:-change_me_postgres_password}@postgres:5432/${POSTGRES_DB:-watch_together_prod}?sslmode=disable
+      DATABASE_URL: ""
       PROGRESS_DATABASE_URL: postgres://${POSTGRES_USER:-watch_together}:${POSTGRES_PASSWORD:-change_me_postgres_password}@postgres:5432/${PROGRESS_POSTGRES_DB:-watch_together_progress_prod}?sslmode=disable
       IDENTITY_SERVICE_MODE: rpc
       IDENTITY_SERVICE_ADDR: http://identityservice:8090
@@ -561,7 +561,7 @@ services:
       METRICS_ENABLED: ${METRICS_ENABLED:-true}
       METRICS_PATH: ${METRICS_PATH:-/metrics}
       READINESS_PATH: ${READINESS_PATH:-/readyz}
-      DATABASE_URL: postgres://${POSTGRES_USER:-watch_together}:${POSTGRES_PASSWORD:-change_me_postgres_password}@postgres:5432/${POSTGRES_DB:-watch_together_prod}?sslmode=disable
+      DATABASE_URL: ""
       IDENTITY_SERVICE_MODE: rpc
       IDENTITY_SERVICE_ADDR: http://identityservice:8090
       PROGRESS_SERVICE_MODE: rpc
@@ -596,7 +596,7 @@ services:
       METRICS_ENABLED: ${METRICS_ENABLED:-true}
       METRICS_PATH: ${METRICS_PATH:-/metrics}
       READINESS_PATH: ${READINESS_PATH:-/readyz}
-      DATABASE_URL: postgres://${POSTGRES_USER:-watch_together}:${POSTGRES_PASSWORD:-change_me_postgres_password}@postgres:5432/${POSTGRES_DB:-watch_together_prod}?sslmode=disable
+      DATABASE_URL: ""
       TIMELINE_DATABASE_URL: postgres://${POSTGRES_USER:-watch_together}:${POSTGRES_PASSWORD:-change_me_postgres_password}@postgres:5432/${TIMELINE_POSTGRES_DB:-watch_together_timeline_prod}?sslmode=disable
       KAFKA_BROKERS: ${KAFKA_BROKERS:-kafka:9092}
       KAFKA_CLIENT_ID: ${KAFKA_CLIENT_ID:-watch-together-timelineservice}

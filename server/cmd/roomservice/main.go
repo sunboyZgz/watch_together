@@ -23,8 +23,6 @@ import (
 	"watch_together/server/internal/servicekit"
 	"watch_together/server/internal/store"
 	"watch_together/server/internal/telemetry"
-
-	"gorm.io/gorm"
 )
 
 func main() {
@@ -33,8 +31,8 @@ func main() {
 		fmt.Fprintf(os.Stderr, "load server config: %v\n", err)
 		os.Exit(1)
 	}
-	if strings.TrimSpace(runtimeConfig.DatabaseURL) == "" {
-		fmt.Fprintln(os.Stderr, "DATABASE_URL is required for roomservice")
+	if strings.TrimSpace(runtimeConfig.RoomDatabaseURL) == "" {
+		fmt.Fprintln(os.Stderr, "ROOM_DATABASE_URL is required for roomservice")
 		os.Exit(1)
 	}
 	if strings.EqualFold(strings.TrimSpace(runtimeConfig.AppEnv), "prod") &&
@@ -66,41 +64,24 @@ func main() {
 		_ = telemetry.Shutdown(shutdownCtx, shutdownTelemetry)
 	}()
 
-	mainDB, err := store.OpenPostgres(ctx, runtimeConfig.DatabaseURL)
+	roomDB, err := store.OpenPostgres(ctx, runtimeConfig.RoomDatabaseURL)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "connect postgres: %v\n", err)
+		fmt.Fprintf(os.Stderr, "connect room_postgres: %v\n", err)
 		os.Exit(1)
 	}
-	mainSQLDB, err := mainDB.DB()
+	roomSQLDB, err := roomDB.DB()
 	if err == nil {
-		defer mainSQLDB.Close()
+		defer roomSQLDB.Close()
 	}
 
-	roomDB := mainDB
-	var roomSQLDB *sql.DB
-	if strings.TrimSpace(runtimeConfig.RoomDatabaseURL) != "" {
-		opened, err := store.OpenPostgres(ctx, runtimeConfig.RoomDatabaseURL)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "connect room_postgres: %v\n", err)
-			os.Exit(1)
-		}
-		roomDB = opened
-		if sqlDB, err := opened.DB(); err == nil {
-			roomSQLDB = sqlDB
-			defer sqlDB.Close()
-		}
-	} else {
-		roomSQLDB = mainSQLDB
-	}
-
-	identityService := newIdentityBoundary(runtimeConfig, serviceConfig, mainDB)
+	identityService := newIdentityBoundary(runtimeConfig, serviceConfig)
 	if identityService == nil {
-		fmt.Fprintln(os.Stderr, "identity boundary is required for roomservice")
+		fmt.Fprintln(os.Stderr, "identity RPC boundary is required for roomservice")
 		os.Exit(1)
 	}
-	mediaService := newMediaBoundary(ctx, runtimeConfig, serviceConfig, mainDB)
+	mediaService := newMediaBoundary(runtimeConfig, serviceConfig)
 	if mediaService == nil {
-		fmt.Fprintln(os.Stderr, "media boundary is required for roomservice")
+		fmt.Fprintln(os.Stderr, "media RPC boundary is required for roomservice")
 		os.Exit(1)
 	}
 	roomService := roomapi.NewServiceWithBoundaries(store.NewPostgresRoomStore(roomDB), mediaService, identityService)
@@ -141,10 +122,8 @@ func main() {
 }
 
 func newMediaBoundary(
-	ctx context.Context,
 	config wtconfig.ServerRuntimeConfig,
 	service servicekit.Config,
-	db *gorm.DB,
 ) *media.Service {
 	if strings.EqualFold(strings.TrimSpace(config.ServiceClients.MediaMode), "rpc") {
 		rpcStore := media.NewRPCStore(config.ServiceClients.MediaAddr, internalrpc.ClientConfig{
@@ -158,25 +137,12 @@ func newMediaBoundary(
 		}
 		return media.NewService(rpcStore)
 	}
-	mediaDB := db
-	if strings.TrimSpace(config.MediaDatabaseURL) != "" {
-		opened, err := store.OpenPostgres(ctx, config.MediaDatabaseURL)
-		if err != nil {
-			log.Printf("failed to connect media_postgres for roomservice; using unavailable media boundary: %v", err)
-			return nil
-		}
-		mediaDB = opened
-	}
-	if mediaDB == nil {
-		return nil
-	}
-	return media.NewService(store.NewPostgresMediaStore(mediaDB))
+	return nil
 }
 
 func newIdentityBoundary(
 	config wtconfig.ServerRuntimeConfig,
 	service servicekit.Config,
-	db *gorm.DB,
 ) auth.IdentityService {
 	if strings.EqualFold(strings.TrimSpace(config.ServiceClients.IdentityMode), "rpc") {
 		return auth.NewRPCClient(config.ServiceClients.IdentityAddr, internalrpc.ClientConfig{
@@ -186,10 +152,7 @@ func newIdentityBoundary(
 			Service:    service,
 		})
 	}
-	if db == nil {
-		return nil
-	}
-	return auth.NewService(store.NewPostgresUserStore(db))
+	return nil
 }
 
 func installServiceEndpoints(

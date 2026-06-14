@@ -1,14 +1,8 @@
 # Data Model
 
-The durable schema is SQL-first. Main database migrations live under `server/migrations/`; identity database migrations live under `server/identity_migrations/`; media database migrations live under `server/media_migrations/`; timeline database migrations live under `server/timeline_migrations/`; progress database migrations live under `server/progress_migrations/`; room database migrations live under `server/room_migrations/`. GORM models in `server/internal/model/models.go` mirror the active tables. Table ownership is enforced by `server/internal/store/db_ownership.yaml` plus architecture tests; see [Database Ownership](./database-ownership.md) for the owner map and split checklist.
+The durable schema is SQL-first. After Phase 27, `server/migrations/` is intentionally a main-database migration set with no business owner tables. Identity database migrations live under `server/identity_migrations/`; media database migrations live under `server/media_migrations/`; timeline database migrations live under `server/timeline_migrations/`; progress database migrations live under `server/progress_migrations/`; room database migrations live under `server/room_migrations/`. GORM models in `server/internal/model/models.go` mirror the active owner tables. Table ownership is enforced by `server/internal/store/db_ownership.yaml` plus architecture tests; see [Database Ownership](./database-ownership.md) for the owner map and split checklist.
 
-When `IDENTITY_DATABASE_URL` is empty, `users` continues to live in the main database for local fallback. When `IDENTITY_DATABASE_URL` is set, identity-owned rows are migrated and written in the independent identity database. The old main-database `users` table is kept as shadow/rollback data during the Phase 22 pilot.
-
-When `MEDIA_DATABASE_URL` is empty, media tables continue to live in the main database for local fallback. When `MEDIA_DATABASE_URL` is set, media-owned tables are migrated and read from the independent media database. The old main-database media tables are kept as shadow/rollback data during the Phase 9 pilot.
-
-When `TIMELINE_DATABASE_URL` is empty, `room_timeline_outbox` continues to live in the main database for local fallback. When `TIMELINE_DATABASE_URL` is set, timeline-owned outbox rows are migrated and written in the independent timeline database. The old main-database outbox table is kept as fallback/shadow data during the Phase 10 pilot; old history is not migrated.
-
-When `ROOM_DATABASE_URL` is empty, `rooms` and `room_members` continue to live in the main database for local fallback. When `ROOM_DATABASE_URL` is set, room-owned rows are migrated and written in the independent room database. The room database keeps user and media ids as columns but does not define cross-database foreign keys to identity or media tables.
+`IDENTITY_DATABASE_URL`, `ROOM_DATABASE_URL`, `MEDIA_DATABASE_URL`, `PROGRESS_DATABASE_URL`, and `TIMELINE_DATABASE_URL` are required by their owning services in the full-RPC local and production paths. They no longer fall back to `DATABASE_URL`. The main database does not create `users`, `rooms`, `room_members`, media tables, `user_media_progress`, or `room_timeline_outbox`; those tables exist only in their owner databases.
 
 ## Primary Tables
 
@@ -110,7 +104,7 @@ Stores room business records:
 
 Current room statuses are handled as `active`, `grace_period`, and `destroyed`.
 
-Phase 9 removes the cross-database foreign key from `rooms.media_episode_id` to `media_episodes.id` in the main database. The column, indexes, and room behavior remain. Room create/join/detail do not query media tables from `PostgresRoomStore`; media detail is loaded through the media port or `MediaInternalService`.
+The room database keeps `media_episode_id` as an id column without a cross-database foreign key to media tables. Room create/join/detail do not query media tables from `PostgresRoomStore`; media detail is loaded through the media port or `MediaInternalService`.
 
 ### `room_members`
 
@@ -139,7 +133,7 @@ Stores low-frequency progress:
 
 This table supports the Android home page's last-watched and continue-watching data. It does not drive real-time room sync.
 
-Phase 9 removes the cross-database foreign key from `user_media_progress.media_episode_id` to `media_episodes.id` in the main database. Progress writes validate playable episodes through the media port before `PostgresProgressStore` writes this table.
+The progress database keeps `media_episode_id` as an id column without a cross-database foreign key to media tables. Progress writes validate playable episodes through the media port before `PostgresProgressStore` writes this table.
 
 ### `room_timeline_outbox`
 
@@ -159,7 +153,7 @@ Stores reliable delivery work for Kafka room timeline result events:
 
 Rows are written after accepted/rejected control decisions and membership events. In Phase 12 default paths, `roomserver` sends typed result fields and `cmd/timelineservice` generates the canonical event id, event version, server occurrence time, payload JSON, and outbox row. Explicit local rollback can still use the same timeline-owned builder in process. `cmd/outboxworker` claims pending rows with `FOR UPDATE SKIP LOCKED`, publishes to Kafka, then marks rows as `published` or schedules retry. During authority recovery, `cmd/timelineservice` exposes one recovery feed that merges Kafka canonical events with same-room `pending` and `publishing` rows so already-decided events are not lost while asynchronous publishing catches up.
 
-In Phase 10, this table can live in the independent timeline database selected by `TIMELINE_DATABASE_URL`. In Phase 12, compose defaults route roomserver access through typed result RPCs on `cmd/timelineservice`, while `cmd/outboxworker` and `cmd/derivedworker` remain timeline-owned workers. Kafka remains a result log, not command ingress. If timeline RPC or explicit local timeline storage is unavailable, timeline writes fail closed and accepted distributed controls are not broadcast.
+This table lives in the timeline database selected by `TIMELINE_DATABASE_URL`. In Phase 12 and later, compose defaults route roomserver access through typed result RPCs on `cmd/timelineservice`, while `cmd/outboxworker` and `cmd/derivedworker` remain timeline-owned workers. Kafka remains a result log, not command ingress. If timeline RPC or explicit local timeline storage is unavailable, timeline writes fail closed and accepted distributed controls are not broadcast.
 
 `pending` and `publishing` rows are part of the recovery gap and must not be deleted by cleanup jobs. Published row retention can be added later, but Phase 10 does not auto-delete outbox history.
 
@@ -216,14 +210,12 @@ The canonical topic is the durable room timeline result log and Phase 5 authorit
 
 ## Startup And Cleanup
 
-On server startup:
+On startup in the full-RPC path:
 
-- PostgreSQL is opened if `DATABASE_URL` is configured.
-- The media database is opened when `MEDIA_DATABASE_URL` is configured and the process needs a local media store.
-- The timeline database is opened when `TIMELINE_DATABASE_URL` is configured and the process is `cmd/timelineservice`, `cmd/outboxworker`, or an explicit local timeline rollback path.
+- `cmd/identityservice`, `cmd/roomservice`, `cmd/mediaservice`, `cmd/progressservice`, `cmd/timelineservice`, and `cmd/outboxworker` open their owner database URL and fail closed if it is missing or unavailable.
+- `cmd/apigateway` and the default `roomserver` session gateway do not open `DATABASE_URL` or any owner database URL.
 - Redis is opened if `REDIS_ADDR` is configured.
-- Existing active persistent rooms are marked `grace_period`.
-- In-memory cleanup starts.
-- Persistent cleanup destroys expired room records and deletes matching Redis `room_state`.
+- Room lifecycle startup work, grace-period transitions, and expired-room cleanup go through room RPC.
+- Timeline recovery and outbox gap reads go through timeline RPC.
 
-If PostgreSQL is unavailable, DB-backed HTTP endpoints return `503`, but the process can still start.
+If an owner database is unavailable, the owning service is not ready and callers receive the existing service-unavailable envelope through RPC/HTTP boundaries.

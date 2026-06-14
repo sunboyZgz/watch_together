@@ -1,1 +1,2 @@
-DROP TABLE IF EXISTS room_timeline_outbox;
+-- Phase 27: main database migration intentionally has no business schema.
+-- Owner schemas are managed by their dedicated migration directories.

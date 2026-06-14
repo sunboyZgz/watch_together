@@ -6,7 +6,7 @@ import (
 	wtconfig "watch_together/server/internal/config"
 )
 
-func TestMediaDatabaseURLPrefersMediaDatabaseAndFallsBackToMain(t *testing.T) {
+func TestMediaDatabaseURLRequiresMediaDatabase(t *testing.T) {
 	cases := []struct {
 		name string
 		cfg  wtconfig.ServerRuntimeConfig
@@ -21,11 +21,11 @@ func TestMediaDatabaseURLPrefersMediaDatabaseAndFallsBackToMain(t *testing.T) {
 			want: "postgres://media",
 		},
 		{
-			name: "fallback main database",
+			name: "main database ignored",
 			cfg: wtconfig.ServerRuntimeConfig{
 				DatabaseURL: "postgres://main",
 			},
-			want: "postgres://main",
+			want: "",
 		},
 	}
 	for _, tc := range cases {

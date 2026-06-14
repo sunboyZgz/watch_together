@@ -27,7 +27,7 @@ func main() {
 	}
 	databaseURL := timelineDatabaseURL(runtimeConfig)
 	if databaseURL == "" {
-		fmt.Fprintln(os.Stderr, "TIMELINE_DATABASE_URL or DATABASE_URL is required for outboxworker")
+		fmt.Fprintln(os.Stderr, "TIMELINE_DATABASE_URL is required for outboxworker")
 		os.Exit(1)
 	}
 
@@ -98,8 +98,5 @@ func serviceName(configured string, fallback string) string {
 }
 
 func timelineDatabaseURL(config wtconfig.ServerRuntimeConfig) string {
-	if strings.TrimSpace(config.TimelineDatabaseURL) != "" {
-		return strings.TrimSpace(config.TimelineDatabaseURL)
-	}
-	return strings.TrimSpace(config.DatabaseURL)
+	return strings.TrimSpace(config.TimelineDatabaseURL)
 }

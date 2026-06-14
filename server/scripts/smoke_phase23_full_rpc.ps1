@@ -596,28 +596,41 @@ try {
         }
     }
 
-    Invoke-Step 'verify owner databases received writes and main shadow tables did not' {
+    Invoke-Step 'verify owner databases received writes and main owner tables are absent' {
         $identityCount = Invoke-ScalarInt -Database 'anime_watch_identity_dev' -Sql "SELECT COUNT(*) FROM users WHERE id IN ('$($hostUser.userId)', '$($viewerUser.userId)');"
         Assert-EqualInt -Name 'identity DB smoke users' -Actual $identityCount -Expected 2
-        $mainIdentityCount = Invoke-ScalarInt -Database 'anime_watch_dev' -Sql "SELECT COUNT(*) FROM users WHERE id IN ('$($hostUser.userId)', '$($viewerUser.userId)');"
-        Assert-EqualInt -Name 'main DB shadow users' -Actual $mainIdentityCount -Expected 0
 
         $roomCount = Invoke-ScalarInt -Database 'anime_watch_room_dev' -Sql "SELECT COUNT(*) FROM rooms WHERE room_code = '$script:roomCode';"
         Assert-EqualInt -Name 'room DB smoke room' -Actual $roomCount -Expected 1
         $memberCount = Invoke-ScalarInt -Database 'anime_watch_room_dev' -Sql "SELECT COUNT(*) FROM rooms r JOIN room_members m ON m.room_id = r.id WHERE r.room_code = '$script:roomCode' AND m.user_id IN ('$($hostUser.userId)', '$($viewerUser.userId)');"
         Assert-EqualInt -Name 'room DB smoke members' -Actual $memberCount -Expected 2
-        $mainRoomCount = Invoke-ScalarInt -Database 'anime_watch_dev' -Sql "SELECT COUNT(*) FROM rooms WHERE room_code = '$script:roomCode';"
-        Assert-EqualInt -Name 'main DB shadow room' -Actual $mainRoomCount -Expected 0
 
         $progressCount = Invoke-ScalarInt -Database 'anime_watch_progress_dev' -Sql "SELECT COUNT(*) FROM user_media_progress WHERE user_id = '$($hostUser.userId)' AND media_episode_id = '$SmokeEpisodeID';"
         Assert-EqualInt -Name 'progress DB smoke progress' -Actual $progressCount -Expected 1
-        $mainProgressCount = Invoke-ScalarInt -Database 'anime_watch_dev' -Sql "SELECT COUNT(*) FROM user_media_progress WHERE user_id = '$($hostUser.userId)' AND media_episode_id = '$SmokeEpisodeID';"
-        Assert-EqualInt -Name 'main DB shadow progress' -Actual $mainProgressCount -Expected 0
 
         $timelineCount = Invoke-ScalarInt -Database 'anime_watch_timeline_dev' -Sql "SELECT COUNT(*) FROM room_timeline_outbox WHERE room_id = '$script:roomCode' AND event_type = 'room.control.accepted';"
         Assert-AtLeastInt -Name 'timeline DB accepted outbox rows' -Actual $timelineCount -Minimum 3
-        $mainTimelineCount = Invoke-ScalarInt -Database 'anime_watch_dev' -Sql "SELECT COUNT(*) FROM room_timeline_outbox WHERE room_id = '$script:roomCode' AND event_type = 'room.control.accepted';"
-        Assert-EqualInt -Name 'main DB shadow timeline outbox' -Actual $mainTimelineCount -Expected 0
+
+        $mainOwnerTableCount = Invoke-ScalarInt -Database 'anime_watch_dev' -Sql @"
+SELECT COUNT(*)
+FROM (
+    VALUES
+        ('users'),
+        ('rooms'),
+        ('room_members'),
+        ('media_tags'),
+        ('media_seasons'),
+        ('media_episodes'),
+        ('media_season_tags'),
+        ('media_episode_variants'),
+        ('media_items'),
+        ('media_item_tags'),
+        ('user_media_progress'),
+        ('room_timeline_outbox')
+) AS shadow(table_name)
+WHERE to_regclass('public.' || shadow.table_name) IS NOT NULL;
+"@
+        Assert-EqualInt -Name 'main DB owner table count' -Actual $mainOwnerTableCount -Expected 0
     }
 
     Invoke-Step 'verify authority RPC metrics include control application' {
@@ -627,7 +640,7 @@ try {
         }
     }
 
-    Write-Host 'Phase 23 full RPC multi database smoke completed.'
+    Write-Host 'Phase 27 full RPC owner-database smoke completed.'
 } catch {
     Write-SmokeDiagnostics
     throw

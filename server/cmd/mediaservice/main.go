@@ -30,7 +30,7 @@ func main() {
 	}
 	databaseURL := mediaDatabaseURL(runtimeConfig)
 	if strings.TrimSpace(databaseURL) == "" {
-		fmt.Fprintln(os.Stderr, "MEDIA_DATABASE_URL or DATABASE_URL is required for mediaservice")
+		fmt.Fprintln(os.Stderr, "MEDIA_DATABASE_URL is required for mediaservice")
 		os.Exit(1)
 	}
 	if strings.EqualFold(strings.TrimSpace(runtimeConfig.AppEnv), "prod") &&
@@ -176,8 +176,5 @@ func serviceName(configured string, fallback string) string {
 }
 
 func mediaDatabaseURL(config wtconfig.ServerRuntimeConfig) string {
-	if strings.TrimSpace(config.MediaDatabaseURL) != "" {
-		return strings.TrimSpace(config.MediaDatabaseURL)
-	}
-	return strings.TrimSpace(config.DatabaseURL)
+	return strings.TrimSpace(config.MediaDatabaseURL)
 }

@@ -1,10 +1,10 @@
 # Database Ownership
 
-Phase 7 keeps one PostgreSQL database and adds logical ownership boundaries. Phase 8 makes the boundary enforceable with the machine-readable registry at `server/internal/store/db_ownership.yaml` and architecture tests that scan store SQL and migrations.
+Phase 7 started with one PostgreSQL database and logical ownership boundaries. Phase 8 made the boundary enforceable with the machine-readable registry at `server/internal/store/db_ownership.yaml` and architecture tests that scan store SQL and migrations.
 
-Phase 9 adds the first independent media database boundary. Phase 10 adds the timeline database boundary for `room_timeline_outbox`. Phase 11 makes timeline a default service-family boundary in compose: `roomserver` calls `cmd/timelineservice` over RPC, while `cmd/outboxworker` and `cmd/derivedworker` remain separate timeline-owned workers. Phase 16 makes local compose `app` use media, timeline, and authority RPC by default; Phase 17/18 adds identity RPC; Phase 19 adds room metadata and membership RPC through `cmd/roomservice`; Phase 20 adds progress/home composition RPC and `PROGRESS_DATABASE_URL`; Phase 21 adds the room-session database boundary through `ROOM_DATABASE_URL` and moves lifecycle/recovery metadata access behind `cmd/roomservice`; Phase 22 adds the identity database boundary through `IDENTITY_DATABASE_URL` and removes the home SQL read model fallback; Phase 23 adds a full-RPC multi-database smoke gate that verifies owner DB writes and empty main shadow rows for smoke data. In these database phases, "split database" means a separate PostgreSQL database such as `anime_watch_identity_dev`, `anime_watch_media_dev`, `anime_watch_room_dev`, or `anime_watch_timeline_dev`, usually inside the same PostgreSQL server/container as the main database. It is not a requirement to deploy a second PostgreSQL software system.
+Phases 9-22 moved media, timeline, progress, room, and identity into independent PostgreSQL database boundaries while adding their RPC services. The independent media database was the first concrete database split and remains the catalog owner boundary. Phase 23 added the full-RPC multi-database smoke gate, Phase 26 moved public REST to `cmd/apigateway`, and Phase 27 removes the main-database shadow-table path. In the current architecture, "split database" means a separate PostgreSQL database such as `anime_watch_identity_dev`, `anime_watch_media_dev`, `anime_watch_room_dev`, `anime_watch_progress_dev`, or `anime_watch_timeline_dev`, usually inside the same PostgreSQL server/container as the main database. It is not a requirement to deploy a second PostgreSQL software system.
 
-When an owner database URL is empty, the matching owner keeps the previous single-database fallback. When the URL is configured, that owner uses the configured database. Timeline and identity are fail-closed: if `TIMELINE_DATABASE_URL` or `IDENTITY_DATABASE_URL` is set but cannot be opened, that service must be unavailable rather than silently falling back to the main database.
+Owner database URLs are required by owner services: `IDENTITY_DATABASE_URL`, `ROOM_DATABASE_URL`, `MEDIA_DATABASE_URL`, `PROGRESS_DATABASE_URL`, and `TIMELINE_DATABASE_URL`. If an owner URL is missing or unavailable, the owner service is unavailable; it must not silently fall back to `DATABASE_URL`. The main database no longer creates or owns `users`, `rooms`, `room_members`, media tables, `user_media_progress`, or `room_timeline_outbox`.
 
 ## Ownership Rules
 
@@ -12,7 +12,7 @@ When an owner database URL is empty, the matching owner keeps the previous singl
 - Other contexts must not write owner tables directly.
 - Cross-context reads must go through a port/interface, RPC adapter, or a documented read model.
 - New tables must declare an owner before their first migration is merged.
-- Cross-database foreign keys are not valid. Phase 9 drops the main database FKs from `rooms.media_episode_id` and `user_media_progress.media_episode_id` to media tables while keeping the columns and indexes.
+- Cross-database foreign keys are not valid. Owner databases keep cross-context ids as columns and enforce existence through service calls, not SQL FKs.
 - The registry, not this prose table, is the CI source of truth. Documentation should explain owner intent; tests enforce the registry.
 
 ## Table Owners
@@ -42,33 +42,29 @@ The canonical registry lives in `server/internal/store/db_ownership.yaml`. Curre
 | `outboxworker` | `timeline` | Claims and updates `room_timeline_outbox` from the timeline database. | Timeline-owned worker access. |
 | `derivedworker` | `timeline` | Consumes Kafka canonical topic and publishes derived topics. | Timeline-owned projection worker access. |
 
-## Phase 9 Media Database Boundary
+## Phase 27 Owner Database Boundary
 
-Phase 9 moves the media owner from a purely logical table boundary to a database boundary:
+Each owner table is created only by its owner migration directory:
 
-- Media-owned migrations live under `server/media_migrations`.
-- Main application migrations still live under `server/migrations`.
-- `cmd/mediaservice` prefers `MEDIA_DATABASE_URL` and falls back to `DATABASE_URL`.
-- `roomserver` local media mode prefers `MEDIA_DATABASE_URL` and falls back to `DATABASE_URL`.
-- `MEDIA_SERVICE_MODE=rpc` keeps `roomserver` away from the media database; it calls `cmd/mediaservice` instead.
-- `/readyz` reports the main database as `postgres` and the optional media database as `media_postgres`.
-- `cmd/mediadbsync` copies media-owned rows from the old main database tables into the media database and can run `--verify-only` content checks.
+- `server/identity_migrations` creates `users`.
+- `server/room_migrations` creates `rooms` and `room_members`.
+- `server/media_migrations` creates media catalog tables.
+- `server/progress_migrations` creates `user_media_progress`.
+- `server/timeline_migrations` creates `room_timeline_outbox`.
+- `server/migrations` remains for main-database infrastructure bookkeeping and must not create or reference owner tables.
 
-The old main-database media tables are intentionally kept as shadow/rollback data for this phase. They should not receive new non-media-owner access.
+`cmd/identityservice`, `cmd/roomservice`, `cmd/mediaservice`, `cmd/progressservice`, `cmd/timelineservice`, and `cmd/outboxworker` require their owner database URL. `cmd/apigateway`, the default `roomserver` session gateway, and `cmd/roomauthorityservice` do not receive `DATABASE_URL` or direct owner database URLs in compose.
+
+The legacy import tools `cmd/identitydbsync`, `cmd/roomdbsync`, `cmd/mediadbsync`, and `cmd/progressdbsync` are explicit import utilities. They require `--source-database-url` for the source and no longer default to reading from `DATABASE_URL`.
 
 ## Phase 10 Timeline Database Boundary
 
-Phase 10 moves the timeline owner from a purely logical table boundary to an optional database boundary:
+Phase 10 moved the timeline owner from a purely logical table boundary to a database boundary:
 
 - Timeline-owned migrations live under `server/timeline_migrations`.
-- Main application migrations still live under `server/migrations`.
-- `cmd/timelineservice` prefers `TIMELINE_DATABASE_URL` and falls back to `DATABASE_URL` only when the timeline URL is empty.
-- `cmd/outboxworker` prefers `TIMELINE_DATABASE_URL` and falls back to `DATABASE_URL` only when the timeline URL is empty.
-- `roomserver` local timeline mode opens `TIMELINE_DATABASE_URL` when configured; if that connection fails, the timeline recorder is unavailable and accepted distributed controls fail closed.
+- `cmd/timelineservice` and `cmd/outboxworker` require `TIMELINE_DATABASE_URL`.
 - `TIMELINE_SERVICE_MODE=rpc` keeps `roomserver` away from the timeline database; it calls `cmd/timelineservice` instead. Phase 11 makes this the compose default.
-- `/readyz` reports the main database as `postgres` and the optional timeline database as `timeline_postgres`.
-
-The old main-database `room_timeline_outbox` table is intentionally kept as fallback/shadow data. Development-stage Phase 10 does not migrate old outbox history into the timeline database; new timeline databases start empty after running `server/timeline_migrations`.
+- `/readyz` reports the owner database as `timeline_postgres` in timeline-owned processes.
 
 ## Phase 11 Timeline Service-Family Boundary
 
@@ -78,7 +74,7 @@ Phase 11 keeps timeline as a service family rather than a single process:
 - `cmd/outboxworker` remains a separate timeline-owned worker for Kafka publish retry and mark-published state.
 - `cmd/derivedworker` remains a separate timeline-owned projection worker for derived topics.
 - Compose app/prod paths default `roomserver` to `TIMELINE_SERVICE_MODE=rpc` and do not pass the timeline-owned database URL to roomserver.
-- `TIMELINE_SERVICE_MODE=local` is still supported as an explicit rollback path, using `ROOMSERVER_TIMELINE_DATABASE_URL` in compose when direct timeline DB access is required.
+- `TIMELINE_SERVICE_MODE=local` is still supported as an explicit compatibility path, using `ROOMSERVER_TIMELINE_DATABASE_URL` in compose when direct timeline DB access is required.
 
 ## Phase 12 Timeline Result Ownership
 
@@ -91,27 +87,27 @@ Phase 12 moves canonical result event semantics into the timeline owner:
 
 ## Phase 21 Room Service and Room Database Boundary
 
-Phase 19 makes room metadata and membership a serviceized business slice. Phase 21 gives that slice its own optional database boundary and moves lifecycle/recovery metadata behind the same service:
+Phase 19 makes room metadata and membership a serviceized business slice. Phase 21 gives that slice its own database boundary and moves lifecycle/recovery metadata behind the same service:
 
 - `cmd/roomservice` exposes `RoomInternalService` for create, join, leave, detail, active-member checks, runtime bootstrap, recoverable room listing, grace-period updates, activation, destroy, startup backfill, and expired-room cleanup.
 - Local compose `app` and production compose default `roomserver` to `ROOM_SERVICE_MODE=rpc`.
 - `roomserver` still owns WebSocket connections, local room runtime state, and client-visible envelopes.
 - Room-owned migrations live under `server/room_migrations`.
-- `cmd/roomservice` prefers `ROOM_DATABASE_URL` and falls back to `DATABASE_URL` only when the room URL is empty.
+- `cmd/roomservice` requires `ROOM_DATABASE_URL`.
 - `ROOM_SERVICE_MODE=rpc` keeps `roomserver` away from the room database; compose app/prod pass `ROOM_DATABASE_URL` only to `cmd/roomservice`.
 - `cmd/roomservice` calls identity RPC for user validation/profile enrichment and media RPC for episode details, so `PostgresRoomStore` only reads/writes `rooms` and `room_members`.
 - `cmd/roomauthorityservice` reads room runtime bootstrap and recoverable-room metadata through room RPC instead of PostgreSQL.
-- `cmd/roomdbsync` copies `rooms` and `room_members` from the main database shadow tables to the room database and supports `--verify-only`.
+- `cmd/roomdbsync` is a legacy explicit import tool and requires `--source-database-url`.
 
 ## Phase 22 Identity Database Boundary and Home Composition Cleanup
 
 Phase 22 gives identity its own database boundary and removes the last home SQL read model:
 
 - Identity-owned migrations live under `server/identity_migrations`.
-- `cmd/identityservice` prefers `IDENTITY_DATABASE_URL` and falls back to `DATABASE_URL` only when the identity URL is empty.
+- `cmd/identityservice` requires `IDENTITY_DATABASE_URL`.
 - Local compose `app` and production compose pass `IDENTITY_DATABASE_URL` only to `cmd/identityservice`; `roomserver` stays on identity RPC and does not receive the identity database URL.
-- `cmd/identitydbsync` copies `users` from the main database shadow table to the identity database and supports `--verify-only`.
-- Main database migrations drop the old `users` foreign keys from `rooms`, `room_members`, and `user_media_progress`; service calls enforce user validity.
+- `cmd/identitydbsync` is a legacy explicit import tool and requires `--source-database-url`.
+- Service calls enforce user validity; owner database schemas do not use cross-database SQL FKs.
 - `home-composition` now reads identity/profile, recent progress, and media summaries only through ports/RPC. The `PostgresHomeStore` read model is removed.
 
 Operational rules:
@@ -120,29 +116,19 @@ Operational rules:
 - Published row retention can be introduced later, but Phase 10 only documents that boundary and does not auto-delete history.
 - Backing up the timeline database protects outbox retry state and recovery gap closure. Restoring it does not restore users, rooms, progress, or media metadata.
 
-## Future Split Checklist
-
-Remaining blockers after the Phase 22 service and database pilots:
+## Current Split Checklist
 
 - `room-session -> media` direct SQL is closed in Phase 8. Room create/join/detail now use the media port, backed by local `PostgresMediaStore` or `MediaInternalService` RPC.
 - `progress -> media` direct SQL is closed in Phase 8. Progress writes validate playable episodes through the media port before touching `user_media_progress`.
 - `home-composition -> identity/progress/media` direct SQL is closed in Phase 22. Home summary now requests every dependency through service ports/RPC.
-- The main database still retains old media tables for rollback/shadow validation. A later cleanup can remove them after sync confidence is high.
 - Timeline owns its independent outbox schema and compose-default RPC path. Later phases can add richer timeline service APIs or projection management, but `roomserver` should not regain default direct timeline DB ownership.
-- Identity owns its independent users schema in compose app/prod; the main database `users` table remains only as rollback/shadow data.
-- Main-database shadow tables remain for identity, media, progress, room, and timeline fallback. Phase 23's smoke gate verifies the default compose path does not write new smoke rows to those shadows. Later cleanup can remove them after sync confidence is high.
+- Identity, room, media, progress, and timeline own their independent schemas in compose app/prod.
+- Phase 27 smoke verifies owner DB writes and verifies the main database owner tables do not exist.
 
-Before moving a context to its own database:
+Before adding another durable context:
 
 1. Replace direct cross-context writes with service calls or events.
 2. Replace cross-context reads with RPC queries, cached projections, or read models.
-3. Backfill the target database and verify row counts.
-4. Run dual-read or shadow-read checks before switching production traffic.
-5. Move migrations, backups, readiness checks, and restore runbooks to the owning service.
-6. Remove cross-database transaction assumptions.
-
-Suggested order:
-
-1. Split `media` first because it is catalog/storage oriented and mostly independent from room authority.
-2. Keep hardening `timeline` as a service family before extracting more contexts. Phase 11 establishes service-owned RPC defaults and worker responsibility boundaries.
-3. Consider an independent API gateway only after service boundaries are stable; `roomserver` can continue as the Android-facing BFF/session gateway meanwhile.
+3. Move migrations, backups, readiness checks, and restore runbooks to the owning service.
+4. Remove cross-database transaction assumptions.
+5. Add a business smoke that proves the Android-facing path writes only to the owning database.

@@ -189,9 +189,6 @@ func NewServer(config Config) *Server {
 		presenceRegistry = cache.NewPresenceRegistry(redisClient, config.WebSocket.PresenceLeaseTTL)
 	}
 	db := newPostgresDB("postgres", config.DatabaseURL)
-	if distributedAuthority && db == nil {
-		log.Fatal("distributed_authority requires postgres")
-	}
 	var identityDB *gorm.DB
 	if !isRPCMode(config.ServiceClients.IdentityMode) && strings.TrimSpace(config.IdentityDatabaseURL) != "" {
 		identityDB = newPostgresDB("identity_postgres", config.IdentityDatabaseURL)
@@ -457,7 +454,7 @@ func readinessSnapshotFromConfig(
 		strings.TrimSpace(config.InstanceID),
 		normalizeRoomRuntimeMode(config.RoomRuntimeMode),
 		[]observability.DependencyStatus{
-			dependencyStatus("postgres", db != nil, distributedAuthority || strings.TrimSpace(config.DatabaseURL) != ""),
+			dependencyStatus("postgres", db != nil, strings.TrimSpace(config.DatabaseURL) != ""),
 			dependencyStatus("identity_postgres", identityDB != nil, !isRPCMode(config.ServiceClients.IdentityMode) && strings.TrimSpace(config.IdentityDatabaseURL) != ""),
 			dependencyStatus("room_postgres", roomDB != nil, !isRPCMode(config.ServiceClients.RoomMode) && strings.TrimSpace(config.RoomDatabaseURL) != ""),
 			dependencyStatus("media_postgres", mediaDB != nil, !isRPCMode(config.ServiceClients.MediaMode) && strings.TrimSpace(config.MediaDatabaseURL) != ""),
@@ -761,16 +758,10 @@ func newIdentityService(
 	if isRPCMode(config.ServiceClients.IdentityMode) {
 		return auth.NewRPCClient(config.ServiceClients.IdentityAddr, internalRPCClientConfig(config, service))
 	}
-	var storeDB *gorm.DB
-	if strings.TrimSpace(config.IdentityDatabaseURL) != "" {
-		storeDB = identityDB
-	} else {
-		storeDB = db
-	}
-	if storeDB == nil {
+	if strings.TrimSpace(config.IdentityDatabaseURL) == "" || identityDB == nil {
 		return nil
 	}
-	return auth.NewServiceWithTokenManager(store.NewPostgresUserStore(storeDB), tokenManager)
+	return auth.NewServiceWithTokenManager(store.NewPostgresUserStore(identityDB), tokenManager)
 }
 
 // newHomeService connects home summary reads to local composition or the home RPC boundary.
@@ -799,29 +790,17 @@ func newMediaService(db *gorm.DB, mediaDB *gorm.DB, config Config, service servi
 		}
 		return media.NewService(rpcStore)
 	}
-	var storeDB *gorm.DB
-	if strings.TrimSpace(config.MediaDatabaseURL) != "" {
-		storeDB = mediaDB
-	} else {
-		storeDB = db
-	}
-	if storeDB == nil {
+	if strings.TrimSpace(config.MediaDatabaseURL) == "" || mediaDB == nil {
 		return nil
 	}
-	return media.NewService(store.NewPostgresMediaStore(storeDB))
+	return media.NewService(store.NewPostgresMediaStore(mediaDB))
 }
 
 func newTimelineOutboxStore(db *gorm.DB, timelineDB *gorm.DB, config Config) *store.PostgresTimelineOutboxStore {
-	var storeDB *gorm.DB
-	if strings.TrimSpace(config.TimelineDatabaseURL) != "" {
-		storeDB = timelineDB
-	} else {
-		storeDB = db
-	}
-	if storeDB == nil {
+	if strings.TrimSpace(config.TimelineDatabaseURL) == "" || timelineDB == nil {
 		return nil
 	}
-	return store.NewPostgresTimelineOutboxStore(storeDB, config.Kafka.TopicRoomTimeline)
+	return store.NewPostgresTimelineOutboxStore(timelineDB, config.Kafka.TopicRoomTimeline)
 }
 
 // newRoomService connects room business APIs to the shared PostgreSQL handle when available.
@@ -837,13 +816,7 @@ func newRoomService(
 		client := roomapi.NewRPCClient(config.ServiceClients.RoomAddr, internalRPCClientConfig(config, service))
 		return client, client
 	}
-	var storeDB *gorm.DB
-	if strings.TrimSpace(config.RoomDatabaseURL) != "" {
-		storeDB = roomDB
-	} else {
-		storeDB = db
-	}
-	if storeDB == nil {
+	if strings.TrimSpace(config.RoomDatabaseURL) == "" || roomDB == nil {
 		return nil, nil
 	}
 	if mediaService == nil {
@@ -851,7 +824,7 @@ func newRoomService(
 	}
 	var mediaLookup roomapi.MediaDetailLookup
 	mediaLookup = mediaService
-	roomStore := store.NewPostgresRoomStore(storeDB)
+	roomStore := store.NewPostgresRoomStore(roomDB)
 	roomService := roomapi.NewServiceWithBoundaries(roomStore, mediaLookup, identityService)
 	return roomService, roomService
 }
@@ -868,18 +841,12 @@ func newProgressService(
 	if isRPCMode(config.ServiceClients.ProgressMode) {
 		return progress.NewRPCClient(config.ServiceClients.ProgressAddr, internalRPCClientConfig(config, service))
 	}
-	var storeDB *gorm.DB
-	if strings.TrimSpace(config.ProgressDatabaseURL) != "" {
-		storeDB = progressDB
-	} else {
-		storeDB = db
-	}
-	if storeDB == nil || mediaService == nil {
+	if strings.TrimSpace(config.ProgressDatabaseURL) == "" || progressDB == nil || mediaService == nil {
 		return nil
 	}
 	var mediaValidator progress.MediaValidator
 	mediaValidator = mediaService
-	return progress.NewServiceWithBoundaries(store.NewPostgresProgressStore(storeDB), identityService, mediaValidator)
+	return progress.NewServiceWithBoundaries(store.NewPostgresProgressStore(progressDB), identityService, mediaValidator)
 }
 
 func startPersistentRoomCleanupLoop(

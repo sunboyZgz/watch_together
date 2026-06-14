@@ -150,6 +150,7 @@ func TestComposeAppAndProdUseFullRPCBoundary(t *testing.T) {
 	localTimeline := requireComposeService(t, localCompose, "timelineservice")
 	localAuthority := requireComposeService(t, localCompose, "roomauthorityservice")
 	localGateway := requireComposeService(t, localCompose, "apigateway")
+	localOutbox := requireComposeService(t, localCompose, "outboxworker")
 
 	for _, serviceName := range []string{"identityservice", "roomservice", "mediaservice", "progressservice", "homecompositionservice", "timelineservice", "roomauthorityservice"} {
 		if !dependsOnService(localRoomserver.DependsOn, serviceName) {
@@ -158,6 +159,9 @@ func TestComposeAppAndProdUseFullRPCBoundary(t *testing.T) {
 	}
 	if mode := envString(localRoomserver.Environment, "SERVER_EDGE_MODE"); !strings.Contains(mode, "session_gateway") {
 		t.Fatalf("app roomserver SERVER_EDGE_MODE = %q, want session_gateway default", mode)
+	}
+	if databaseURL := envString(localRoomserver.Environment, "DATABASE_URL"); databaseURL != "" {
+		t.Fatalf("app roomserver must not receive main DATABASE_URL, got %q", databaseURL)
 	}
 	if !containsContext(localGateway.Profiles, "app") {
 		t.Fatalf("apigateway profiles = %v, want app profile", localGateway.Profiles)
@@ -278,6 +282,9 @@ func TestComposeAppAndProdUseFullRPCBoundary(t *testing.T) {
 	if identityDatabaseURL := envString(localIdentity.Environment, "IDENTITY_DATABASE_URL"); !strings.Contains(identityDatabaseURL, "anime_watch_identity_dev") {
 		t.Fatalf("identityservice IDENTITY_DATABASE_URL = %q, want local identity database", identityDatabaseURL)
 	}
+	if databaseURL := envString(localIdentity.Environment, "DATABASE_URL"); databaseURL != "" {
+		t.Fatalf("identityservice must not receive main DATABASE_URL, got %q", databaseURL)
+	}
 	if !containsContext(localRoom.Profiles, "app") {
 		t.Fatalf("roomservice profiles = %v, want app profile", localRoom.Profiles)
 	}
@@ -290,6 +297,9 @@ func TestComposeAppAndProdUseFullRPCBoundary(t *testing.T) {
 	if roomDatabaseURL := envString(localRoom.Environment, "ROOM_DATABASE_URL"); !strings.Contains(roomDatabaseURL, "anime_watch_room_dev") {
 		t.Fatalf("roomservice ROOM_DATABASE_URL = %q, want local room database", roomDatabaseURL)
 	}
+	if databaseURL := envString(localRoom.Environment, "DATABASE_URL"); databaseURL != "" {
+		t.Fatalf("roomservice must not receive main DATABASE_URL, got %q", databaseURL)
+	}
 	if !containsContext(localMedia.Profiles, "app") {
 		t.Fatalf("mediaservice profiles = %v, want app profile", localMedia.Profiles)
 	}
@@ -298,6 +308,9 @@ func TestComposeAppAndProdUseFullRPCBoundary(t *testing.T) {
 	}
 	if mediaDatabaseURL := envString(localMedia.Environment, "MEDIA_DATABASE_URL"); !strings.Contains(mediaDatabaseURL, "anime_watch_media_dev") {
 		t.Fatalf("mediaservice MEDIA_DATABASE_URL = %q, want local media database", mediaDatabaseURL)
+	}
+	if databaseURL := envString(localMedia.Environment, "DATABASE_URL"); databaseURL != "" {
+		t.Fatalf("mediaservice must not receive main DATABASE_URL, got %q", databaseURL)
 	}
 	if !containsContext(localProgress.Profiles, "app") {
 		t.Fatalf("progressservice profiles = %v, want app profile", localProgress.Profiles)
@@ -314,6 +327,9 @@ func TestComposeAppAndProdUseFullRPCBoundary(t *testing.T) {
 	if progressDatabaseURL := envString(localProgress.Environment, "PROGRESS_DATABASE_URL"); !strings.Contains(progressDatabaseURL, "anime_watch_progress_dev") {
 		t.Fatalf("progressservice PROGRESS_DATABASE_URL = %q, want local progress database", progressDatabaseURL)
 	}
+	if databaseURL := envString(localProgress.Environment, "DATABASE_URL"); databaseURL != "" {
+		t.Fatalf("progressservice must not receive main DATABASE_URL, got %q", databaseURL)
+	}
 	if !containsContext(localHome.Profiles, "app") {
 		t.Fatalf("homecompositionservice profiles = %v, want app profile", localHome.Profiles)
 	}
@@ -326,6 +342,9 @@ func TestComposeAppAndProdUseFullRPCBoundary(t *testing.T) {
 	if !dependsOnService(localHome.DependsOn, "mediaservice") {
 		t.Fatalf("homecompositionservice must depend on mediaservice")
 	}
+	if databaseURL := envString(localHome.Environment, "DATABASE_URL"); databaseURL != "" {
+		t.Fatalf("homecompositionservice must not receive main DATABASE_URL, got %q", databaseURL)
+	}
 	if !containsContext(localTimeline.Profiles, "app") {
 		t.Fatalf("timelineservice profiles = %v, want app profile", localTimeline.Profiles)
 	}
@@ -334,6 +353,15 @@ func TestComposeAppAndProdUseFullRPCBoundary(t *testing.T) {
 	}
 	if timelineDatabaseURL := envString(localTimeline.Environment, "TIMELINE_DATABASE_URL"); !strings.Contains(timelineDatabaseURL, "anime_watch_timeline_dev") {
 		t.Fatalf("timelineservice TIMELINE_DATABASE_URL = %q, want local timeline database", timelineDatabaseURL)
+	}
+	if databaseURL := envString(localTimeline.Environment, "DATABASE_URL"); databaseURL != "" {
+		t.Fatalf("timelineservice must not receive main DATABASE_URL, got %q", databaseURL)
+	}
+	if timelineDatabaseURL := envString(localOutbox.Environment, "TIMELINE_DATABASE_URL"); !strings.Contains(timelineDatabaseURL, "anime_watch_timeline_dev") {
+		t.Fatalf("outboxworker TIMELINE_DATABASE_URL = %q, want local timeline database", timelineDatabaseURL)
+	}
+	if databaseURL := envString(localOutbox.Environment, "DATABASE_URL"); databaseURL != "" {
+		t.Fatalf("outboxworker must not receive main DATABASE_URL, got %q", databaseURL)
 	}
 	if !containsContext(localAuthority.Profiles, "app") {
 		t.Fatalf("roomauthorityservice profiles = %v, want app profile", localAuthority.Profiles)
@@ -397,6 +425,7 @@ func TestComposeAppAndProdUseFullRPCBoundary(t *testing.T) {
 	prodHome := requireComposeService(t, prodCompose, "homecompositionservice")
 	prodTimeline := requireComposeService(t, prodCompose, "timelineservice")
 	prodAuthority := requireComposeService(t, prodCompose, "roomauthorityservice")
+	prodOutbox := requireComposeService(t, prodCompose, "outboxworker")
 	if len(prodAuthority.Profiles) != 0 {
 		t.Fatalf("prod roomauthorityservice should be a default service, got profiles %v", prodAuthority.Profiles)
 	}
@@ -420,6 +449,9 @@ func TestComposeAppAndProdUseFullRPCBoundary(t *testing.T) {
 	}
 	if mode := envString(prodRoomserver.Environment, "SERVER_EDGE_MODE"); !strings.Contains(mode, "session_gateway") {
 		t.Fatalf("prod roomserver SERVER_EDGE_MODE = %q, want session_gateway default", mode)
+	}
+	if databaseURL := envString(prodRoomserver.Environment, "DATABASE_URL"); databaseURL != "" {
+		t.Fatalf("prod roomserver must not receive main DATABASE_URL, got %q", databaseURL)
 	}
 	for _, serviceName := range []string{"identityservice", "roomservice", "mediaservice", "progressservice", "homecompositionservice", "roomauthorityservice"} {
 		if !dependsOnService(prodGateway.DependsOn, serviceName) {
@@ -479,8 +511,14 @@ func TestComposeAppAndProdUseFullRPCBoundary(t *testing.T) {
 	if identityDatabaseURL := envString(prodIdentity.Environment, "IDENTITY_DATABASE_URL"); !strings.Contains(identityDatabaseURL, "watch_together_identity_prod") {
 		t.Fatalf("prod identityservice IDENTITY_DATABASE_URL = %q, want prod identity database", identityDatabaseURL)
 	}
+	if databaseURL := envString(prodIdentity.Environment, "DATABASE_URL"); databaseURL != "" {
+		t.Fatalf("prod identityservice must not receive main DATABASE_URL, got %q", databaseURL)
+	}
 	if roomDatabaseURL := envString(prodRoom.Environment, "ROOM_DATABASE_URL"); !strings.Contains(roomDatabaseURL, "watch_together_room_prod") {
 		t.Fatalf("prod roomservice ROOM_DATABASE_URL = %q, want prod room database", roomDatabaseURL)
+	}
+	if databaseURL := envString(prodRoom.Environment, "DATABASE_URL"); databaseURL != "" {
+		t.Fatalf("prod roomservice must not receive main DATABASE_URL, got %q", databaseURL)
 	}
 	if !dependsOnService(prodRoom.DependsOn, "room-postgres-init") {
 		t.Fatalf("prod roomservice must depend on room-postgres-init")
@@ -490,6 +528,9 @@ func TestComposeAppAndProdUseFullRPCBoundary(t *testing.T) {
 	}
 	if mediaDatabaseURL := envString(prodMedia.Environment, "MEDIA_DATABASE_URL"); !strings.Contains(mediaDatabaseURL, "watch_together_media_prod") {
 		t.Fatalf("prod mediaservice MEDIA_DATABASE_URL = %q, want prod media database", mediaDatabaseURL)
+	}
+	if databaseURL := envString(prodMedia.Environment, "DATABASE_URL"); databaseURL != "" {
+		t.Fatalf("prod mediaservice must not receive main DATABASE_URL, got %q", databaseURL)
 	}
 	if !dependsOnService(prodProgress.DependsOn, "progress-postgres-init") {
 		t.Fatalf("prod progressservice must depend on progress-postgres-init")
@@ -503,6 +544,9 @@ func TestComposeAppAndProdUseFullRPCBoundary(t *testing.T) {
 	if progressDatabaseURL := envString(prodProgress.Environment, "PROGRESS_DATABASE_URL"); !strings.Contains(progressDatabaseURL, "watch_together_progress_prod") {
 		t.Fatalf("prod progressservice PROGRESS_DATABASE_URL = %q, want prod progress database", progressDatabaseURL)
 	}
+	if databaseURL := envString(prodProgress.Environment, "DATABASE_URL"); databaseURL != "" {
+		t.Fatalf("prod progressservice must not receive main DATABASE_URL, got %q", databaseURL)
+	}
 	if !dependsOnService(prodHome.DependsOn, "identityservice") {
 		t.Fatalf("prod homecompositionservice must depend on identityservice")
 	}
@@ -512,11 +556,23 @@ func TestComposeAppAndProdUseFullRPCBoundary(t *testing.T) {
 	if !dependsOnService(prodHome.DependsOn, "mediaservice") {
 		t.Fatalf("prod homecompositionservice must depend on mediaservice")
 	}
+	if databaseURL := envString(prodHome.Environment, "DATABASE_URL"); databaseURL != "" {
+		t.Fatalf("prod homecompositionservice must not receive main DATABASE_URL, got %q", databaseURL)
+	}
 	if !dependsOnService(prodTimeline.DependsOn, "timeline-postgres-init") {
 		t.Fatalf("prod timelineservice must depend on timeline-postgres-init")
 	}
 	if timelineDatabaseURL := envString(prodTimeline.Environment, "TIMELINE_DATABASE_URL"); !strings.Contains(timelineDatabaseURL, "watch_together_timeline_prod") {
 		t.Fatalf("prod timelineservice TIMELINE_DATABASE_URL = %q, want prod timeline database", timelineDatabaseURL)
+	}
+	if databaseURL := envString(prodTimeline.Environment, "DATABASE_URL"); databaseURL != "" {
+		t.Fatalf("prod timelineservice must not receive main DATABASE_URL, got %q", databaseURL)
+	}
+	if timelineDatabaseURL := envString(prodOutbox.Environment, "TIMELINE_DATABASE_URL"); !strings.Contains(timelineDatabaseURL, "watch_together_timeline_prod") {
+		t.Fatalf("prod outboxworker TIMELINE_DATABASE_URL = %q, want prod timeline database", timelineDatabaseURL)
+	}
+	if databaseURL := envString(prodOutbox.Environment, "DATABASE_URL"); databaseURL != "" {
+		t.Fatalf("prod outboxworker must not receive main DATABASE_URL, got %q", databaseURL)
 	}
 	if len(prodIdentity.Profiles) != 0 {
 		t.Fatalf("prod identityservice should be a default service, got profiles %v", prodIdentity.Profiles)
@@ -679,6 +735,27 @@ func TestMigrationCreatedTablesDeclareOwners(t *testing.T) {
 		for _, table := range createdTables(string(contentBytes)) {
 			if _, ok := registry.Tables[table]; !ok {
 				t.Fatalf("migration %s creates table %s without ownership registry entry", filepath.Base(file), table)
+			}
+		}
+	}
+}
+
+func TestMainMigrationsDoNotReferenceOwnerTables(t *testing.T) {
+	registry := loadOwnershipRegistry(t)
+	files, err := filepath.Glob("../../migrations/*.sql")
+	if err != nil {
+		t.Fatalf("glob migrations: %v", err)
+	}
+	for _, file := range files {
+		contentBytes, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatalf("read migration %s: %v", file, err)
+		}
+		content := string(contentBytes)
+		for table := range registry.Tables {
+			pattern := regexp.MustCompile(`(?i)(^|[^a-z0-9_])` + regexp.QuoteMeta(table) + `([^a-z0-9_]|$)`)
+			if pattern.MatchString(content) {
+				t.Fatalf("main migration %s references owner table %s; owner schemas must live only in owner migration directories", filepath.Base(file), table)
 			}
 		}
 	}

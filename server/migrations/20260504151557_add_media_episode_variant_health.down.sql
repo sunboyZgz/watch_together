@@ -1,4 +1,2 @@
--- Write rollback migration here.
-ALTER TABLE media_episode_variants
-    DROP COLUMN IF EXISTS average_segment_ms,
-    DROP COLUMN IF EXISTS segment_count;
+-- Phase 27: main database migration intentionally has no business schema.
+-- Owner schemas are managed by their dedicated migration directories.

@@ -180,10 +180,6 @@ func TestLoadServerRuntimeConfigDistributedAuthorityRequiresDependencies(t *test
 			content: "ROOM_RUNTIME_MODE=distributed_authority\nSERVER_INSTANCE_ID=roomserver-a\nDATABASE_URL=postgres://db\nREDIS_ADDR=redis:6380\nNATS_URL=nats://nats:4222\nKAFKA_BROKERS=kafka:9092\n",
 		},
 		{
-			name:    "missing database",
-			content: "ROOM_RUNTIME_MODE=distributed_authority\nSERVER_INSTANCE_ID=roomserver-a\nWS_CROSS_INSTANCE_BROADCAST_ENABLED=true\nREDIS_ADDR=redis:6380\nNATS_URL=nats://nats:4222\nKAFKA_BROKERS=kafka:9092\n",
-		},
-		{
 			name:    "missing redis",
 			content: "ROOM_RUNTIME_MODE=distributed_authority\nSERVER_INSTANCE_ID=roomserver-a\nWS_CROSS_INSTANCE_BROADCAST_ENABLED=true\nDATABASE_URL=postgres://db\nNATS_URL=nats://nats:4222\nKAFKA_BROKERS=kafka:9092\n",
 		},
@@ -201,6 +197,19 @@ func TestLoadServerRuntimeConfigDistributedAuthorityRequiresDependencies(t *test
 				t.Fatalf("expected distributed_authority dependency validation to fail")
 			}
 		})
+	}
+}
+
+func TestLoadServerRuntimeConfigDistributedAuthorityDoesNotRequireMainDatabase(t *testing.T) {
+	configDir := t.TempDir()
+	mustWriteConfigFile(
+		t,
+		filepath.Join(configDir, ".env"),
+		"ROOM_RUNTIME_MODE=distributed_authority\nSERVER_INSTANCE_ID=roomserver-a\nWS_CROSS_INSTANCE_BROADCAST_ENABLED=true\nREDIS_ADDR=redis:6380\nNATS_URL=nats://nats:4222\nKAFKA_BROKERS=kafka:9092\n",
+	)
+
+	if _, err := LoadServerRuntimeConfig(configDir); err != nil {
+		t.Fatalf("distributed authority should not require DATABASE_URL when services use RPC/owner DBs: %v", err)
 	}
 }
 

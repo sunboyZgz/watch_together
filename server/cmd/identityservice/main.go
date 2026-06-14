@@ -30,7 +30,7 @@ func main() {
 	}
 	databaseURL := identityDatabaseURL(runtimeConfig)
 	if strings.TrimSpace(databaseURL) == "" {
-		fmt.Fprintln(os.Stderr, "IDENTITY_DATABASE_URL or DATABASE_URL is required for identityservice")
+		fmt.Fprintln(os.Stderr, "IDENTITY_DATABASE_URL is required for identityservice")
 		os.Exit(1)
 	}
 	if strings.EqualFold(strings.TrimSpace(runtimeConfig.AppEnv), "prod") &&
@@ -180,8 +180,5 @@ func serviceName(configured string, fallback string) string {
 }
 
 func identityDatabaseURL(config wtconfig.ServerRuntimeConfig) string {
-	if strings.TrimSpace(config.IdentityDatabaseURL) != "" {
-		return strings.TrimSpace(config.IdentityDatabaseURL)
-	}
-	return strings.TrimSpace(config.DatabaseURL)
+	return strings.TrimSpace(config.IdentityDatabaseURL)
 }

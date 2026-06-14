@@ -21,7 +21,6 @@ import (
 	"watch_together/server/internal/observability"
 	"watch_together/server/internal/progress"
 	"watch_together/server/internal/servicekit"
-	"watch_together/server/internal/store"
 	"watch_together/server/internal/telemetry"
 )
 
@@ -103,41 +102,14 @@ func newIdentityBoundary(config wtconfig.ServerRuntimeConfig, service servicekit
 	if strings.EqualFold(strings.TrimSpace(config.ServiceClients.IdentityMode), "rpc") {
 		return auth.NewRPCClient(config.ServiceClients.IdentityAddr, internalRPCClientConfig(config, service))
 	}
-	databaseURL := strings.TrimSpace(config.IdentityDatabaseURL)
-	if databaseURL == "" {
-		databaseURL = strings.TrimSpace(config.DatabaseURL)
-	}
-	if databaseURL == "" {
-		return nil
-	}
-	db, err := store.OpenPostgres(context.Background(), databaseURL)
-	if err != nil {
-		log.Printf("failed to connect identity postgres for homecompositionservice: %v", err)
-		return nil
-	}
-	return auth.NewServiceWithTokenManager(store.NewPostgresUserStore(db), auth.NewTokenManager(auth.TokenConfig{
-		JWTSecret:      config.Auth.JWTSecret,
-		AccessTokenTTL: time.Duration(config.Auth.AccessTokenTTLHours) * time.Hour,
-	}))
+	return nil
 }
 
 func newProgressBoundary(config wtconfig.ServerRuntimeConfig, service servicekit.Config) progress.BusinessService {
 	if strings.EqualFold(strings.TrimSpace(config.ServiceClients.ProgressMode), "rpc") {
 		return progress.NewRPCClient(config.ServiceClients.ProgressAddr, internalRPCClientConfig(config, service))
 	}
-	databaseURL := strings.TrimSpace(config.ProgressDatabaseURL)
-	if databaseURL == "" {
-		databaseURL = strings.TrimSpace(config.DatabaseURL)
-	}
-	if databaseURL == "" {
-		return nil
-	}
-	db, err := store.OpenPostgres(context.Background(), databaseURL)
-	if err != nil {
-		log.Printf("failed to connect progress postgres for homecompositionservice: %v", err)
-		return nil
-	}
-	return progress.NewService(store.NewPostgresProgressStore(db))
+	return nil
 }
 
 func newMediaBoundary(config wtconfig.ServerRuntimeConfig, service servicekit.Config) *media.Service {
@@ -148,19 +120,7 @@ func newMediaBoundary(config wtconfig.ServerRuntimeConfig, service servicekit.Co
 		}
 		return media.NewService(rpcStore)
 	}
-	databaseURL := strings.TrimSpace(config.MediaDatabaseURL)
-	if databaseURL == "" {
-		databaseURL = strings.TrimSpace(config.DatabaseURL)
-	}
-	if databaseURL == "" {
-		return nil
-	}
-	db, err := store.OpenPostgres(context.Background(), databaseURL)
-	if err != nil {
-		log.Printf("failed to connect media postgres for homecompositionservice: %v", err)
-		return nil
-	}
-	return media.NewService(store.NewPostgresMediaStore(db))
+	return nil
 }
 
 func installServiceEndpoints(
