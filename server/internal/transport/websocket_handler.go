@@ -6,6 +6,8 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/coder/websocket"
@@ -57,6 +59,9 @@ type WebSocketHandler struct {
 	metrics             *observability.Metrics
 	instanceID          string
 	roomRuntimeMode     string
+	drainState          *WebSocketDrainState
+	activeClientsMu     sync.Mutex
+	activeClients       map[*room.ClientConnection]struct{}
 }
 
 const (
@@ -69,7 +74,9 @@ const (
 	defaultControlIdempotencyTTL     = 10 * time.Minute
 	defaultPresenceLeaseTTL          = 45 * time.Second
 	defaultPresenceRefreshInterval   = 15 * time.Second
+	defaultDrainGrace                = 8 * time.Second
 	defaultSeekMinInterval           = 250 * time.Millisecond
+	WebSocketDrainReason             = "server draining"
 	roomRuntimeModeLocalProcess      = "local_process"
 	roomRuntimeModeDistributed       = "distributed_authority"
 )
@@ -86,8 +93,28 @@ type WebSocketRuntimeConfig struct {
 	ControlIdempotencyTTL     time.Duration
 	PresenceLeaseTTL          time.Duration
 	PresenceRefreshInterval   time.Duration
+	DrainGrace                time.Duration
 	CrossInstanceBroadcast    bool
 	EventBus                  string
+}
+
+type WebSocketDrainState struct {
+	draining atomic.Bool
+}
+
+func NewWebSocketDrainState() *WebSocketDrainState {
+	return &WebSocketDrainState{}
+}
+
+func (s *WebSocketDrainState) Begin() {
+	if s == nil {
+		return
+	}
+	s.draining.Store(true)
+}
+
+func (s *WebSocketDrainState) IsDraining() bool {
+	return s != nil && s.draining.Load()
 }
 
 type latestRoomStateWriter interface {
@@ -286,6 +313,64 @@ func (h *WebSocketHandler) SetMetrics(metrics *observability.Metrics) {
 	h.metrics = metrics
 }
 
+func (h *WebSocketHandler) SetDrainState(state *WebSocketDrainState) {
+	if h == nil {
+		return
+	}
+	h.drainState = state
+}
+
+func (h *WebSocketHandler) BeginDrain() {
+	if h == nil {
+		return
+	}
+	if h.drainState == nil {
+		h.drainState = NewWebSocketDrainState()
+	}
+	h.drainState.Begin()
+	if h.metrics != nil {
+		h.metrics.SetRoomserverDraining(true)
+	}
+}
+
+func (h *WebSocketHandler) Drain(ctx context.Context) error {
+	if h == nil {
+		return nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	h.BeginDrain()
+	for _, client := range h.snapshotActiveClients() {
+		h.recordWebSocketDrainClose()
+		_ = client.Close(websocket.StatusServiceRestart, WebSocketDrainReason)
+	}
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		if h.ActiveConnectionCount() == 0 {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			for _, client := range h.snapshotActiveClients() {
+				_ = client.CloseNow()
+			}
+			return ctx.Err()
+		case <-ticker.C:
+		}
+	}
+}
+
+func (h *WebSocketHandler) ActiveConnectionCount() int {
+	if h == nil {
+		return 0
+	}
+	h.activeClientsMu.Lock()
+	defer h.activeClientsMu.Unlock()
+	return len(h.activeClients)
+}
+
 func (h *WebSocketHandler) SubscribeRoomBroadcasts(ctx context.Context) error {
 	if h == nil || h.roomBroadcastBus == nil {
 		return nil
@@ -365,6 +450,7 @@ func newWebSocketHandlerWithClock(
 		presenceRefresh:     config.PresenceRefreshInterval,
 		timelineRecorder:    timeline.NoopRecorder{},
 		roomRuntimeMode:     roomRuntimeModeLocalProcess,
+		activeClients:       make(map[*room.ClientConnection]struct{}),
 	}
 }
 
@@ -396,6 +482,9 @@ func normalizeWebSocketRuntimeConfig(config WebSocketRuntimeConfig) WebSocketRun
 	if config.PresenceRefreshInterval <= 0 {
 		config.PresenceRefreshInterval = defaultPresenceRefreshInterval
 	}
+	if config.DrainGrace <= 0 {
+		config.DrainGrace = defaultDrainGrace
+	}
 	return config
 }
 
@@ -411,6 +500,10 @@ func broadcastConfigFromWebSocketConfig(config WebSocketRuntimeConfig) broadcast
 // ServeHTTP upgrades the request to WebSocket and keeps reading protocol messages
 // until the client disconnects or a read error occurs.
 func (h *WebSocketHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if h.isDraining() {
+		http.Error(w, WebSocketDrainReason, http.StatusServiceUnavailable)
+		return
+	}
 	authUserID, ok := h.authenticateRequest(r)
 	if !ok {
 		http.Error(w, "missing or invalid access token", http.StatusUnauthorized)
@@ -434,6 +527,12 @@ func (h *WebSocketHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	client := room.NewClientConnectionWithOptions(conn, h.clientOptions)
 	client.SetIdentity(authUserID, "")
+	if !h.registerActiveClient(client) {
+		h.recordWebSocketDrainClose()
+		_ = client.Close(websocket.StatusServiceRestart, WebSocketDrainReason)
+		return
+	}
+	defer h.unregisterActiveClient(client)
 	h.recordWebSocketConnection(1)
 	ctx, cancel := context.WithCancel(context.Background())
 	writerDone := make(chan struct{})
@@ -746,11 +845,15 @@ func (h *WebSocketHandler) handleJoinRoom(
 		}
 	}
 
+	reconnectJoin := h.hasSameDeviceLease(ctx, payload.RoomID, authUserID, payload.DeviceID)
 	// We persist identity on the connection first so disconnect cleanup can find the room later.
 	client.SetIdentity(authUserID, payload.RoomID)
 	client.SetDeviceID(payload.DeviceID)
 	if err := h.acquireActiveDevice(ctx, payload.RoomID, authUserID, payload.DeviceID, client); err != nil {
 		client.SetIdentity("", "")
+		if reconnectJoin {
+			h.recordReconnectJoinMetric("failure")
+		}
 		return err
 	}
 	if !h.isDistributedAuthorityMode() {
@@ -790,6 +893,9 @@ func (h *WebSocketHandler) handleJoinRoom(
 	if joinResult.Err != nil {
 		h.releaseActiveDeviceForClient(ctx, client)
 		client.SetIdentity("", "")
+		if reconnectJoin {
+			h.recordReconnectJoinMetric("failure")
+		}
 		if errors.Is(joinResult.Err, room.ErrRoomFull) {
 			return protocolMessageError{
 				roomID:  payload.RoomID,
@@ -805,6 +911,9 @@ func (h *WebSocketHandler) handleJoinRoom(
 	}
 
 	if err := h.writeRoomState(ctx, client, joinResult.State); err != nil {
+		if reconnectJoin {
+			h.recordReconnectJoinMetric("failure")
+		}
 		return err
 	}
 	h.cacheRoomState(joinResult.State)
@@ -812,7 +921,13 @@ func (h *WebSocketHandler) handleJoinRoom(
 		h.releaseActiveDeviceForClient(ctx, client)
 		_ = h.roomManager.RemoveClient(client)
 		client.SetIdentity("", "")
+		if reconnectJoin {
+			h.recordReconnectJoinMetric("failure")
+		}
 		return err
+	}
+	if reconnectJoin || joinResult.ReplacedClient != nil || joinResult.HostReclaimed {
+		h.recordReconnectJoinMetric("success")
 	}
 	h.broadcastRoomPresenceForRoom(ctx, payload.RoomID, "join", true)
 	if joinResult.HostReclaimed {
@@ -890,6 +1005,14 @@ func (h *WebSocketHandler) acquireActiveDevice(
 		)
 	}
 	return nil
+}
+
+func (h *WebSocketHandler) hasSameDeviceLease(ctx context.Context, roomID string, userID string, deviceID string) bool {
+	if h == nil || h.activeDevices == nil || roomID == "" || userID == "" || deviceID == "" {
+		return false
+	}
+	lease, ok, err := h.activeDevices.Get(ctx, roomID, userID)
+	return err == nil && ok && lease.DeviceID == deviceID
 }
 
 func (h *WebSocketHandler) releaseActiveDeviceForClient(ctx context.Context, client *room.ClientConnection) {
@@ -2824,6 +2947,60 @@ func (h *WebSocketHandler) recordPresenceOnline(count int) {
 	if h.metrics != nil {
 		h.metrics.SetPresenceOnline(count)
 	}
+}
+
+func (h *WebSocketHandler) recordWebSocketDrainClose() {
+	if h.metrics != nil {
+		h.metrics.RecordWebSocketDrainClose()
+	}
+}
+
+func (h *WebSocketHandler) recordReconnectJoinMetric(result string) {
+	if h.metrics != nil {
+		h.metrics.RecordWebSocketReconnectJoin(result)
+	}
+}
+
+func (h *WebSocketHandler) isDraining() bool {
+	return h != nil && h.drainState != nil && h.drainState.IsDraining()
+}
+
+func (h *WebSocketHandler) registerActiveClient(client *room.ClientConnection) bool {
+	if h == nil || client == nil {
+		return false
+	}
+	h.activeClientsMu.Lock()
+	defer h.activeClientsMu.Unlock()
+	if h.isDraining() {
+		return false
+	}
+	if h.activeClients == nil {
+		h.activeClients = make(map[*room.ClientConnection]struct{})
+	}
+	h.activeClients[client] = struct{}{}
+	return true
+}
+
+func (h *WebSocketHandler) unregisterActiveClient(client *room.ClientConnection) {
+	if h == nil || client == nil {
+		return
+	}
+	h.activeClientsMu.Lock()
+	defer h.activeClientsMu.Unlock()
+	delete(h.activeClients, client)
+}
+
+func (h *WebSocketHandler) snapshotActiveClients() []*room.ClientConnection {
+	if h == nil {
+		return nil
+	}
+	h.activeClientsMu.Lock()
+	defer h.activeClientsMu.Unlock()
+	clients := make([]*room.ClientConnection, 0, len(h.activeClients))
+	for client := range h.activeClients {
+		clients = append(clients, client)
+	}
+	return clients
 }
 
 func clientsWithout(clients []*room.ClientConnection, excluded *room.ClientConnection) []*room.ClientConnection {

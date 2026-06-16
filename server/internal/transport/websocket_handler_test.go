@@ -3,6 +3,7 @@ package transport
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -1651,6 +1652,184 @@ func TestWebSocketHostReconnectRestoresHostControl(t *testing.T) {
 	if state.HostUserID != "user_a" {
 		t.Fatalf("expected original host to remain host, got %s", state.HostUserID)
 	}
+}
+
+func TestWebSocketHandlerRejectsNewConnectionsWhileDraining(t *testing.T) {
+	roomManager := room.NewManager()
+	handler := NewWebSocketHandler(roomManager, true)
+	handler.BeginDrain()
+	mux := http.NewServeMux()
+	mux.Handle("/ws", handler)
+
+	httpServer := httptest.NewServer(mux)
+	defer httpServer.Close()
+
+	wsURL := "ws" + httpServer.URL[len("http"):] + "/ws"
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	conn, response, err := websocket.Dial(ctx, wsURL, websocketDialOptions("user_a"))
+	if err == nil {
+		_ = conn.Close(websocket.StatusNormalClosure, "test done")
+		t.Fatalf("expected draining websocket dial to fail")
+	}
+	if response == nil || response.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("expected draining dial HTTP %d, got response=%v err=%v", http.StatusServiceUnavailable, response, err)
+	}
+}
+
+func TestWebSocketHandlerDrainClosesExistingConnectionsAndRunsCleanup(t *testing.T) {
+	roomManager := room.NewManager()
+	createdRoom, err := roomManager.CreateRoom("user_a", "sample_001")
+	if err != nil {
+		t.Fatalf("create room: %v", err)
+	}
+	handler := NewWebSocketHandler(roomManager, true)
+	mux := http.NewServeMux()
+	mux.Handle("/ws", handler)
+
+	httpServer := httptest.NewServer(mux)
+	defer httpServer.Close()
+
+	wsURL := "ws" + httpServer.URL[len("http"):] + "/ws"
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	conn := mustDialWebSocket(t, ctx, wsURL)
+	mustJoinRoom(t, ctx, conn, createdRoom.ID(), "user_a")
+	state := mustReadEnvelope(t, ctx, conn)
+	if state.Type != protocol.TypeRoomState {
+		t.Fatalf("expected room_state before drain, got %s", state.Type)
+	}
+	if got := roomManager.ClientCount(createdRoom.ID()); got != 1 {
+		t.Fatalf("expected one client before drain, got %d", got)
+	}
+
+	drainErr := make(chan error, 1)
+	go func() {
+		drainCtx, drainCancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer drainCancel()
+		drainErr <- handler.Drain(drainCtx)
+	}()
+
+	_, _, readErr := conn.Read(ctx)
+	var closeErr websocket.CloseError
+	if !errors.As(readErr, &closeErr) {
+		t.Fatalf("expected websocket close error during drain, got %v", readErr)
+	}
+	if closeErr.Code != websocket.StatusServiceRestart || closeErr.Reason != WebSocketDrainReason {
+		t.Fatalf("expected drain close %d/%q, got %d/%q", websocket.StatusServiceRestart, WebSocketDrainReason, closeErr.Code, closeErr.Reason)
+	}
+
+	select {
+	case err := <-drainErr:
+		if err != nil {
+			t.Fatalf("drain returned error: %v", err)
+		}
+	case <-ctx.Done():
+		t.Fatalf("timed out waiting for drain to finish")
+	}
+	if got := roomManager.ClientCount(createdRoom.ID()); got != 0 {
+		t.Fatalf("expected drain cleanup to remove client, got %d", got)
+	}
+}
+
+func TestWebSocketReconnectToAnotherHandlerLazyBootstrapsAfterDrain(t *testing.T) {
+	firstManager := room.NewManager()
+	createdRoom, err := firstManager.CreateRoom("user_a", "sample_001")
+	if err != nil {
+		t.Fatalf("create room: %v", err)
+	}
+	firstHandler := NewWebSocketHandler(firstManager, true)
+	firstMux := http.NewServeMux()
+	firstMux.Handle("/ws", firstHandler)
+	firstServer := httptest.NewServer(firstMux)
+	defer firstServer.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	firstURL := "ws" + firstServer.URL[len("http"):] + "/ws"
+	firstConn := mustDialWebSocket(t, ctx, firstURL)
+	mustJoinRoom(t, ctx, firstConn, createdRoom.ID(), "user_a")
+	if envelope := mustReadEnvelope(t, ctx, firstConn); envelope.Type != protocol.TypeRoomState {
+		t.Fatalf("expected first room_state, got %s", envelope.Type)
+	}
+
+	drainErr := make(chan error, 1)
+	go func() {
+		drainCtx, drainCancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer drainCancel()
+		drainErr <- firstHandler.Drain(drainCtx)
+	}()
+	_, _, readErr := firstConn.Read(ctx)
+	var closeErr websocket.CloseError
+	if !errors.As(readErr, &closeErr) || closeErr.Code != websocket.StatusServiceRestart {
+		t.Fatalf("expected first connection to drain with service restart, got %v", readErr)
+	}
+	if err := <-drainErr; err != nil {
+		t.Fatalf("first handler drain: %v", err)
+	}
+
+	secondManager := room.NewManager()
+	membership := &fakeRoomMembershipStore{
+		active: map[string]bool{
+			roomMembershipKey(createdRoom.ID(), "user_a"): true,
+		},
+	}
+	secondHandler := NewWebSocketHandlerWithConfigAndRoomStateWriterAndTokenVerifierAndRoomLeaver(
+		secondManager,
+		true,
+		WebSocketRuntimeConfig{},
+		nil,
+		nil,
+		membership,
+	)
+	secondHandler.SetRoomRuntimeBootstrapper(
+		fakeRoomBootstrapper{
+			result: roomapi.RuntimeBootstrapResult{
+				Room: roomapi.Room{
+					ID:          "room_uuid",
+					RoomCode:    createdRoom.ID(),
+					HostUserID:  "user_a",
+					MediaItemID: "sample_001",
+					Status:      "active",
+				},
+				Media: roomapi.Media{ID: "sample_001", Title: "Sample"},
+			},
+		},
+		fakeTimelineRecoveryReader{},
+	)
+	secondMux := http.NewServeMux()
+	secondMux.Handle("/ws", secondHandler)
+	secondServer := httptest.NewServer(secondMux)
+	defer secondServer.Close()
+
+	secondURL := "ws" + secondServer.URL[len("http"):] + "/ws"
+	secondConn := mustDialWebSocket(t, ctx, secondURL)
+	defer secondConn.Close(websocket.StatusNormalClosure, "test done")
+	mustJoinRoom(t, ctx, secondConn, createdRoom.ID(), "user_a")
+	recoveredEnvelope := mustReadEnvelope(t, ctx, secondConn)
+	if recoveredEnvelope.Type != protocol.TypeRoomState {
+		t.Fatalf("expected recovered room_state, got %s", recoveredEnvelope.Type)
+	}
+	var recovered protocol.RoomStatePayload
+	if err := json.Unmarshal(recoveredEnvelope.Payload, &recovered); err != nil {
+		t.Fatalf("unmarshal recovered room_state: %v", err)
+	}
+	if recovered.RoomID != createdRoom.ID() || recovered.HostUserID != "user_a" {
+		t.Fatalf("unexpected recovered state: %+v", recovered)
+	}
+
+	mustSendEnvelope(t, ctx, secondConn, protocol.Envelope{
+		Type: protocol.TypePlay,
+		Payload: mustJSONRaw(protocol.PlayPayload{
+			RoomID:     createdRoom.ID(),
+			UserID:     "user_a",
+			PositionMs: 1_000,
+			Seq:        recovered.Seq,
+		}),
+	})
+	assertControlBroadcast(t, ctx, secondConn, protocol.TypePlay, -1, recovered.Seq+1)
 }
 
 func mustDialWebSocket(t *testing.T, ctx context.Context, wsURL string, userIDs ...string) *websocket.Conn {

@@ -94,6 +94,9 @@ type Metrics struct {
 	registry *prometheus.Registry
 
 	webSocketConnections prometheus.Gauge
+	roomserverDraining   prometheus.Gauge
+	webSocketDrainCloses prometheus.Counter
+	webSocketReconnects  *prometheus.CounterVec
 	controlResults       *prometheus.CounterVec
 	seekRateDecisions    *prometheus.CounterVec
 	natsEvents           *prometheus.CounterVec
@@ -114,6 +117,21 @@ func NewMetrics() *Metrics {
 			Name:      "websocket_connections_current",
 			Help:      "Current roomserver WebSocket connections.",
 		}),
+		roomserverDraining: prometheus.NewGauge(prometheus.GaugeOpts{
+			Namespace: "watch_together",
+			Name:      "roomserver_draining",
+			Help:      "Whether this roomserver is draining WebSocket sessions before shutdown.",
+		}),
+		webSocketDrainCloses: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: "watch_together",
+			Name:      "websocket_drain_closes_total",
+			Help:      "WebSocket connections closed because the roomserver entered drain.",
+		}),
+		webSocketReconnects: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: "watch_together",
+			Name:      "websocket_reconnect_joins_total",
+			Help:      "Same-device reconnect join outcomes observed by roomserver.",
+		}, []string{"result"}),
 		controlResults: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Namespace: "watch_together",
 			Name:      "websocket_control_events_total",
@@ -163,6 +181,9 @@ func NewMetrics() *Metrics {
 	}
 	registry.MustRegister(
 		metrics.webSocketConnections,
+		metrics.roomserverDraining,
+		metrics.webSocketDrainCloses,
+		metrics.webSocketReconnects,
 		metrics.controlResults,
 		metrics.seekRateDecisions,
 		metrics.natsEvents,
@@ -188,6 +209,31 @@ func (m *Metrics) AddWebSocketConnection(delta float64) {
 		return
 	}
 	m.webSocketConnections.Add(delta)
+}
+
+func (m *Metrics) SetRoomserverDraining(draining bool) {
+	if m == nil {
+		return
+	}
+	if draining {
+		m.roomserverDraining.Set(1)
+		return
+	}
+	m.roomserverDraining.Set(0)
+}
+
+func (m *Metrics) RecordWebSocketDrainClose() {
+	if m == nil {
+		return
+	}
+	m.webSocketDrainCloses.Inc()
+}
+
+func (m *Metrics) RecordWebSocketReconnectJoin(result string) {
+	if m == nil {
+		return
+	}
+	m.webSocketReconnects.WithLabelValues(labelValue(result)).Inc()
 }
 
 func (m *Metrics) RecordControlResult(controlType string, result string) {

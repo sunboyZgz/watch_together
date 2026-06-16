@@ -46,6 +46,16 @@ android {
             "MEDIA_DEFAULT_ID",
             "\"${configValue("MEDIA_DEFAULT_ID", "")}\""
         )
+        buildConfigField(
+            "long",
+            "WS_RECONNECT_INITIAL_DELAY_MS",
+            "${configValue("WS_RECONNECT_INITIAL_DELAY_MS", "500")}L"
+        )
+        buildConfigField(
+            "long",
+            "WS_RECONNECT_MAX_DELAY_MS",
+            "${configValue("WS_RECONNECT_MAX_DELAY_MS", "8000")}L"
+        )
     }
 
     flavorDimensions += "env"

@@ -11,6 +11,9 @@ import (
 func TestMetricsHandler(t *testing.T) {
 	metrics := NewMetrics()
 	metrics.AddWebSocketConnection(1)
+	metrics.SetRoomserverDraining(true)
+	metrics.RecordWebSocketDrainClose()
+	metrics.RecordWebSocketReconnectJoin("success")
 	metrics.RecordControlResult("seek", "accepted")
 	metrics.RecordSeekRateLimit("limited")
 	metrics.RecordNATSEvent("broadcast_publish", "ok")
@@ -29,6 +32,9 @@ func TestMetricsHandler(t *testing.T) {
 	body := recorder.Body.String()
 	for _, expected := range []string{
 		"watch_together_websocket_connections_current",
+		"watch_together_roomserver_draining",
+		"watch_together_websocket_drain_closes_total",
+		"watch_together_websocket_reconnect_joins_total",
 		"watch_together_websocket_control_events_total",
 		"watch_together_seek_rate_limit_decisions_total",
 		"watch_together_nats_room_events_total",

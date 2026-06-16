@@ -78,6 +78,63 @@ func TestGinRouterReadyz(t *testing.T) {
 	}
 }
 
+func TestGinRouterReadyzReportsDrainingWhileHealthzStaysLive(t *testing.T) {
+	roomManager := room.NewManager()
+	drainState := transport.NewWebSocketDrainState()
+	router, _ := newGinRouter(
+		context.Background(),
+		roomManager,
+		false,
+		WebSocketRuntimeConfig{},
+		drainState,
+		nil,
+		nil,
+		transport.NewRoomHTTPHandler(roomManager, nil),
+		transport.NewAuthHTTPHandler(nil),
+		transport.NewHomeHTTPHandler(nil),
+		transport.NewMediaHTTPHandler(nil),
+		transport.NewProgressHTTPHandler(nil),
+		EdgeModeSessionGateway,
+		runtimeBoundary{},
+		func(context.Context) observability.ReadinessSnapshot {
+			return testReadinessSnapshot("", "local_process")
+		},
+		observability.Config{MetricsEnabled: true}.Normalized(),
+		observability.NewMetrics(),
+		"",
+		eventbus.NewDisabledRoomBroadcastBus(),
+		eventbus.NewDisabledRoomControlBus(),
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+	)
+
+	drainState.Begin()
+
+	readyRecorder := httptest.NewRecorder()
+	router.ServeHTTP(readyRecorder, httptest.NewRequest(http.MethodGet, "/readyz", nil))
+	if readyRecorder.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected draining readyz status %d, got %d body=%s", http.StatusServiceUnavailable, readyRecorder.Code, readyRecorder.Body.String())
+	}
+	if !strings.Contains(readyRecorder.Body.String(), `"name":"roomserver_draining"`) ||
+		!strings.Contains(readyRecorder.Body.String(), `"status":"draining"`) {
+		t.Fatalf("expected draining dependency in readyz response, got %s", readyRecorder.Body.String())
+	}
+
+	healthRecorder := httptest.NewRecorder()
+	router.ServeHTTP(healthRecorder, httptest.NewRequest(http.MethodGet, "/healthz", nil))
+	if healthRecorder.Code != http.StatusOK {
+		t.Fatalf("expected healthz to stay live during drain, got %d", healthRecorder.Code)
+	}
+}
+
 func TestGinRouterMetricsEnabled(t *testing.T) {
 	router := newTestGinRouter()
 	recorder := httptest.NewRecorder()
@@ -94,11 +151,12 @@ func TestGinRouterMetricsEnabled(t *testing.T) {
 
 func TestGinRouterMetricsDisabled(t *testing.T) {
 	roomManager := room.NewManager()
-	router := newGinRouter(
+	router, _ := newGinRouter(
 		context.Background(),
 		roomManager,
 		false,
 		WebSocketRuntimeConfig{},
+		nil,
 		nil,
 		nil,
 		transport.NewRoomHTTPHandler(roomManager, nil),
@@ -609,11 +667,12 @@ func newTestGinRouterWithEdge(edgeMode string) http.Handler {
 
 func newTestGinRouterWithEdgeAndRuntime(edgeMode string, runtime runtimeBoundary) http.Handler {
 	roomManager := room.NewManager()
-	return newGinRouter(
+	router, _ := newGinRouter(
 		context.Background(),
 		roomManager,
 		false,
 		WebSocketRuntimeConfig{},
+		nil,
 		nil,
 		nil,
 		transport.NewRoomHTTPHandler(roomManager, nil),
@@ -642,6 +701,7 @@ func newTestGinRouterWithEdgeAndRuntime(edgeMode string, runtime runtimeBoundary
 		nil,
 		nil,
 	)
+	return router
 }
 
 func testReadinessSnapshot(instanceID string, runtimeMode string) observability.ReadinessSnapshot {

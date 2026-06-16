@@ -11,6 +11,8 @@ object AppConfig {
     val mediaDefaultId: String = BuildConfig.MEDIA_DEFAULT_ID
     val rewriteLoopbackMediaUrls: Boolean = BuildConfig.REWRITE_LOOPBACK_MEDIA_URLS
     val debugSync: Boolean = BuildConfig.DEBUG_SYNC
+    val wsReconnectInitialDelayMs: Long = BuildConfig.WS_RECONNECT_INITIAL_DELAY_MS
+    val wsReconnectMaxDelayMs: Long = BuildConfig.WS_RECONNECT_MAX_DELAY_MS
 
     fun authLoginUrl(): String = "${apiBaseUrl.trimEnd('/')}/auth/login"
 

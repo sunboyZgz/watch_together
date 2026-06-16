@@ -1,5 +1,6 @@
 package com.example.watch_together.sync
 
+import com.example.watch_together.config.AppConfig
 import com.example.watch_together.sync.protocol.JoinRoomPayload
 import com.example.watch_together.sync.protocol.LeaveRoomPayload
 import com.example.watch_together.sync.protocol.HeartbeatAckPayload
@@ -20,6 +21,9 @@ import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import org.json.JSONObject
+import java.util.concurrent.Executors
+import java.util.concurrent.ThreadLocalRandom
+import java.util.concurrent.TimeUnit
 
 interface RoomWebSocketListener {
     fun onLog(message: String)
@@ -47,16 +51,66 @@ enum class RoomWebSocketConnectionState {
     Failed
 }
 
+fun interface RoomWebSocketFactory {
+    fun newWebSocket(request: Request, listener: WebSocketListener): WebSocket
+}
+
+interface ReconnectTask {
+    fun cancel()
+}
+
+fun interface ReconnectScheduler {
+    fun schedule(delayMs: Long, task: () -> Unit): ReconnectTask
+}
+
+private class ExecutorReconnectScheduler : ReconnectScheduler {
+    private val executor = Executors.newSingleThreadScheduledExecutor { runnable ->
+        Thread(runnable, "room-ws-reconnect").apply { isDaemon = true }
+    }
+
+    override fun schedule(delayMs: Long, task: () -> Unit): ReconnectTask {
+        val future = executor.schedule(task, delayMs.coerceAtLeast(0L), TimeUnit.MILLISECONDS)
+        return object : ReconnectTask {
+            override fun cancel() {
+                future.cancel(false)
+            }
+        }
+    }
+}
+
 class RoomWebSocketClient(
     private val okHttpClient: OkHttpClient = OkHttpClient(),
-    private val decoder: SyncMessageDecoder = SyncMessageDecoder()
+    private val decoder: SyncMessageDecoder = SyncMessageDecoder(),
+    private val reconnectScheduler: ReconnectScheduler = ExecutorReconnectScheduler(),
+    private val reconnectInitialDelayMs: Long = AppConfig.wsReconnectInitialDelayMs,
+    private val reconnectMaxDelayMs: Long = AppConfig.wsReconnectMaxDelayMs,
+    private val reconnectJitterFraction: () -> Double = {
+        ThreadLocalRandom.current().nextDouble(0.0, 0.25)
+    },
+    private val webSocketFactory: RoomWebSocketFactory = RoomWebSocketFactory { request, listener ->
+        okHttpClient.newWebSocket(request, listener)
+    }
 ) {
+    private data class ActiveSession(
+        val wsUrl: String,
+        val roomId: String,
+        val userId: String,
+        val deviceId: String,
+        val accessToken: String,
+        val listener: RoomWebSocketListener
+    )
+
     private var webSocket: WebSocket? = null
     private var activeRoomId: String? = null
     private var activeUserId: String? = null
+    private var activeSession: ActiveSession? = null
     private var sessionGeneration: Long = 0L
     private var connectionState: RoomWebSocketConnectionState = RoomWebSocketConnectionState.Idle
     private var lastFailureMessage: String? = null
+    private var manualClose: Boolean = false
+    private var terminalBusinessError: Boolean = false
+    private var reconnectAttempt: Int = 0
+    private var pendingReconnect: ReconnectTask? = null
 
     // joinRoom opens the shared /ws endpoint, sends join_room, and forwards the
     // first protocol messages back to the UI layer.
@@ -70,66 +124,81 @@ class RoomWebSocketClient(
     ) {
         close()
         val generation = ++sessionGeneration
+        val session = ActiveSession(
+            wsUrl = wsUrl,
+            roomId = roomId,
+            userId = userId,
+            deviceId = deviceId,
+            accessToken = accessToken,
+            listener = listener
+        )
         activeRoomId = roomId
         activeUserId = userId
+        activeSession = session
+        manualClose = false
+        terminalBusinessError = false
+        reconnectAttempt = 0
+        pendingReconnect?.cancel()
+        pendingReconnect = null
         connectionState = RoomWebSocketConnectionState.Connecting
         lastFailureMessage = null
+        openWebSocket(session, generation)
+    }
 
+    private fun openWebSocket(session: ActiveSession, generation: Long) {
         val request = Request.Builder()
-            .url(wsUrl)
-            .header("Authorization", "Bearer $accessToken")
+            .url(session.wsUrl)
+            .header("Authorization", "Bearer ${session.accessToken}")
             .build()
 
-        webSocket = okHttpClient.newWebSocket(request, object : WebSocketListener() {
+        connectionState = RoomWebSocketConnectionState.Connecting
+        webSocket = webSocketFactory.newWebSocket(request, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
                 if (!isCurrentSession(generation, webSocket)) return
                 connectionState = RoomWebSocketConnectionState.Open
-                listener.onLog("WebSocket connected to $wsUrl")
+                session.listener.onLog("WebSocket connected to ${session.wsUrl}")
 
                 val joinPayload = JoinRoomPayload(
-                    roomId = roomId,
-                    userId = userId,
-                    deviceId = deviceId
+                    roomId = session.roomId,
+                    userId = session.userId,
+                    deviceId = session.deviceId
                 )
-                val envelope = joinPayload.toEnvelope()
-                val rawMessage = JSONObject()
-                    .put("type", envelope.type)
-                    .put(
-                        "payload",
-                        JSONObject()
-                            .put("roomId", joinPayload.roomId)
-                            .put("userId", joinPayload.userId)
-                            .put("deviceId", joinPayload.deviceId)
-                    )
-                    .toString()
-
-                webSocket.send(rawMessage)
-                listener.onLog("join_room sent for roomId=$roomId userId=$userId")
+                webSocket.send(joinPayloadToJson(joinPayload))
+                session.listener.onLog("join_room sent for roomId=${session.roomId} userId=${session.userId}")
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) {
                 if (!isCurrentSession(generation, webSocket)) return
                 try {
                     when (val message = decoder.decode(text)) {
-                        is SyncMessage.RoomState -> listener.onRoomState(message.payload.toRoomSyncState())
-                        is SyncMessage.RoomMembersChanged -> listener.onRoomMembersChanged(message.payload)
-                        is SyncMessage.RoomPresence -> listener.onRoomPresence(message.payload)
-                        is SyncMessage.RoomDeviceWaiting -> listener.onRoomDeviceWaiting(message.payload)
-                        is SyncMessage.RoomDeviceSwitchRequest -> listener.onRoomDeviceSwitchRequest(message.payload)
-                        is SyncMessage.RoomDeviceSwitchResult -> listener.onRoomDeviceSwitchResult(message.payload)
-                        is SyncMessage.Play -> listener.onPlay(message.payload)
-                        is SyncMessage.Pause -> listener.onPause(message.payload)
-                        is SyncMessage.Seek -> listener.onSeek(message.payload)
-                        is SyncMessage.SetPlaybackRate -> listener.onPlaybackRate(message.payload)
-                        is SyncMessage.Ended -> listener.onEnded(message.payload)
+                        is SyncMessage.RoomState -> {
+                            reconnectAttempt = 0
+                            session.listener.onRoomState(message.payload.toRoomSyncState())
+                        }
+                        is SyncMessage.RoomMembersChanged -> session.listener.onRoomMembersChanged(message.payload)
+                        is SyncMessage.RoomPresence -> session.listener.onRoomPresence(message.payload)
+                        is SyncMessage.RoomDeviceWaiting -> session.listener.onRoomDeviceWaiting(message.payload)
+                        is SyncMessage.RoomDeviceSwitchRequest -> session.listener.onRoomDeviceSwitchRequest(message.payload)
+                        is SyncMessage.RoomDeviceSwitchResult -> session.listener.onRoomDeviceSwitchResult(message.payload)
+                        is SyncMessage.Play -> session.listener.onPlay(message.payload)
+                        is SyncMessage.Pause -> session.listener.onPause(message.payload)
+                        is SyncMessage.Seek -> session.listener.onSeek(message.payload)
+                        is SyncMessage.SetPlaybackRate -> session.listener.onPlaybackRate(message.payload)
+                        is SyncMessage.Ended -> session.listener.onEnded(message.payload)
                         is SyncMessage.Heartbeat -> {
                             sendHeartbeatAck(webSocket, message.payload.serverTimeMs)
-                            listener.onHeartbeat(message.payload.serverTimeMs)
+                            session.listener.onHeartbeat(message.payload.serverTimeMs)
                         }
-                        is SyncMessage.Error -> listener.onError(message.payload.message)
+                        is SyncMessage.Error -> {
+                            val messageText = message.payload.message
+                            if (isTerminalBusinessError(messageText)) {
+                                terminalBusinessError = true
+                            }
+                            session.listener.onError(messageText)
+                        }
                     }
                 } catch (error: Throwable) {
-                    listener.onError(error.message ?: "Failed to handle WebSocket message")
+                    session.listener.onError(error.message ?: "Failed to handle WebSocket message")
                 }
             }
 
@@ -137,19 +206,26 @@ class RoomWebSocketClient(
                 if (!isCurrentSession(generation, webSocket)) return
                 connectionState = RoomWebSocketConnectionState.Failed
                 lastFailureMessage = t.message ?: "Unknown WebSocket failure"
-                listener.onError(lastFailureMessage.orEmpty())
+                this@RoomWebSocketClient.webSocket = null
+                if (response?.code == 401) {
+                    terminalBusinessError = true
+                }
+                session.listener.onError(lastFailureMessage.orEmpty())
+                scheduleReconnect(generation, "failure")
             }
 
             override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
                 if (!isCurrentSession(generation, webSocket)) return
                 connectionState = RoomWebSocketConnectionState.Closing
-                listener.onLog("WebSocket closing: $code / $reason")
+                session.listener.onLog("WebSocket closing: $code / $reason")
             }
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
                 if (!isCurrentSession(generation, webSocket)) return
                 connectionState = RoomWebSocketConnectionState.Closed
-                listener.onLog("WebSocket closed: $code / $reason")
+                this@RoomWebSocketClient.webSocket = null
+                session.listener.onLog("WebSocket closed: $code / $reason")
+                scheduleReconnect(generation, "closed $code")
             }
         })
     }
@@ -222,6 +298,9 @@ class RoomWebSocketClient(
     }
 
     fun close() {
+        manualClose = true
+        pendingReconnect?.cancel()
+        pendingReconnect = null
         sessionGeneration++
         val roomId = activeRoomId
         val userId = activeUserId
@@ -240,12 +319,15 @@ class RoomWebSocketClient(
         webSocket = null
         activeRoomId = null
         activeUserId = null
+        activeSession = null
+        terminalBusinessError = false
+        reconnectAttempt = 0
         connectionState = RoomWebSocketConnectionState.Closed
     }
 
     fun diagnostics(): String {
         return "state=$connectionState roomId=${activeRoomId ?: "none"} userId=${activeUserId ?: "none"} " +
-            "lastFailure=${lastFailureMessage ?: "none"}"
+            "lastFailure=${lastFailureMessage ?: "none"} reconnectAttempt=$reconnectAttempt"
     }
 
     private fun sendControl(envelope: Any): Boolean {
@@ -264,6 +346,60 @@ class RoomWebSocketClient(
             }
 
             else -> error("Unsupported envelope type: ${envelope::class.java.simpleName}")
+        }
+    }
+
+    private fun joinPayloadToJson(payload: JoinRoomPayload): String {
+        val envelope = payload.toEnvelope()
+        return JSONObject()
+            .put("type", envelope.type)
+            .put(
+                "payload",
+                JSONObject()
+                    .put("roomId", payload.roomId)
+                    .put("userId", payload.userId)
+                    .put("deviceId", payload.deviceId)
+            )
+            .toString()
+    }
+
+    private fun scheduleReconnect(generation: Long, reason: String) {
+        val session = activeSession ?: return
+        if (manualClose || terminalBusinessError || generation != sessionGeneration) {
+            return
+        }
+        pendingReconnect?.cancel()
+        reconnectAttempt += 1
+        val delayMs = reconnectDelayMs(reconnectAttempt)
+        session.listener.onLog("WebSocket reconnect scheduled in ${delayMs}ms after $reason")
+        pendingReconnect = reconnectScheduler.schedule(delayMs) {
+            if (manualClose || terminalBusinessError || generation != sessionGeneration) {
+                return@schedule
+            }
+            openWebSocket(session, generation)
+        }
+    }
+
+    private fun reconnectDelayMs(attempt: Int): Long {
+        val initial = reconnectInitialDelayMs.coerceAtLeast(1L)
+        val max = reconnectMaxDelayMs.coerceAtLeast(initial)
+        var base = initial
+        repeat((attempt - 1).coerceAtLeast(0).coerceAtMost(16)) {
+            base = (base * 2).coerceAtMost(max)
+        }
+        val jitter = (base * reconnectJitterFraction().coerceIn(0.0, 0.25)).toLong()
+        return (base + jitter).coerceAtMost(max)
+    }
+
+    private fun isTerminalBusinessError(message: String): Boolean {
+        return when (message.trim().lowercase()) {
+            "room identity mismatch",
+            "room membership required",
+            "room membership is invalid",
+            "room not found",
+            "missing deviceid",
+            "invalid deviceid" -> true
+            else -> false
         }
     }
 

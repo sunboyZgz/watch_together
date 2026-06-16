@@ -47,6 +47,7 @@ func ConfigFromRuntime(runtimeConfig wtconfig.ServerRuntimeConfig) Config {
 			ControlIdempotencyTTL:     time.Duration(runtimeConfig.WebSocket.ControlIdempotencyTTLms) * time.Millisecond,
 			PresenceLeaseTTL:          time.Duration(runtimeConfig.WebSocket.PresenceLeaseTTLms) * time.Millisecond,
 			PresenceRefreshInterval:   time.Duration(runtimeConfig.WebSocket.PresenceRefreshIntervalMs) * time.Millisecond,
+			DrainGrace:                time.Duration(runtimeConfig.WebSocket.DrainGraceMs) * time.Millisecond,
 			CrossInstanceBroadcast:    runtimeConfig.WebSocket.CrossInstanceBroadcast,
 			EventBus:                  runtimeConfig.WebSocket.EventBus,
 		},

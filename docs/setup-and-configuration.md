@@ -99,6 +99,7 @@ WS_SEEK_MIN_INTERVAL_MS=250
 CONTROL_IDEMPOTENCY_TTL_MS=600000
 PRESENCE_LEASE_TTL_MS=45000
 PRESENCE_REFRESH_INTERVAL_MS=15000
+WS_DRAIN_GRACE_MS=8000
 WS_CROSS_INSTANCE_BROADCAST_ENABLED=false
 WS_EVENT_BUS=nats_core
 NATS_URL=nats://127.0.0.1:4222
@@ -197,6 +198,10 @@ Distributed control hardening settings:
 
 Presence is runtime state only. It is stored in Redis, broadcast as user-level `room_presence` snapshots, and is not PostgreSQL membership or a Kafka timeline event.
 
+WebSocket drain setting:
+
+- `WS_DRAIN_GRACE_MS` controls how long `roomserver` waits for existing WebSocket sessions to close after entering drain. During drain, `/readyz` returns `not_ready`, `/healthz` remains live, new `/ws` upgrades are rejected with `server draining`, and existing sockets receive close code `1012` with reason `server draining`.
+
 Distributed seek rate limiting:
 
 - `WS_SEEK_MIN_INTERVAL_MS` still controls the minimum interval between accepted seek controls.
@@ -208,6 +213,7 @@ Observability settings:
 - `METRICS_ENABLED` controls whether `METRICS_PATH` is registered.
 - `METRICS_ADDR` is optional for worker processes. Leave it empty for `roomserver`, which exposes metrics on the main HTTP server; set it for workers such as `:9091`.
 - `METRICS_PATH` defaults to `/metrics` and exposes Prometheus metrics.
+- `roomserver` metrics include current WebSocket connections, drain state, drain close count, and same-device reconnect join count.
 - `READINESS_PATH` defaults to `/readyz` and reports dependency readiness as JSON.
 - `/healthz` remains lightweight liveness and keeps the runtime headers.
 
@@ -517,10 +523,14 @@ LOCAL_API_BASE_URL=http://10.0.2.2:8080
 LOCAL_WS_BASE_URL=ws://10.0.2.2:8080/ws
 LOCAL_MEDIA_BASE_URL=http://10.0.2.2:9000/media/tmp
 LOCAL_REWRITE_LOOPBACK_MEDIA_URLS=true
+WS_RECONNECT_INITIAL_DELAY_MS=500
+WS_RECONNECT_MAX_DELAY_MS=8000
 PROD_API_BASE_URL=https://example.com
 PROD_WS_BASE_URL=wss://example.com/ws
 PROD_REWRITE_LOOPBACK_MEDIA_URLS=false
 ```
+
+Android automatically reconnects WebSocket sessions after non-user-initiated disconnects. It reuses the current `roomId`, `userId`, stable `deviceId`, and access token, then sends the same `join_room` payload. `WS_RECONNECT_INITIAL_DELAY_MS` and `WS_RECONNECT_MAX_DELAY_MS` control the exponential backoff range; token failures and explicit business errors do not retry forever.
 
 Build examples:
 
@@ -551,6 +561,9 @@ Production deployment uses `server/compose.prod.yaml`. Its intended boundary is:
 - Production compose defaults identity, room, media, progress, home, timeline, and authority to RPC services.
 - `apigateway` runs by default and owns Android-facing REST/BFF routing.
 - `roomauthorityservice` runs by default and owns authority decisions through `authority.Engine`; `roomserver` remains the WebSocket/session gateway and keeps local WebSocket connection tables.
+- Rolling release uses WebSocket drain plus Android reconnect. It does not attempt transparent TCP/WebSocket connection migration between `roomserver` instances.
 - Authority compatibility mode is explicit: set `AUTHORITY_SERVICE_MODE=local`, `ROOM_RUNTIME_MODE=local_process`, `WS_CROSS_INSTANCE_BROADCAST_ENABLED=false`, and the required owner DB URLs for any local durable adapters. No Android HTTP/WebSocket payload changes are involved.
 
 See [server/deploy/README.md](../server/deploy/README.md) for deployment-specific commands and Nginx details.
+
+Phase 29 is the intended place to add kind manifests and verify Kubernetes rolling restart behavior locally. Phase 28 only adds the application-level drain/reconnect semantics that kind will exercise.

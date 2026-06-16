@@ -129,6 +129,9 @@ type Server struct {
 	eventBus          eventbus.RoomBroadcastBus
 	controlBus        eventbus.RoomControlBus
 	telemetryShutdown telemetry.ShutdownFunc
+	webSocketHandler  *transport.WebSocketHandler
+	drainState        *transport.WebSocketDrainState
+	metrics           *observability.Metrics
 }
 
 type accessTokenVerifier interface {
@@ -152,6 +155,9 @@ type runtimeBoundary struct {
 func NewServer(config Config) *Server {
 	config.EdgeMode = normalizeEdgeMode(config.EdgeMode)
 	config.RoomRuntimeMode = normalizeRoomRuntimeMode(config.RoomRuntimeMode)
+	if config.WebSocket.DrainGrace <= 0 {
+		config.WebSocket.DrainGrace = 8 * time.Second
+	}
 	distributedAuthority := config.RoomRuntimeMode == roomRuntimeModeDistributedAuthority
 	needsSession := config.EdgeMode == EdgeModeCombined || config.EdgeMode == EdgeModeSessionGateway
 	if distributedAuthority && len(config.Kafka.Brokers) == 0 {
@@ -167,6 +173,7 @@ func NewServer(config Config) *Server {
 		log.Printf("failed to start telemetry; tracing disabled: %v", err)
 	}
 	metrics := observability.NewMetrics()
+	drainState := transport.NewWebSocketDrainState()
 	if distributedAuthority {
 		config.Redis.Required = true
 	}
@@ -328,11 +335,12 @@ func NewServer(config Config) *Server {
 	homeHTTPHandler := transport.NewHomeHTTPHandlerWithTokenVerifier(homeService, identityService)
 	mediaHTTPHandler := transport.NewMediaHTTPHandlerWithTokenVerifier(mediaService, identityService, config.Media)
 	progressHTTPHandler := transport.NewProgressHTTPHandlerWithTokenVerifier(progressService, identityService)
-	router := newGinRouter(
+	router, webSocketHandler := newGinRouter(
 		serverCtx,
 		roomManager,
 		config.DebugSync,
 		config.WebSocket,
+		drainState,
 		roomStateCache,
 		identityService,
 		roomHTTPHandler,
@@ -382,6 +390,9 @@ func NewServer(config Config) *Server {
 		eventBus:          roomBroadcastBus,
 		controlBus:        roomControlBus,
 		telemetryShutdown: telemetryShutdown,
+		webSocketHandler:  webSocketHandler,
+		drainState:        drainState,
+		metrics:           metrics,
 	}
 }
 
@@ -634,6 +645,7 @@ func newGinRouter(
 	roomManager *room.Manager,
 	debugSync bool,
 	webSocketConfig transport.WebSocketRuntimeConfig,
+	drainState *transport.WebSocketDrainState,
 	roomStateCache *cache.RoomStateCache,
 	tokenVerifier accessTokenVerifier,
 	roomHTTPHandler *transport.RoomHTTPHandler,
@@ -659,7 +671,7 @@ func newGinRouter(
 	authorityRecovery *recovery.Service,
 	roomBootstrap roomapi.BusinessService,
 	timelineRecoveryReader timeline.RecoveryReader,
-) *gin.Engine {
+) (*gin.Engine, *transport.WebSocketHandler) {
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
 	router.Use(gin.Recovery())
@@ -671,6 +683,7 @@ func newGinRouter(
 		c.Next()
 	})
 
+	edgeMode = normalizeEdgeMode(edgeMode)
 	router.GET("/healthz", func(c *gin.Context) {
 		if runtime.InstanceID != "" {
 			c.Header("X-Watch-Together-Instance-ID", runtime.InstanceID)
@@ -683,6 +696,14 @@ func newGinRouter(
 		if readinessProvider != nil {
 			readiness = readinessProvider(c.Request.Context())
 		}
+		if drainState != nil && edgeMode != EdgeModeAPIGateway {
+			drainDependency := observability.DependencyStatus{Name: "roomserver_draining", Status: "ok", Required: true}
+			if drainState.IsDraining() {
+				drainDependency.Status = "draining"
+				readiness.Status = "not_ready"
+			}
+			readiness.Dependencies = append(readiness.Dependencies, drainDependency)
+		}
 		status := http.StatusOK
 		if readiness.Status != "ready" {
 			status = http.StatusServiceUnavailable
@@ -692,7 +713,6 @@ func newGinRouter(
 	if observabilityConfig.MetricsEnabled {
 		router.GET(observabilityConfig.MetricsPath, gin.WrapH(metrics.Handler()))
 	}
-	edgeMode = normalizeEdgeMode(edgeMode)
 	if edgeMode == EdgeModeCombined || edgeMode == EdgeModeAPIGateway {
 		router.Any("/auth/login", gin.WrapF(authHTTPHandler.Login))
 		router.Any("/auth/register", gin.WrapF(authHTTPHandler.Register))
@@ -706,7 +726,7 @@ func newGinRouter(
 		router.Any("/rooms/*roomPath", gin.WrapF(roomHTTPHandler.RoomRoute))
 	}
 	if edgeMode == EdgeModeAPIGateway {
-		return router
+		return router, nil
 	}
 	webSocketHandler := transport.NewWebSocketHandlerWithConfigAndRoomStateWriterAndTokenVerifierAndRoomLeaver(
 		roomManager,
@@ -717,6 +737,7 @@ func newGinRouter(
 		roomHTTPHandler.RoomLeaver(),
 	)
 	webSocketHandler.SetMetrics(metrics)
+	webSocketHandler.SetDrainState(drainState)
 	webSocketHandler.SetRoomRuntimeBootstrapper(roomBootstrap, timelineRecoveryReader)
 	webSocketHandler.SetRoomBroadcastBus(broadcastInstanceID, roomBroadcastBus)
 	webSocketHandler.SetAuthorityControlApplier(authorityControl)
@@ -744,7 +765,7 @@ func newGinRouter(
 	}
 	router.Any("/ws", gin.WrapH(webSocketHandler))
 
-	return router
+	return router, webSocketHandler
 }
 
 // newIdentityService connects identity APIs to a local PostgreSQL store or the identity RPC boundary.
@@ -959,18 +980,51 @@ func (s *Server) ListenAndServe() error {
 	return s.httpServer.ListenAndServe()
 }
 
+func (s *Server) BeginDrain(ctx context.Context) error {
+	if s == nil {
+		return nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if s.drainState != nil {
+		s.drainState.Begin()
+	}
+	if s.metrics != nil {
+		s.metrics.SetRoomserverDraining(true)
+	}
+	if s.webSocketHandler == nil {
+		return nil
+	}
+	return s.webSocketHandler.Drain(ctx)
+}
+
 // Shutdown gracefully stops HTTP serving and closes infrastructure resources.
 func (s *Server) Shutdown(ctx context.Context) error {
 	if s == nil {
 		return nil
 	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	var shutdownErr error
+	drainCtx := ctx
+	drainCancel := func() {}
+	if s.config.WebSocket.DrainGrace > 0 {
+		drainCtx, drainCancel = context.WithTimeout(ctx, s.config.WebSocket.DrainGrace)
+	}
+	if err := s.BeginDrain(drainCtx); err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+		shutdownErr = err
+	}
+	drainCancel()
 	if s.cancel != nil {
 		s.cancel()
 	}
-	var shutdownErr error
 	if s.httpServer != nil {
 		if err := s.httpServer.Shutdown(ctx); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			shutdownErr = err
+			if shutdownErr == nil {
+				shutdownErr = err
+			}
 		}
 	}
 	if err := s.Close(); err != nil && shutdownErr == nil {
