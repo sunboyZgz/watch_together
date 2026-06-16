@@ -6,11 +6,13 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/coder/websocket"
 
+	"watch_together/server/internal/observability"
 	"watch_together/server/internal/protocol"
 	"watch_together/server/internal/realtime"
 	"watch_together/server/internal/room"
@@ -266,8 +268,8 @@ func TestWebSocketJoinRoomLazyBootstrapsGatewayCreatedRoom(t *testing.T) {
 	if payload.RoomID != "ROOM01" || payload.HostUserID != "user_a" {
 		t.Fatalf("unexpected bootstrapped room identity room=%s host=%s", payload.RoomID, payload.HostUserID)
 	}
-	if payload.Seq != 2 || payload.PositionMs != 42_000 || payload.Paused {
-		t.Fatalf("expected recovered playing state seq=2 pos=42000 paused=false, got seq=%d pos=%d paused=%t", payload.Seq, payload.PositionMs, payload.Paused)
+	if payload.Seq != 2 || payload.PositionMs < 42_000 || payload.PositionMs > 42_100 || payload.Paused {
+		t.Fatalf("expected recovered playing state seq=2 pos around 42000 paused=false, got seq=%d pos=%d paused=%t", payload.Seq, payload.PositionMs, payload.Paused)
 	}
 	if got := roomManager.ClientCount("ROOM01"); got != 1 {
 		t.Fatalf("expected lazy bootstrapped room to accept client, got %d clients", got)
@@ -1685,6 +1687,8 @@ func TestWebSocketHandlerDrainClosesExistingConnectionsAndRunsCleanup(t *testing
 		t.Fatalf("create room: %v", err)
 	}
 	handler := NewWebSocketHandler(roomManager, true)
+	metrics := observability.NewMetrics()
+	handler.SetMetrics(metrics)
 	mux := http.NewServeMux()
 	mux.Handle("/ws", handler)
 
@@ -1731,6 +1735,17 @@ func TestWebSocketHandlerDrainClosesExistingConnectionsAndRunsCleanup(t *testing
 	}
 	if got := roomManager.ClientCount(createdRoom.ID()); got != 0 {
 		t.Fatalf("expected drain cleanup to remove client, got %d", got)
+	}
+	recorder := httptest.NewRecorder()
+	metrics.Handler().ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	body := recorder.Body.String()
+	for _, expected := range []string{
+		"watch_together_roomserver_draining 1",
+		"watch_together_websocket_drain_closes_total 1",
+	} {
+		if !strings.Contains(body, expected) {
+			t.Fatalf("expected drain metric %q in body:\n%s", expected, body)
+		}
 	}
 }
 

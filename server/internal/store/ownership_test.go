@@ -42,6 +42,7 @@ type composeService struct {
 	Profiles    []string       `yaml:"profiles"`
 	DependsOn   any            `yaml:"depends_on"`
 	Environment map[string]any `yaml:"environment"`
+	Ports       []string       `yaml:"ports"`
 }
 
 func TestDatabaseOwnershipRegistryCoversCoreTables(t *testing.T) {
@@ -151,6 +152,8 @@ func TestComposeAppAndProdUseFullRPCBoundary(t *testing.T) {
 	localAuthority := requireComposeService(t, localCompose, "roomauthorityservice")
 	localGateway := requireComposeService(t, localCompose, "apigateway")
 	localOutbox := requireComposeService(t, localCompose, "outboxworker")
+	rollingRoomserver := requireComposeService(t, localCompose, "roomserver-rolling")
+	rollingNginx := requireComposeService(t, localCompose, "nginx-rolling")
 
 	for _, serviceName := range []string{"identityservice", "roomservice", "mediaservice", "progressservice", "homecompositionservice", "timelineservice", "roomauthorityservice"} {
 		if !dependsOnService(localRoomserver.DependsOn, serviceName) {
@@ -368,6 +371,49 @@ func TestComposeAppAndProdUseFullRPCBoundary(t *testing.T) {
 	}
 	if old := envString(localRoomserver.Environment, "AUTHORITY_SERVICE_INSTANCE_ID"); old != "" {
 		t.Fatalf("app roomserver must not use deprecated AUTHORITY_SERVICE_INSTANCE_ID, got %q", old)
+	}
+	if !containsContext(rollingRoomserver.Profiles, "rolling-smoke") {
+		t.Fatalf("roomserver-rolling profiles = %v, want rolling-smoke profile", rollingRoomserver.Profiles)
+	}
+	if primaryInstanceID := envString(localRoomserver.Environment, "SERVER_INSTANCE_ID"); strings.Contains(primaryInstanceID, "local-roomserver-2") {
+		t.Fatalf("primary roomserver SERVER_INSTANCE_ID unexpectedly matches rolling instance: %q", primaryInstanceID)
+	}
+	if rollingInstanceID := envString(rollingRoomserver.Environment, "SERVER_INSTANCE_ID"); rollingInstanceID != "local-roomserver-2" {
+		t.Fatalf("roomserver-rolling SERVER_INSTANCE_ID = %q, want local-roomserver-2", rollingInstanceID)
+	}
+	if mode := envString(rollingRoomserver.Environment, "SERVER_EDGE_MODE"); !strings.Contains(mode, "session_gateway") {
+		t.Fatalf("roomserver-rolling SERVER_EDGE_MODE = %q, want session_gateway", mode)
+	}
+	if runtimeMode := envString(rollingRoomserver.Environment, "ROOM_RUNTIME_MODE"); !strings.Contains(runtimeMode, "distributed_authority") {
+		t.Fatalf("roomserver-rolling ROOM_RUNTIME_MODE = %q, want distributed_authority", runtimeMode)
+	}
+	for _, serviceName := range []string{"identityservice", "roomservice", "mediaservice", "progressservice", "homecompositionservice", "timelineservice", "roomauthorityservice", "redis", "nats", "kafka"} {
+		if !dependsOnService(rollingRoomserver.DependsOn, serviceName) {
+			t.Fatalf("roomserver-rolling must depend on %s", serviceName)
+		}
+	}
+	for _, key := range []string{"DATABASE_URL", "IDENTITY_DATABASE_URL", "ROOM_DATABASE_URL", "MEDIA_DATABASE_URL", "PROGRESS_DATABASE_URL", "TIMELINE_DATABASE_URL"} {
+		value := envString(rollingRoomserver.Environment, key)
+		if strings.Contains(value, "${"+key) {
+			t.Fatalf("roomserver-rolling must not receive direct %s, got %q", key, value)
+		}
+		if value != "" && !strings.Contains(value, "ROOMSERVER_"+key) {
+			t.Fatalf("roomserver-rolling %s override must be explicit, got %q", key, value)
+		}
+	}
+	if !containsContext(rollingNginx.Profiles, "rolling-smoke") {
+		t.Fatalf("nginx-rolling profiles = %v, want rolling-smoke profile", rollingNginx.Profiles)
+	}
+	for _, serviceName := range []string{"apigateway", "roomserver", "roomserver-rolling", "minio"} {
+		if !dependsOnService(rollingNginx.DependsOn, serviceName) {
+			t.Fatalf("nginx-rolling must depend on %s", serviceName)
+		}
+	}
+	if !containsContext(rollingRoomserver.Ports, "8099:8080") {
+		t.Fatalf("roomserver-rolling ports = %v, want 8099:8080", rollingRoomserver.Ports)
+	}
+	if !containsContext(rollingNginx.Ports, "8081:80") {
+		t.Fatalf("nginx-rolling ports = %v, want 8081:80", rollingNginx.Ports)
 	}
 
 	pilotRoomserver := requireComposeService(t, localCompose, "roomserver-rpc-pilot")
@@ -650,6 +696,34 @@ func TestNginxRoutesRESTToAPIGatewayAndWebSocketToRoomserver(t *testing.T) {
 	} {
 		if !strings.Contains(text, expected) {
 			t.Fatalf("expected nginx config to contain %q", expected)
+		}
+	}
+	if strings.Contains(text, "roomserver-rolling:8080") {
+		t.Fatalf("default nginx config must not depend on smoke-only roomserver-rolling backend")
+	}
+}
+
+func TestRollingNginxRoutesRESTToAPIGatewayAndWebSocketToBothRoomservers(t *testing.T) {
+	content, err := os.ReadFile("../../deploy/nginx/default.rolling.conf")
+	if err != nil {
+		t.Fatalf("read rolling nginx config: %v", err)
+	}
+	text := string(content)
+	for _, expected := range []string{
+		"upstream watch_together_api",
+		"server apigateway:8080;",
+		"upstream watch_together_ws",
+		"server roomserver:8080",
+		"server roomserver-rolling:8080",
+		"location /auth/",
+		"location /rooms",
+		"proxy_pass http://watch_together_api;",
+		"location /ws",
+		"proxy_pass http://watch_together_ws;",
+		"proxy_next_upstream_tries 2;",
+	} {
+		if !strings.Contains(text, expected) {
+			t.Fatalf("expected rolling nginx config to contain %q", expected)
 		}
 	}
 }

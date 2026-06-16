@@ -360,6 +360,22 @@ cd server
 .\scripts\verify_phase27.ps1 -RunSmoke -ResetVolumes -DownAfterRun
 ```
 
+Run the Phase 29 rolling-drain verification after WebSocket drain/reconnect changes. The default run keeps the Phase 27 RPC-only database boundary checks and adds the rolling-smoke compose/Nginx guards:
+
+```powershell
+cd server
+.\scripts\verify_phase29.ps1
+```
+
+Add `-RunSmoke` to run the Compose dual-roomserver rolling release gate. The smoke first establishes the full-RPC owner-database baseline, then starts `roomserver-rolling` plus `nginx-rolling` on `http://127.0.0.1:8081`, drains the primary `roomserver`, reconnects through rolling `/ws`, verifies `room_state`, and continues play/seek/pause through authority/timeline RPC:
+
+```powershell
+cd server
+.\scripts\verify_phase29.ps1 -RunSmoke -ResetVolumes -DownAfterRun
+```
+
+Phase 29 intentionally stays on Docker Compose and Nginx. `kind`/Kubernetes deployment learning starts in Phase 30, after this local rolling-drain gate is stable.
+
 Legacy media database import:
 
 ```bash

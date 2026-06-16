@@ -280,6 +280,20 @@ services:
     ports:
       - "8098:8080"
 
+  roomserver-rolling:
+    <<: *roomserver_base
+    profiles: ["rolling-smoke"]
+    container_name: anime-watch-roomserver-rolling
+    environment:
+      <<: *roomserver_environment
+      SERVER_INSTANCE_ID: local-roomserver-2
+      NATS_NAME: watch-together-roomserver-rolling
+      KAFKA_CLIENT_ID: watch-together-roomserver-rolling
+      SERVICE_NAME: watch-together-roomserver-rolling
+      OTEL_SERVICE_NAME: watch-together-roomserver-rolling
+    ports:
+      - "8099:8080"
+
   apigateway:
     profiles: ["app"]
     image: watch-together-roomserver:dev
@@ -702,6 +716,21 @@ services:
       - minio
     ports:
       - "8080:80"
+
+  nginx-rolling:
+    profiles: ["rolling-smoke"]
+    image: nginx:1.27-alpine
+    container_name: anime-watch-nginx-rolling
+    restart: unless-stopped
+    depends_on:
+      - apigateway
+      - roomserver
+      - roomserver-rolling
+      - minio
+    volumes:
+      - ./deploy/nginx/default.rolling.conf:/etc/nginx/conf.d/default.conf:ro
+    ports:
+      - "8081:80"
 
 volumes:
   postgres_data:
