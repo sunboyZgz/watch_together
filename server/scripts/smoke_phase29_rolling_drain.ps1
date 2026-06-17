@@ -102,6 +102,9 @@ function Wait-HttpReady {
     do {
         try {
             $response = Invoke-RestMethod -Method Get -Uri $Url -TimeoutSec 5
+            if ($response -is [string] -and $response.Trim() -eq 'ok') {
+                return
+            }
             if ($response.status -eq 'ready' -or $response.status -eq 'ok') {
                 return
             }
@@ -121,7 +124,10 @@ function Wait-ServiceStopped {
     do {
         Push-Location $ServerRoot
         try {
-            $containerID = (& docker compose ps -q $Service).Trim()
+            $containerID = ((& docker compose ps -q $Service) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -First 1)
+            if ($null -ne $containerID) {
+                $containerID = $containerID.Trim()
+            }
             if ([string]::IsNullOrWhiteSpace($containerID)) {
                 return
             }
@@ -234,9 +240,9 @@ function New-SmokeWebSocket {
         [string] $WsUrl
     )
     $socket = [System.Net.WebSockets.ClientWebSocket]::new()
-    $socket.Options.SetRequestHeader('Authorization', "Bearer $Token")
+    [void]$socket.Options.SetRequestHeader('Authorization', "Bearer $Token")
     $cts = [System.Threading.CancellationTokenSource]::new([TimeSpan]::FromSeconds(15))
-    $socket.ConnectAsync([Uri]$WsUrl, $cts.Token).GetAwaiter().GetResult()
+    [void]$socket.ConnectAsync([Uri]$WsUrl, $cts.Token).GetAwaiter().GetResult()
     return $socket
 }
 
@@ -248,7 +254,7 @@ function Send-WsJson {
     $json = $Message | ConvertTo-Json -Depth 20 -Compress
     $bytes = [System.Text.Encoding]::UTF8.GetBytes($json)
     $segment = [System.ArraySegment[byte]]::new($bytes, 0, $bytes.Length)
-    $Socket.SendAsync($segment, [System.Net.WebSockets.WebSocketMessageType]::Text, $true, [System.Threading.CancellationToken]::None).GetAwaiter().GetResult()
+    [void]$Socket.SendAsync($segment, [System.Net.WebSockets.WebSocketMessageType]::Text, $true, [System.Threading.CancellationToken]::None).GetAwaiter().GetResult()
 }
 
 function Receive-WsJson {
@@ -344,7 +350,7 @@ function Close-SmokeWebSocket {
         return
     }
     if ($Socket.State -eq [System.Net.WebSockets.WebSocketState]::Open) {
-        $Socket.CloseAsync([System.Net.WebSockets.WebSocketCloseStatus]::NormalClosure, 'smoke done', [System.Threading.CancellationToken]::None).GetAwaiter().GetResult()
+        [void]$Socket.CloseAsync([System.Net.WebSockets.WebSocketCloseStatus]::NormalClosure, 'smoke done', [System.Threading.CancellationToken]::None).GetAwaiter().GetResult()
     }
     $Socket.Dispose()
 }
@@ -408,7 +414,6 @@ $viewerSocket = $null
 $oldHostSocket = $null
 $oldViewerSocket = $null
 $shouldDown = $DownAfterRun -and -not $KeepRunning
-$composeStarted = $false
 $hostUser = $null
 $viewerUser = $null
 $roomCode = ''
@@ -432,7 +437,6 @@ try {
         } finally {
             Pop-Location
         }
-        $composeStarted = $true
     }
 
     Invoke-Step 'start rolling-smoke roomserver and nginx profile' {
@@ -564,7 +568,7 @@ WHERE to_regclass('public.' || shadow.table_name) IS NOT NULL;
 } finally {
     Close-SmokeWebSocket -Socket $hostSocket
     Close-SmokeWebSocket -Socket $viewerSocket
-    if ($shouldDown -and $composeStarted) {
+    if ($shouldDown) {
         Invoke-Compose -Arguments @('--profile', 'app', '--profile', 'rolling-smoke', 'down', '--remove-orphans')
     }
 }

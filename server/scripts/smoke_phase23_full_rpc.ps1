@@ -268,9 +268,9 @@ function New-SmokeUser {
 function New-SmokeWebSocket {
     param([string] $Token)
     $socket = [System.Net.WebSockets.ClientWebSocket]::new()
-    $socket.Options.SetRequestHeader('Authorization', "Bearer $Token")
+    [void]$socket.Options.SetRequestHeader('Authorization', "Bearer $Token")
     $cts = [System.Threading.CancellationTokenSource]::new([TimeSpan]::FromSeconds(15))
-    $socket.ConnectAsync([Uri]'ws://127.0.0.1:8080/ws', $cts.Token).GetAwaiter().GetResult()
+    [void]$socket.ConnectAsync([Uri]'ws://127.0.0.1:8080/ws', $cts.Token).GetAwaiter().GetResult()
     return $socket
 }
 
@@ -282,7 +282,7 @@ function Send-WsJson {
     $json = $Message | ConvertTo-Json -Depth 20 -Compress
     $bytes = [System.Text.Encoding]::UTF8.GetBytes($json)
     $segment = [System.ArraySegment[byte]]::new($bytes, 0, $bytes.Length)
-    $Socket.SendAsync($segment, [System.Net.WebSockets.WebSocketMessageType]::Text, $true, [System.Threading.CancellationToken]::None).GetAwaiter().GetResult()
+    [void]$Socket.SendAsync($segment, [System.Net.WebSockets.WebSocketMessageType]::Text, $true, [System.Threading.CancellationToken]::None).GetAwaiter().GetResult()
 }
 
 function Receive-WsJson {
@@ -344,7 +344,7 @@ function Close-SmokeWebSocket {
         return
     }
     if ($Socket.State -eq [System.Net.WebSockets.WebSocketState]::Open) {
-        $Socket.CloseAsync([System.Net.WebSockets.WebSocketCloseStatus]::NormalClosure, 'smoke done', [System.Threading.CancellationToken]::None).GetAwaiter().GetResult()
+        [void]$Socket.CloseAsync([System.Net.WebSockets.WebSocketCloseStatus]::NormalClosure, 'smoke done', [System.Threading.CancellationToken]::None).GetAwaiter().GetResult()
     }
     $Socket.Dispose()
 }
@@ -533,15 +533,15 @@ try {
         if ($progress.data.mediaItemId -ne $SmokeEpisodeID) {
             throw "progress response mediaItemId=$($progress.data.mediaItemId), want $SmokeEpisodeID"
         }
-        $home = Invoke-JsonRequest -Method Get -Uri "$BaseUrl/home/summary" -Token $hostUser.token
-        if ($null -eq $home.data.lastWatched) {
+        $homeSummary = Invoke-JsonRequest -Method Get -Uri "$BaseUrl/home/summary" -Token $hostUser.token
+        if ($null -eq $homeSummary.data.lastWatched) {
             throw 'home summary did not return lastWatched after progress update'
         }
-        if ($home.data.lastWatched.mediaItemId -ne $SmokeEpisodeID) {
-            throw "home lastWatched mediaItemId=$($home.data.lastWatched.mediaItemId), want $SmokeEpisodeID"
+        if ($homeSummary.data.lastWatched.mediaItemId -ne $SmokeEpisodeID) {
+            throw "home lastWatched mediaItemId=$($homeSummary.data.lastWatched.mediaItemId), want $SmokeEpisodeID"
         }
-        if ($home.data.lastWatched.title -ne 'Phase23 Smoke Episode') {
-            throw "home lastWatched title=$($home.data.lastWatched.title), want Phase23 Smoke Episode"
+        if ($homeSummary.data.lastWatched.title -ne 'Phase23 Smoke Season') {
+            throw "home lastWatched title=$($homeSummary.data.lastWatched.title), want Phase23 Smoke Season"
         }
     }
 

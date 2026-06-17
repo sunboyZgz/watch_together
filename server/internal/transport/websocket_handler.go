@@ -26,42 +26,43 @@ import (
 )
 
 type WebSocketHandler struct {
-	roomManager         *room.Manager
-	debugSync           bool
-	heartbeatInterval   time.Duration
-	heartbeatTimeout    time.Duration
-	clock               realtime.Clock
-	broadcaster         roomBroadcaster
-	clientOptions       room.ClientConnectionOptions
-	connectionLimit     *semaphore.Weighted
-	maxRoomClients      int
-	roomStateWriter     latestRoomStateWriter
-	roomLeaver          roomMembershipLeaver
-	roomMemberChecker   roomMembershipChecker
-	roomBootstrapper    roomRuntimeBootstrapper
-	timelineRecovery    timeline.RecoveryReader
-	controlDeduper      *controlRequestDeduper
-	seekRateLimiter     *controlRateLimiter
-	tokenVerifier       accessTokenVerifier
-	deviceSwitches      *roomDeviceSwitchRegistry
-	deviceSwitchTimeout time.Duration
-	roomBroadcastBus    eventbus.RoomBroadcastBus
-	roomControlBus      eventbus.RoomControlBus
-	authorityControl    authority.ControlApplier
-	roomAuthority       roomAuthorityLookup
-	authorityRecovery   roomAuthorityRecovery
-	activeDevices       activeDeviceRegistry
-	controlRequests     controlRequestRegistry
-	controlRates        controlRateRegistry
-	presence            presenceRegistry
-	presenceRefresh     time.Duration
-	timelineRecorder    timeline.ResultRecorder
-	metrics             *observability.Metrics
-	instanceID          string
-	roomRuntimeMode     string
-	drainState          *WebSocketDrainState
-	activeClientsMu     sync.Mutex
-	activeClients       map[*room.ClientConnection]struct{}
+	roomManager           *room.Manager
+	debugSync             bool
+	heartbeatInterval     time.Duration
+	heartbeatTimeout      time.Duration
+	clock                 realtime.Clock
+	broadcaster           roomBroadcaster
+	clientOptions         room.ClientConnectionOptions
+	connectionLimit       *semaphore.Weighted
+	maxRoomClients        int
+	roomStateWriter       latestRoomStateWriter
+	roomLeaver            roomMembershipLeaver
+	roomMemberChecker     roomMembershipChecker
+	roomBootstrapper      roomRuntimeBootstrapper
+	timelineRecovery      timeline.RecoveryReader
+	controlDeduper        *controlRequestDeduper
+	seekRateLimiter       *controlRateLimiter
+	tokenVerifier         accessTokenVerifier
+	deviceSwitches        *roomDeviceSwitchRegistry
+	deviceSwitchTimeout   time.Duration
+	roomBroadcastBus      eventbus.RoomBroadcastBus
+	roomControlBus        eventbus.RoomControlBus
+	authorityControl      authority.ControlApplier
+	roomAuthority         roomAuthorityLookup
+	authorityRecovery     roomAuthorityRecovery
+	activeDevices         activeDeviceRegistry
+	controlRequests       controlRequestRegistry
+	controlRates          controlRateRegistry
+	presence              presenceRegistry
+	presenceRefresh       time.Duration
+	controlRequestTimeout time.Duration
+	timelineRecorder      timeline.ResultRecorder
+	metrics               *observability.Metrics
+	instanceID            string
+	roomRuntimeMode       string
+	drainState            *WebSocketDrainState
+	activeClientsMu       sync.Mutex
+	activeClients         map[*room.ClientConnection]struct{}
 }
 
 const (
@@ -74,6 +75,7 @@ const (
 	defaultControlIdempotencyTTL     = 10 * time.Minute
 	defaultPresenceLeaseTTL          = 45 * time.Second
 	defaultPresenceRefreshInterval   = 15 * time.Second
+	defaultControlRequestTimeout     = 3 * time.Second
 	defaultDrainGrace                = 8 * time.Second
 	defaultSeekMinInterval           = 250 * time.Millisecond
 	WebSocketDrainReason             = "server draining"
@@ -93,6 +95,7 @@ type WebSocketRuntimeConfig struct {
 	ControlIdempotencyTTL     time.Duration
 	PresenceLeaseTTL          time.Duration
 	PresenceRefreshInterval   time.Duration
+	ControlRequestTimeout     time.Duration
 	DrainGrace                time.Duration
 	CrossInstanceBroadcast    bool
 	EventBus                  string
@@ -443,14 +446,15 @@ func newWebSocketHandlerWithClock(
 			defaultControlRequestDedupMaxEntries,
 			defaultControlRequestDedupShards,
 		),
-		seekRateLimiter:     newControlRateLimiter(config.SeekMinInterval, defaultControlRateLimitMaxEntries, defaultControlRateLimitShards),
-		tokenVerifier:       defaultAccessTokenVerifier,
-		deviceSwitches:      newRoomDeviceSwitchRegistry(),
-		deviceSwitchTimeout: config.RoomDeviceSwitchTimeout,
-		presenceRefresh:     config.PresenceRefreshInterval,
-		timelineRecorder:    timeline.NoopRecorder{},
-		roomRuntimeMode:     roomRuntimeModeLocalProcess,
-		activeClients:       make(map[*room.ClientConnection]struct{}),
+		seekRateLimiter:       newControlRateLimiter(config.SeekMinInterval, defaultControlRateLimitMaxEntries, defaultControlRateLimitShards),
+		tokenVerifier:         defaultAccessTokenVerifier,
+		deviceSwitches:        newRoomDeviceSwitchRegistry(),
+		deviceSwitchTimeout:   config.RoomDeviceSwitchTimeout,
+		presenceRefresh:       config.PresenceRefreshInterval,
+		controlRequestTimeout: config.ControlRequestTimeout,
+		timelineRecorder:      timeline.NoopRecorder{},
+		roomRuntimeMode:       roomRuntimeModeLocalProcess,
+		activeClients:         make(map[*room.ClientConnection]struct{}),
 	}
 }
 
@@ -481,6 +485,9 @@ func normalizeWebSocketRuntimeConfig(config WebSocketRuntimeConfig) WebSocketRun
 	}
 	if config.PresenceRefreshInterval <= 0 {
 		config.PresenceRefreshInterval = defaultPresenceRefreshInterval
+	}
+	if config.ControlRequestTimeout <= 0 {
+		config.ControlRequestTimeout = defaultControlRequestTimeout
 	}
 	if config.DrainGrace <= 0 {
 		config.DrainGrace = defaultDrainGrace
@@ -2050,7 +2057,7 @@ func (h *WebSocketHandler) forwardControlEvent(
 	if handled {
 		return client.WriteJSON(ctx, duplicate)
 	}
-	requestCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	requestCtx, cancel := context.WithTimeout(ctx, h.controlRequestTimeout)
 	defer cancel()
 	response, err := h.roomControlBus.RequestRoomControl(requestCtx, authorityInstanceID, eventbus.RoomControlRequest{
 		SourceInstanceID: h.instanceID,
@@ -2120,15 +2127,7 @@ func (h *WebSocketHandler) forwardAuthorityRPCControlEvent(
 		return err
 	}
 	meta.AuthorityEpoch = authorityEpoch
-	duplicate, handled, err := h.reserveDistributedControlRequest(ctx, roomID, meta)
-	if err != nil {
-		h.recordControlRejected(ctx, eventType, roomID, meta, controlErrorMessage(err))
-		return err
-	}
-	if handled {
-		return client.WriteJSON(ctx, duplicate)
-	}
-	requestCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	requestCtx, cancel := context.WithTimeout(ctx, h.controlRequestTimeout)
 	defer cancel()
 	response, err := h.authorityControl.ApplyRoomControl(requestCtx, authority.ApplyControlRequest{
 		SourceInstanceID:       h.instanceID,
@@ -2154,7 +2153,6 @@ func (h *WebSocketHandler) forwardAuthorityRPCControlEvent(
 		return protocolMessageError{roomID: roomID, message: "room authority unavailable"}
 	}
 	if response.Error != "" {
-		h.finalizeDistributedControlRejected(ctx, roomID, meta, response.Seq, response.Error)
 		h.recordControlRejected(ctx, eventType, roomID, meta, response.Error)
 		return protocolMessageError{roomID: roomID, message: response.Error}
 	}

@@ -40,9 +40,13 @@ type composeDocument struct {
 
 type composeService struct {
 	Profiles    []string       `yaml:"profiles"`
+	Image       string         `yaml:"image"`
+	User        string         `yaml:"user"`
 	DependsOn   any            `yaml:"depends_on"`
 	Environment map[string]any `yaml:"environment"`
 	Ports       []string       `yaml:"ports"`
+	Volumes     []string       `yaml:"volumes"`
+	Healthcheck map[string]any `yaml:"healthcheck"`
 }
 
 func TestDatabaseOwnershipRegistryCoversCoreTables(t *testing.T) {
@@ -273,6 +277,9 @@ func TestComposeAppAndProdUseFullRPCBoundary(t *testing.T) {
 	if leaseID := envString(localRoomserver.Environment, "AUTHORITY_LEASE_INSTANCE_ID"); !strings.Contains(leaseID, "roomauthorityservice-1") {
 		t.Fatalf("app roomserver AUTHORITY_LEASE_INSTANCE_ID = %q, want roomauthorityservice lease owner", leaseID)
 	}
+	if timeout := envString(localRoomserver.Environment, "WS_CONTROL_REQUEST_TIMEOUT_MS"); !strings.Contains(timeout, "10000") {
+		t.Fatalf("app roomserver WS_CONTROL_REQUEST_TIMEOUT_MS = %q, want cold-start authority RPC budget", timeout)
+	}
 	if serviceInstanceID := envString(localAuthority.Environment, "SERVER_INSTANCE_ID"); !strings.Contains(serviceInstanceID, "roomauthorityservice-1") {
 		t.Fatalf("roomauthorityservice SERVER_INSTANCE_ID = %q, want matching lease owner", serviceInstanceID)
 	}
@@ -386,6 +393,9 @@ func TestComposeAppAndProdUseFullRPCBoundary(t *testing.T) {
 	}
 	if runtimeMode := envString(rollingRoomserver.Environment, "ROOM_RUNTIME_MODE"); !strings.Contains(runtimeMode, "distributed_authority") {
 		t.Fatalf("roomserver-rolling ROOM_RUNTIME_MODE = %q, want distributed_authority", runtimeMode)
+	}
+	if timeout := envString(rollingRoomserver.Environment, "WS_CONTROL_REQUEST_TIMEOUT_MS"); !strings.Contains(timeout, "10000") {
+		t.Fatalf("roomserver-rolling WS_CONTROL_REQUEST_TIMEOUT_MS = %q, want cold-start authority RPC budget", timeout)
 	}
 	for _, serviceName := range []string{"identityservice", "roomservice", "mediaservice", "progressservice", "homecompositionservice", "timelineservice", "roomauthorityservice", "redis", "nats", "kafka"} {
 		if !dependsOnService(rollingRoomserver.DependsOn, serviceName) {
@@ -647,6 +657,9 @@ func TestComposeAppAndProdUseFullRPCBoundary(t *testing.T) {
 	if leaseID := envString(prodRoomserver.Environment, "AUTHORITY_LEASE_INSTANCE_ID"); !strings.Contains(leaseID, "roomauthorityservice-prod-1") {
 		t.Fatalf("prod roomserver AUTHORITY_LEASE_INSTANCE_ID = %q, want authority service lease owner", leaseID)
 	}
+	if timeout := envString(prodRoomserver.Environment, "WS_CONTROL_REQUEST_TIMEOUT_MS"); !strings.Contains(timeout, "10000") {
+		t.Fatalf("prod roomserver WS_CONTROL_REQUEST_TIMEOUT_MS = %q, want cold-start authority RPC budget", timeout)
+	}
 	if old := envString(prodRoomserver.Environment, "AUTHORITY_SERVICE_INSTANCE_ID"); old != "" {
 		t.Fatalf("prod roomserver must not use deprecated AUTHORITY_SERVICE_INSTANCE_ID, got %q", old)
 	}
@@ -725,6 +738,72 @@ func TestRollingNginxRoutesRESTToAPIGatewayAndWebSocketToBothRoomservers(t *test
 		if !strings.Contains(text, expected) {
 			t.Fatalf("expected rolling nginx config to contain %q", expected)
 		}
+	}
+}
+
+func TestComposeKafkaUsesApacheImageBaseline(t *testing.T) {
+	tests := []struct {
+		name string
+		path string
+	}{
+		{name: "local compose", path: "../../compose.yaml"},
+		{name: "prod compose", path: "../../compose.prod.yaml"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			compose := readCompose(t, tc.path)
+			kafka := requireComposeService(t, compose, "kafka")
+			if kafka.Image != "${KAFKA_IMAGE:-apache/kafka:3.7.0}" {
+				t.Fatalf("kafka image = %q, want Apache Kafka image override baseline", kafka.Image)
+			}
+			if kafka.User != "${KAFKA_USER:-0:0}" {
+				t.Fatalf("kafka user = %q, want root default so Apache Kafka can format the named KRaft volume", kafka.User)
+			}
+			for key := range kafka.Environment {
+				if strings.HasPrefix(key, "KAFKA_CFG_") || key == "ALLOW_PLAINTEXT_LISTENER" {
+					t.Fatalf("kafka environment contains Bitnami-only key %q", key)
+				}
+			}
+			for _, expected := range []struct {
+				key   string
+				value string
+			}{
+				{key: "KAFKA_PROCESS_ROLES", value: "broker,controller"},
+				{key: "KAFKA_CONTROLLER_QUORUM_VOTERS", value: "1@kafka:9093"},
+				{key: "KAFKA_ADVERTISED_LISTENERS", value: "PLAINTEXT://kafka:9092"},
+				{key: "KAFKA_LOG_DIRS", value: "/tmp/kraft-combined-logs"},
+				{key: "CLUSTER_ID", value: "${KAFKA_CLUSTER_ID:-5L6g3nShT-eMCtK--X86sw}"},
+			} {
+				if got := envString(kafka.Environment, expected.key); got != expected.value {
+					t.Fatalf("kafka %s = %q, want %q", expected.key, got, expected.value)
+				}
+			}
+			if !containsContext(kafka.Volumes, "kafka_data:/tmp/kraft-combined-logs") {
+				t.Fatalf("kafka volumes = %v, want Apache KRaft log volume", kafka.Volumes)
+			}
+			if containsContext(kafka.Volumes, "kafka_data:/bitnami/kafka") {
+				t.Fatalf("kafka volumes still include Bitnami path: %v", kafka.Volumes)
+			}
+			healthcheck := fmt.Sprint(kafka.Healthcheck["test"])
+			if !strings.Contains(healthcheck, "/opt/kafka/bin/kafka-topics.sh") || !strings.Contains(healthcheck, "--bootstrap-server localhost:9092 --list") {
+				t.Fatalf("kafka healthcheck = %q, want Apache kafka-topics readiness probe", healthcheck)
+			}
+		})
+	}
+}
+
+func TestServiceImageAllowsComposeCommandToSelectRoleBinary(t *testing.T) {
+	content, err := os.ReadFile("../../Dockerfile")
+	if err != nil {
+		t.Fatalf("read Dockerfile: %v", err)
+	}
+	text := string(content)
+	if strings.Contains(text, `ENTRYPOINT ["/app/roomserver"]`) {
+		t.Fatalf("service image must not pin roomserver as ENTRYPOINT; compose command must select apigateway and worker binaries")
+	}
+	if !strings.Contains(text, `CMD ["/app/roomserver"]`) {
+		t.Fatalf("service image should keep roomserver as the default CMD for bare image runs")
 	}
 }
 

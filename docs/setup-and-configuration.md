@@ -99,6 +99,7 @@ WS_SEEK_MIN_INTERVAL_MS=250
 CONTROL_IDEMPOTENCY_TTL_MS=600000
 PRESENCE_LEASE_TTL_MS=45000
 PRESENCE_REFRESH_INTERVAL_MS=15000
+WS_CONTROL_REQUEST_TIMEOUT_MS=10000
 WS_DRAIN_GRACE_MS=8000
 WS_CROSS_INSTANCE_BROADCAST_ENABLED=false
 WS_EVENT_BUS=nats_core
@@ -128,7 +129,7 @@ SERVICE_VERSION=dev
 INTERNAL_RPC_ENABLED=false
 INTERNAL_RPC_ADDR=:8090
 INTERNAL_RPC_PATH_PREFIX=/internal.rpc
-INTERNAL_RPC_TIMEOUT_MS=1000
+INTERNAL_RPC_TIMEOUT_MS=10000
 INTERNAL_RPC_AUTH_TOKEN=
 SERVICE_DISCOVERY_MODE=static
 IDENTITY_SERVICE_MODE=rpc
@@ -195,6 +196,7 @@ Distributed control hardening settings:
 - `CONTROL_IDEMPOTENCY_TTL_MS` controls how long Redis keeps recent control `requestId` outcomes. Duplicate accepted requests return the same accepted envelope; duplicate pending requests return `room authority processing`.
 - `PRESENCE_LEASE_TTL_MS` controls how long a Redis user-level presence entry remains valid without refresh.
 - `PRESENCE_REFRESH_INTERVAL_MS` controls how often heartbeat acks refresh presence while the WebSocket is healthy.
+- `WS_CONTROL_REQUEST_TIMEOUT_MS` controls how long the session gateway waits for a forwarded authority decision. Compose uses `10000` so clean-volume recovery can bootstrap through room/timeline RPC before the client receives `room authority unavailable`.
 
 Presence is runtime state only. It is stored in Redis, broadcast as user-level `room_presence` snapshots, and is not PostgreSQL membership or a Kafka timeline event.
 
@@ -375,6 +377,15 @@ cd server
 ```
 
 Phase 29 intentionally stays on Docker Compose and Nginx. `kind`/Kubernetes deployment learning starts in Phase 30, after this local rolling-drain gate is stable.
+
+Run the Phase 30 readiness preflight before adding kind manifests. It checks Docker, Docker Compose, and the local image set used by the serviceized baseline, including `apache/kafka:3.7.0`; it does not pull images or create a cluster:
+
+```powershell
+cd server
+.\scripts\verify_phase30_ready.ps1
+```
+
+If an image is missing, the script prints the exact `docker pull ...` commands to run manually. `kind` and `kubectl` are reported as optional warnings here because the actual Kubernetes deployment work starts in Phase 30.
 
 Legacy media database import:
 
@@ -582,4 +593,4 @@ Production deployment uses `server/compose.prod.yaml`. Its intended boundary is:
 
 See [server/deploy/README.md](../server/deploy/README.md) for deployment-specific commands and Nginx details.
 
-Phase 29 is the intended place to add kind manifests and verify Kubernetes rolling restart behavior locally. Phase 28 only adds the application-level drain/reconnect semantics that kind will exercise.
+Phase 30 is the intended place to add kind manifests and verify Kubernetes rolling restart behavior locally. Phase 29 verifies the rolling behavior in Docker Compose, and Phase 29.5 pins the Compose Kafka baseline to `apache/kafka:3.7.0` plus a local image preflight.

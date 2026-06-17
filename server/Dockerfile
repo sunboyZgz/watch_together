@@ -105,4 +105,4 @@ COPY --from=builder /out/roomauthorityservice /app/roomauthorityservice
 EXPOSE 8080
 USER 65532:65532
 
-ENTRYPOINT ["/app/roomserver"]
+CMD ["/app/roomserver"]

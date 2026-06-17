@@ -143,10 +143,13 @@ func main() {
 	)
 	go startAuthorityRenewLoop(ctx, time.Duration(runtimeConfig.AuthorityRecovery.RenewIntervalMs)*time.Millisecond, roomManager, authorityRegistry, runtimeConfig.InstanceID)
 	go recoveryService.RunScanner(ctx, time.Duration(runtimeConfig.AuthorityRecovery.TakeoverScanIntervalMs)*time.Millisecond)
+	internalRPCTimeout := time.Duration(runtimeConfig.InternalRPC.TimeoutMs) * time.Millisecond
 	engine := authority.NewEngine(
 		authority.EngineConfig{
 			InstanceID:      runtimeConfig.InstanceID,
 			SeekMinInterval: time.Duration(runtimeConfig.WebSocket.SeekMinIntervalMs) * time.Millisecond,
+			RecordTimeout:   internalRPCTimeout,
+			PublishTimeout:  internalRPCTimeout,
 			DebugSync:       runtimeConfig.DebugSync,
 		},
 		roomManager,
