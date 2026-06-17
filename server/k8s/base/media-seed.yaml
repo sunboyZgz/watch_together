@@ -1,0 +1,124 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: media-seed-sql
+  labels:
+    app.kubernetes.io/name: media-seed
+    app.kubernetes.io/part-of: watch-together
+data:
+  seed.sql: |
+    INSERT INTO media_tags (id, slug, name, sort_order, is_featured, is_active, created_at, updated_at)
+    VALUES ('00000000-0000-0000-0000-000000230100', 'phase23-smoke', 'Phase 23 Smoke', 0, true, true, NOW(), NOW())
+    ON CONFLICT (id) DO UPDATE SET
+        slug = EXCLUDED.slug,
+        name = EXCLUDED.name,
+        is_featured = EXCLUDED.is_featured,
+        is_active = EXCLUDED.is_active,
+        updated_at = NOW();
+
+    INSERT INTO media_seasons (
+        id, slug, title, original_title, description, cover_url, category, production_team,
+        search_aliases, season_number, season_label, sort_order, status, created_at, updated_at
+    )
+    VALUES (
+        '00000000-0000-0000-0000-000000230101',
+        'phase23-smoke-season',
+        'Phase23 Smoke Season',
+        NULL,
+        'Phase23 smoke media for full RPC multi database verification',
+        NULL,
+        'smoke',
+        'watch_together',
+        '["phase23","smoke"]'::jsonb,
+        1,
+        'Smoke Season',
+        0,
+        'active',
+        NOW(),
+        NOW()
+    )
+    ON CONFLICT (id) DO UPDATE SET
+        title = EXCLUDED.title,
+        description = EXCLUDED.description,
+        status = EXCLUDED.status,
+        updated_at = NOW();
+
+    INSERT INTO media_episodes (
+        id, season_id, title, subtitle, description, cover_url, media_url, duration_ms,
+        episode_number, episode_label, source_key, source_hash, sort_order, status, created_at, updated_at
+    )
+    VALUES (
+        '00000000-0000-0000-0000-000000230102',
+        '00000000-0000-0000-0000-000000230101',
+        'Phase23 Smoke Episode',
+        'Full RPC multi database path',
+        'Deterministic playable episode for Phase23 smoke verification',
+        NULL,
+        'phase23-smoke/master.m3u8',
+        120000,
+        1,
+        'Episode 1',
+        'phase23-smoke/source.mp4',
+        'phase23-smoke-hash',
+        0,
+        'active',
+        NOW(),
+        NOW()
+    )
+    ON CONFLICT (id) DO UPDATE SET
+        title = EXCLUDED.title,
+        subtitle = EXCLUDED.subtitle,
+        description = EXCLUDED.description,
+        media_url = EXCLUDED.media_url,
+        duration_ms = EXCLUDED.duration_ms,
+        status = EXCLUDED.status,
+        updated_at = NOW();
+
+    INSERT INTO media_season_tags (season_id, media_tag_id, created_at)
+    VALUES ('00000000-0000-0000-0000-000000230101', '00000000-0000-0000-0000-000000230100', NOW())
+    ON CONFLICT DO NOTHING;
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: seed-media
+  labels:
+    app.kubernetes.io/name: seed-media
+    app.kubernetes.io/part-of: watch-together
+    watch-together/job-phase: seed
+spec:
+  backoffLimit: 3
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: seed-media
+        app.kubernetes.io/part-of: watch-together
+        watch-together/job-phase: seed
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: seed-media
+          image: postgres:16-alpine
+          imagePullPolicy: IfNotPresent
+          command:
+            - /bin/sh
+            - -c
+          args:
+            - |
+              until pg_isready -h postgres -U app -d anime_watch_media_dev; do
+                sleep 2
+              done
+              psql -v ON_ERROR_STOP=1 -h postgres -U app -d anime_watch_media_dev -f /seed/seed.sql
+          env:
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: watch-together-secret
+                  key: postgres-password
+          volumeMounts:
+            - name: seed-sql
+              mountPath: /seed
+      volumes:
+        - name: seed-sql
+          configMap:
+            name: media-seed-sql

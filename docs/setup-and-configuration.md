@@ -376,9 +376,9 @@ cd server
 .\scripts\verify_phase29.ps1 -RunSmoke -ResetVolumes -DownAfterRun
 ```
 
-Phase 29 intentionally stays on Docker Compose and Nginx. `kind`/Kubernetes deployment learning starts in Phase 30, after this local rolling-drain gate is stable.
+Phase 29 intentionally stays on Docker Compose and Nginx. Phase 30 now introduces the local Kubernetes learning baseline with `kind` and `Kustomize`, using `NodePort` for the public entry and keeping Compose as the baseline reference.
 
-Run the Phase 30 readiness preflight before adding kind manifests. It checks Docker, Docker Compose, and the local image set used by the serviceized baseline, including `apache/kafka:3.7.0`; it does not pull images or create a cluster:
+Run the Phase 30 readiness preflight before bringing up the cluster. It checks Docker, Docker Compose, and the local image set used by the serviceized baseline, including `apache/kafka:3.7.0` and `migrate/migrate:v4.17.1`; it does not pull images or create a cluster:
 
 ```powershell
 cd server
@@ -386,6 +386,18 @@ cd server
 ```
 
 If an image is missing, the script prints the exact `docker pull ...` commands to run manually. `kind` and `kubectl` are reported as optional warnings here because the actual Kubernetes deployment work starts in Phase 30.
+
+Use the Phase 30 kind verification flow for the local Kubernetes baseline:
+
+```powershell
+cd server
+.\scripts\kind_create.ps1
+.\scripts\kind_load_images.ps1
+kubectl apply -k .\k8s\overlays\kind
+.\scripts\verify_phase30_kind.ps1 -RunSmoke -ResetCluster -DeleteAfterRun
+```
+
+The public entry becomes `http://127.0.0.1:30080`, and `/ws` stays on the `roomserver` Service behind the same NodePort.
 
 Legacy media database import:
 
@@ -593,4 +605,4 @@ Production deployment uses `server/compose.prod.yaml`. Its intended boundary is:
 
 See [server/deploy/README.md](../server/deploy/README.md) for deployment-specific commands and Nginx details.
 
-Phase 30 is the intended place to add kind manifests and verify Kubernetes rolling restart behavior locally. Phase 29 verifies the rolling behavior in Docker Compose, and Phase 29.5 pins the Compose Kafka baseline to `apache/kafka:3.7.0` plus a local image preflight.
+Phase 30 adds `server/k8s/base`, `server/k8s/overlays/kind`, and the `verify_phase30_kind.ps1` smoke gate for local Kubernetes rolling restart verification. Phase 29 remains the Docker Compose rolling baseline, and Phase 29.5 pins the Compose Kafka baseline to `apache/kafka:3.7.0` plus a local image preflight.

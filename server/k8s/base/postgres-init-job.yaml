@@ -1,0 +1,41 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: postgres-init-databases
+  labels:
+    app.kubernetes.io/name: postgres-init-databases
+    app.kubernetes.io/part-of: watch-together
+    watch-together/job-phase: init
+spec:
+  backoffLimit: 6
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: postgres-init-databases
+        app.kubernetes.io/part-of: watch-together
+        watch-together/job-phase: init
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: postgres-init-databases
+          image: postgres:16-alpine
+          imagePullPolicy: IfNotPresent
+          command:
+            - /bin/sh
+            - -c
+          args:
+            - |
+              until pg_isready -h postgres -U app -d anime_watch_dev; do
+                sleep 1
+              done
+              for db in anime_watch_identity_dev anime_watch_room_dev anime_watch_media_dev anime_watch_progress_dev anime_watch_timeline_dev; do
+                if ! psql -h postgres -U app -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname = '$db'" | grep -q 1; then
+                  createdb -h postgres -U app "$db"
+                fi
+              done
+          env:
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: watch-together-secret
+                  key: postgres-password

@@ -1,0 +1,97 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: outboxworker
+  labels:
+    app.kubernetes.io/name: outboxworker
+    app.kubernetes.io/part-of: watch-together
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: outboxworker
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: outboxworker
+        app.kubernetes.io/part-of: watch-together
+    spec:
+      containers:
+        - name: outboxworker
+          image: watch-together-roomserver:dev
+          imagePullPolicy: IfNotPresent
+          command: ["/app/outboxworker"]
+          env:
+            - name: APP_ENV
+              value: local
+            - name: ROOM_RUNTIME_MODE
+              value: local_process
+            - name: TIMELINE_DATABASE_URL
+              value: postgres://app:app@postgres:5432/anime_watch_timeline_dev?sslmode=disable
+            - name: KAFKA_BROKERS
+              value: kafka:9092
+            - name: KAFKA_CLIENT_ID
+              value: watch-together-outboxworker
+            - name: KAFKA_TOPIC_ROOM_TIMELINE
+              value: wt.room.timeline.v1
+            - name: KAFKA_TOPIC_ROOM_CONTROL_RESULT
+              value: wt.room.control_result.v1
+            - name: KAFKA_TOPIC_ROOM_MEMBERSHIP
+              value: wt.room.membership.v1
+            - name: OUTBOX_WORKER_BATCH_SIZE
+              value: "50"
+            - name: OUTBOX_WORKER_POLL_INTERVAL_MS
+              value: "1000"
+            - name: METRICS_ENABLED
+              value: "true"
+            - name: METRICS_ADDR
+              value: :9091
+            - name: METRICS_PATH
+              value: /metrics
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: derivedworker
+  labels:
+    app.kubernetes.io/name: derivedworker
+    app.kubernetes.io/part-of: watch-together
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: derivedworker
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: derivedworker
+        app.kubernetes.io/part-of: watch-together
+    spec:
+      containers:
+        - name: derivedworker
+          image: watch-together-roomserver:dev
+          imagePullPolicy: IfNotPresent
+          command: ["/app/derivedworker"]
+          env:
+            - name: APP_ENV
+              value: local
+            - name: ROOM_RUNTIME_MODE
+              value: local_process
+            - name: KAFKA_BROKERS
+              value: kafka:9092
+            - name: KAFKA_CLIENT_ID
+              value: watch-together-derivedworker
+            - name: KAFKA_TOPIC_ROOM_TIMELINE
+              value: wt.room.timeline.v1
+            - name: KAFKA_TOPIC_ROOM_CONTROL_RESULT
+              value: wt.room.control_result.v1
+            - name: KAFKA_TOPIC_ROOM_MEMBERSHIP
+              value: wt.room.membership.v1
+            - name: KAFKA_DERIVED_CONSUMER_GROUP_ID
+              value: watch-together-derived-workers
+            - name: METRICS_ENABLED
+              value: "true"
+            - name: METRICS_ADDR
+              value: :9093
+            - name: METRICS_PATH
+              value: /metrics

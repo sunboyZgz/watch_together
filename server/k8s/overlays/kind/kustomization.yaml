@@ -1,0 +1,19 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: watch-together
+resources:
+  - ../../base
+patches:
+  - path: roomserver-replicas.yaml
+  - path: nginx-nodeport.yaml
+generatorOptions:
+  disableNameSuffixHash: true
+secretGenerator:
+  - name: watch-together-secret
+    literals:
+      - postgres-password=app
+      - redis-password=watch_together_redis_dev
+      - minio-root-user=minioadmin
+      - minio-root-password=minioadmin
+      - auth-jwt-secret=watch_together_local_dev_jwt_secret_change_me
+      - media-playback-signing-secret=watch_together_local_dev_media_playback_secret_change_me

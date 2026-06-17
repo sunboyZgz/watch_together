@@ -1,0 +1,976 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: apigateway
+  labels:
+    app.kubernetes.io/name: apigateway
+    app.kubernetes.io/part-of: watch-together
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: apigateway
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: apigateway
+        app.kubernetes.io/part-of: watch-together
+    spec:
+      containers:
+        - name: apigateway
+          image: watch-together-roomserver:dev
+          imagePullPolicy: IfNotPresent
+          command: ["/app/apigateway"]
+          ports:
+            - containerPort: 8080
+              name: http
+          env:
+            - name: APP_ENV
+              value: local
+            - name: SERVER_HOST
+              value: 0.0.0.0
+            - name: SERVER_PORT
+              value: "8080"
+            - name: SERVER_EDGE_MODE
+              value: api_gateway
+            - name: ROOM_RUNTIME_MODE
+              value: local_process
+            - name: DEBUG_SYNC
+              value: "true"
+            - name: WS_CROSS_INSTANCE_BROADCAST_ENABLED
+              value: "false"
+            - name: NATS_URL
+              value: ""
+            - name: METRICS_ENABLED
+              value: "true"
+            - name: METRICS_PATH
+              value: /metrics
+            - name: READINESS_PATH
+              value: /readyz
+            - name: SERVICE_NAME
+              value: watch-together-apigateway
+            - name: SERVICE_VERSION
+              value: kind
+            - name: INTERNAL_RPC_PATH_PREFIX
+              value: /internal.rpc
+            - name: INTERNAL_RPC_TIMEOUT_MS
+              value: "10000"
+            - name: IDENTITY_SERVICE_MODE
+              value: rpc
+            - name: IDENTITY_SERVICE_ADDR
+              value: http://identityservice:8090
+            - name: ROOM_SERVICE_MODE
+              value: rpc
+            - name: ROOM_SERVICE_ADDR
+              value: http://roomservice:8090
+            - name: MEDIA_SERVICE_MODE
+              value: rpc
+            - name: MEDIA_SERVICE_ADDR
+              value: http://mediaservice:8090
+            - name: PROGRESS_SERVICE_MODE
+              value: rpc
+            - name: PROGRESS_SERVICE_ADDR
+              value: http://progressservice:8090
+            - name: HOME_SERVICE_MODE
+              value: rpc
+            - name: HOME_SERVICE_ADDR
+              value: http://homecompositionservice:8090
+            - name: TIMELINE_SERVICE_MODE
+              value: local
+            - name: AUTHORITY_SERVICE_MODE
+              value: rpc
+            - name: AUTHORITY_SERVICE_ADDR
+              value: http://roomauthorityservice:8090
+            - name: AUTHORITY_LEASE_INSTANCE_ID
+              value: roomauthorityservice-1
+            - name: AUTH_JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: watch-together-secret
+                  key: auth-jwt-secret
+            - name: REDIS_ADDR
+              value: ""
+            - name: REDIS_REQUIRED
+              value: "false"
+            - name: MEDIA_DELIVERY_MODE
+              value: nginx_auth_request
+            - name: MEDIA_PLAYBACK_SIGNING_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: watch-together-secret
+                  key: media-playback-signing-secret
+            - name: MEDIA_INTERNAL_BASE_URL
+              value: http://minio:9000/watch-together-media
+            - name: MEDIA_STORAGE_ENDPOINT
+              value: http://minio:9000
+            - name: MEDIA_STORAGE_BUCKET
+              value: watch-together-media
+            - name: MEDIA_STORAGE_REGION
+              value: auto
+            - name: MEDIA_STORAGE_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: watch-together-secret
+                  key: minio-root-user
+            - name: MEDIA_STORAGE_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: watch-together-secret
+                  key: minio-root-password
+            - name: MEDIA_STORAGE_FORCE_PATH_STYLE
+              value: "true"
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 20
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 15
+            timeoutSeconds: 3
+            failureThreshold: 6
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: apigateway
+  labels:
+    app.kubernetes.io/name: apigateway
+    app.kubernetes.io/part-of: watch-together
+spec:
+  selector:
+    app.kubernetes.io/name: apigateway
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: roomserver
+  labels:
+    app.kubernetes.io/name: roomserver
+    app.kubernetes.io/part-of: watch-together
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: roomserver
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: roomserver
+        app.kubernetes.io/part-of: watch-together
+    spec:
+      containers:
+        - name: roomserver
+          image: watch-together-roomserver:dev
+          imagePullPolicy: IfNotPresent
+          command: ["/app/roomserver"]
+          ports:
+            - containerPort: 8080
+              name: http
+          env:
+            - name: APP_ENV
+              value: local
+            - name: SERVER_HOST
+              value: 0.0.0.0
+            - name: SERVER_PORT
+              value: "8080"
+            - name: LOG_LEVEL
+              value: debug
+            - name: SERVER_INSTANCE_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: SERVER_EDGE_MODE
+              value: session_gateway
+            - name: ROOM_RUNTIME_MODE
+              value: distributed_authority
+            - name: DEBUG_SYNC
+              value: "true"
+            - name: WS_CROSS_INSTANCE_BROADCAST_ENABLED
+              value: "true"
+            - name: WS_EVENT_BUS
+              value: nats_core
+            - name: NATS_URL
+              value: nats://nats:4222
+            - name: NATS_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: NATS_SUBJECT_ROOM_BROADCAST
+              value: wt.room.broadcast.v1
+            - name: NATS_SUBJECT_ROOM_CONTROL
+              value: wt.room.control.v1
+            - name: CONTROL_IDEMPOTENCY_TTL_MS
+              value: "600000"
+            - name: PRESENCE_LEASE_TTL_MS
+              value: "45000"
+            - name: PRESENCE_REFRESH_INTERVAL_MS
+              value: "15000"
+            - name: WS_CONTROL_REQUEST_TIMEOUT_MS
+              value: "10000"
+            - name: WS_DRAIN_GRACE_MS
+              value: "8000"
+            - name: KAFKA_BROKERS
+              value: kafka:9092
+            - name: KAFKA_CLIENT_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: KAFKA_TOPIC_ROOM_TIMELINE
+              value: wt.room.timeline.v1
+            - name: KAFKA_TOPIC_ROOM_CONTROL_RESULT
+              value: wt.room.control_result.v1
+            - name: KAFKA_TOPIC_ROOM_MEMBERSHIP
+              value: wt.room.membership.v1
+            - name: KAFKA_DERIVED_CONSUMER_GROUP_ID
+              value: watch-together-derived-workers
+            - name: AUTHORITY_RENEW_INTERVAL_MS
+              value: "10000"
+            - name: AUTHORITY_TAKEOVER_SCAN_INTERVAL_MS
+              value: "30000"
+            - name: AUTHORITY_RECOVERY_TIMEOUT_MS
+              value: "5000"
+            - name: KAFKA_REPLAY_TIMEOUT_MS
+              value: "1000"
+            - name: METRICS_ENABLED
+              value: "true"
+            - name: METRICS_PATH
+              value: /metrics
+            - name: READINESS_PATH
+              value: /readyz
+            - name: SERVICE_NAME
+              value: watch-together-roomserver
+            - name: SERVICE_VERSION
+              value: kind
+            - name: INTERNAL_RPC_PATH_PREFIX
+              value: /internal.rpc
+            - name: INTERNAL_RPC_TIMEOUT_MS
+              value: "10000"
+            - name: IDENTITY_SERVICE_MODE
+              value: rpc
+            - name: IDENTITY_SERVICE_ADDR
+              value: http://identityservice:8090
+            - name: ROOM_SERVICE_MODE
+              value: rpc
+            - name: ROOM_SERVICE_ADDR
+              value: http://roomservice:8090
+            - name: MEDIA_SERVICE_MODE
+              value: rpc
+            - name: MEDIA_SERVICE_ADDR
+              value: http://mediaservice:8090
+            - name: PROGRESS_SERVICE_MODE
+              value: rpc
+            - name: PROGRESS_SERVICE_ADDR
+              value: http://progressservice:8090
+            - name: HOME_SERVICE_MODE
+              value: rpc
+            - name: HOME_SERVICE_ADDR
+              value: http://homecompositionservice:8090
+            - name: TIMELINE_SERVICE_MODE
+              value: rpc
+            - name: TIMELINE_SERVICE_ADDR
+              value: http://timelineservice:8090
+            - name: AUTHORITY_SERVICE_MODE
+              value: rpc
+            - name: AUTHORITY_SERVICE_ADDR
+              value: http://roomauthorityservice:8090
+            - name: AUTHORITY_LEASE_INSTANCE_ID
+              value: roomauthorityservice-1
+            - name: AUTH_JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: watch-together-secret
+                  key: auth-jwt-secret
+            - name: REDIS_ADDR
+              value: redis:6380
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: watch-together-secret
+                  key: redis-password
+            - name: REDIS_DB
+              value: "0"
+            - name: REDIS_REQUIRED
+              value: "true"
+            - name: MEDIA_DELIVERY_MODE
+              value: nginx_auth_request
+            - name: MEDIA_PLAYBACK_SIGNING_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: watch-together-secret
+                  key: media-playback-signing-secret
+            - name: MEDIA_INTERNAL_BASE_URL
+              value: http://minio:9000/watch-together-media
+            - name: MEDIA_STORAGE_ENDPOINT
+              value: http://minio:9000
+            - name: MEDIA_STORAGE_BUCKET
+              value: watch-together-media
+            - name: MEDIA_STORAGE_REGION
+              value: auto
+            - name: MEDIA_STORAGE_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: watch-together-secret
+                  key: minio-root-user
+            - name: MEDIA_STORAGE_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: watch-together-secret
+                  key: minio-root-password
+            - name: MEDIA_STORAGE_FORCE_PATH_STYLE
+              value: "true"
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 20
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 15
+            timeoutSeconds: 3
+            failureThreshold: 6
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: roomserver
+  labels:
+    app.kubernetes.io/name: roomserver
+    app.kubernetes.io/part-of: watch-together
+spec:
+  selector:
+    app.kubernetes.io/name: roomserver
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: identityservice
+  labels:
+    app.kubernetes.io/name: identityservice
+    app.kubernetes.io/part-of: watch-together
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: identityservice
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: identityservice
+        app.kubernetes.io/part-of: watch-together
+    spec:
+      containers:
+        - name: identityservice
+          image: watch-together-roomserver:dev
+          imagePullPolicy: IfNotPresent
+          command: ["/app/identityservice"]
+          ports:
+            - containerPort: 8090
+              name: http
+          env:
+            - name: APP_ENV
+              value: local
+            - name: SERVICE_NAME
+              value: watch-together-identityservice
+            - name: SERVICE_VERSION
+              value: kind
+            - name: INTERNAL_RPC_ADDR
+              value: :8090
+            - name: INTERNAL_RPC_PATH_PREFIX
+              value: /internal.rpc
+            - name: INTERNAL_RPC_AUTH_TOKEN
+              value: ""
+            - name: METRICS_ENABLED
+              value: "true"
+            - name: METRICS_PATH
+              value: /metrics
+            - name: READINESS_PATH
+              value: /readyz
+            - name: AUTH_JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: watch-together-secret
+                  key: auth-jwt-secret
+            - name: AUTH_ACCESS_TOKEN_TTL_HOURS
+              value: "24"
+            - name: IDENTITY_DATABASE_URL
+              value: postgres://app:app@postgres:5432/anime_watch_identity_dev?sslmode=disable
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 20
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 15
+            timeoutSeconds: 3
+            failureThreshold: 6
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: identityservice
+spec:
+  selector:
+    app.kubernetes.io/name: identityservice
+  ports:
+    - name: http
+      port: 8090
+      targetPort: 8090
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: roomservice
+  labels:
+    app.kubernetes.io/name: roomservice
+    app.kubernetes.io/part-of: watch-together
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: roomservice
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: roomservice
+        app.kubernetes.io/part-of: watch-together
+    spec:
+      containers:
+        - name: roomservice
+          image: watch-together-roomserver:dev
+          imagePullPolicy: IfNotPresent
+          command: ["/app/roomservice"]
+          ports:
+            - containerPort: 8090
+              name: http
+          env:
+            - name: APP_ENV
+              value: local
+            - name: SERVICE_NAME
+              value: watch-together-roomservice
+            - name: SERVICE_VERSION
+              value: kind
+            - name: INTERNAL_RPC_ADDR
+              value: :8090
+            - name: INTERNAL_RPC_PATH_PREFIX
+              value: /internal.rpc
+            - name: INTERNAL_RPC_TIMEOUT_MS
+              value: "10000"
+            - name: METRICS_ENABLED
+              value: "true"
+            - name: METRICS_PATH
+              value: /metrics
+            - name: READINESS_PATH
+              value: /readyz
+            - name: ROOM_DATABASE_URL
+              value: postgres://app:app@postgres:5432/anime_watch_room_dev?sslmode=disable
+            - name: IDENTITY_SERVICE_MODE
+              value: rpc
+            - name: IDENTITY_SERVICE_ADDR
+              value: http://identityservice:8090
+            - name: MEDIA_SERVICE_MODE
+              value: rpc
+            - name: MEDIA_SERVICE_ADDR
+              value: http://mediaservice:8090
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 20
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 15
+            timeoutSeconds: 3
+            failureThreshold: 6
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: roomservice
+spec:
+  selector:
+    app.kubernetes.io/name: roomservice
+  ports:
+    - name: http
+      port: 8090
+      targetPort: 8090
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mediaservice
+  labels:
+    app.kubernetes.io/name: mediaservice
+    app.kubernetes.io/part-of: watch-together
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: mediaservice
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: mediaservice
+        app.kubernetes.io/part-of: watch-together
+    spec:
+      containers:
+        - name: mediaservice
+          image: watch-together-roomserver:dev
+          imagePullPolicy: IfNotPresent
+          command: ["/app/mediaservice"]
+          ports:
+            - containerPort: 8090
+              name: http
+          env:
+            - name: APP_ENV
+              value: local
+            - name: SERVICE_NAME
+              value: watch-together-mediaservice
+            - name: SERVICE_VERSION
+              value: kind
+            - name: INTERNAL_RPC_ADDR
+              value: :8090
+            - name: INTERNAL_RPC_PATH_PREFIX
+              value: /internal.rpc
+            - name: INTERNAL_RPC_AUTH_TOKEN
+              value: ""
+            - name: METRICS_ENABLED
+              value: "true"
+            - name: METRICS_PATH
+              value: /metrics
+            - name: READINESS_PATH
+              value: /readyz
+            - name: MEDIA_DATABASE_URL
+              value: postgres://app:app@postgres:5432/anime_watch_media_dev?sslmode=disable
+            - name: MEDIA_STORAGE_ENDPOINT
+              value: http://minio:9000
+            - name: MEDIA_STORAGE_BUCKET
+              value: watch-together-media
+            - name: MEDIA_STORAGE_REGION
+              value: auto
+            - name: MEDIA_STORAGE_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: watch-together-secret
+                  key: minio-root-user
+            - name: MEDIA_STORAGE_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: watch-together-secret
+                  key: minio-root-password
+            - name: MEDIA_STORAGE_FORCE_PATH_STYLE
+              value: "true"
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 20
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 15
+            timeoutSeconds: 3
+            failureThreshold: 6
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mediaservice
+spec:
+  selector:
+    app.kubernetes.io/name: mediaservice
+  ports:
+    - name: http
+      port: 8090
+      targetPort: 8090
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: progressservice
+  labels:
+    app.kubernetes.io/name: progressservice
+    app.kubernetes.io/part-of: watch-together
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: progressservice
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: progressservice
+        app.kubernetes.io/part-of: watch-together
+    spec:
+      containers:
+        - name: progressservice
+          image: watch-together-roomserver:dev
+          imagePullPolicy: IfNotPresent
+          command: ["/app/progressservice"]
+          ports:
+            - containerPort: 8090
+              name: http
+          env:
+            - name: APP_ENV
+              value: local
+            - name: SERVICE_NAME
+              value: watch-together-progressservice
+            - name: SERVICE_VERSION
+              value: kind
+            - name: INTERNAL_RPC_ADDR
+              value: :8090
+            - name: INTERNAL_RPC_PATH_PREFIX
+              value: /internal.rpc
+            - name: INTERNAL_RPC_TIMEOUT_MS
+              value: "10000"
+            - name: METRICS_ENABLED
+              value: "true"
+            - name: METRICS_PATH
+              value: /metrics
+            - name: READINESS_PATH
+              value: /readyz
+            - name: PROGRESS_DATABASE_URL
+              value: postgres://app:app@postgres:5432/anime_watch_progress_dev?sslmode=disable
+            - name: IDENTITY_SERVICE_MODE
+              value: rpc
+            - name: IDENTITY_SERVICE_ADDR
+              value: http://identityservice:8090
+            - name: MEDIA_SERVICE_MODE
+              value: rpc
+            - name: MEDIA_SERVICE_ADDR
+              value: http://mediaservice:8090
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 20
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 15
+            timeoutSeconds: 3
+            failureThreshold: 6
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: progressservice
+spec:
+  selector:
+    app.kubernetes.io/name: progressservice
+  ports:
+    - name: http
+      port: 8090
+      targetPort: 8090
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: homecompositionservice
+  labels:
+    app.kubernetes.io/name: homecompositionservice
+    app.kubernetes.io/part-of: watch-together
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: homecompositionservice
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: homecompositionservice
+        app.kubernetes.io/part-of: watch-together
+    spec:
+      containers:
+        - name: homecompositionservice
+          image: watch-together-roomserver:dev
+          imagePullPolicy: IfNotPresent
+          command: ["/app/homecompositionservice"]
+          ports:
+            - containerPort: 8090
+              name: http
+          env:
+            - name: APP_ENV
+              value: local
+            - name: SERVICE_NAME
+              value: watch-together-homecompositionservice
+            - name: SERVICE_VERSION
+              value: kind
+            - name: INTERNAL_RPC_ADDR
+              value: :8090
+            - name: INTERNAL_RPC_PATH_PREFIX
+              value: /internal.rpc
+            - name: INTERNAL_RPC_TIMEOUT_MS
+              value: "10000"
+            - name: METRICS_ENABLED
+              value: "true"
+            - name: METRICS_PATH
+              value: /metrics
+            - name: READINESS_PATH
+              value: /readyz
+            - name: IDENTITY_SERVICE_MODE
+              value: rpc
+            - name: IDENTITY_SERVICE_ADDR
+              value: http://identityservice:8090
+            - name: PROGRESS_SERVICE_MODE
+              value: rpc
+            - name: PROGRESS_SERVICE_ADDR
+              value: http://progressservice:8090
+            - name: MEDIA_SERVICE_MODE
+              value: rpc
+            - name: MEDIA_SERVICE_ADDR
+              value: http://mediaservice:8090
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 20
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 15
+            timeoutSeconds: 3
+            failureThreshold: 6
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: homecompositionservice
+spec:
+  selector:
+    app.kubernetes.io/name: homecompositionservice
+  ports:
+    - name: http
+      port: 8090
+      targetPort: 8090
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: timelineservice
+  labels:
+    app.kubernetes.io/name: timelineservice
+    app.kubernetes.io/part-of: watch-together
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: timelineservice
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: timelineservice
+        app.kubernetes.io/part-of: watch-together
+    spec:
+      containers:
+        - name: timelineservice
+          image: watch-together-roomserver:dev
+          imagePullPolicy: IfNotPresent
+          command: ["/app/timelineservice"]
+          ports:
+            - containerPort: 8090
+              name: http
+          env:
+            - name: APP_ENV
+              value: local
+            - name: SERVICE_NAME
+              value: watch-together-timelineservice
+            - name: SERVICE_VERSION
+              value: kind
+            - name: INTERNAL_RPC_ADDR
+              value: :8090
+            - name: INTERNAL_RPC_PATH_PREFIX
+              value: /internal.rpc
+            - name: INTERNAL_RPC_AUTH_TOKEN
+              value: ""
+            - name: METRICS_ENABLED
+              value: "true"
+            - name: METRICS_PATH
+              value: /metrics
+            - name: READINESS_PATH
+              value: /readyz
+            - name: TIMELINE_DATABASE_URL
+              value: postgres://app:app@postgres:5432/anime_watch_timeline_dev?sslmode=disable
+            - name: KAFKA_BROKERS
+              value: kafka:9092
+            - name: KAFKA_CLIENT_ID
+              value: watch-together-timelineservice
+            - name: KAFKA_TOPIC_ROOM_TIMELINE
+              value: wt.room.timeline.v1
+            - name: KAFKA_REPLAY_TIMEOUT_MS
+              value: "1000"
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 20
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 15
+            timeoutSeconds: 3
+            failureThreshold: 6
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: timelineservice
+spec:
+  selector:
+    app.kubernetes.io/name: timelineservice
+  ports:
+    - name: http
+      port: 8090
+      targetPort: 8090
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: roomauthorityservice
+  labels:
+    app.kubernetes.io/name: roomauthorityservice
+    app.kubernetes.io/part-of: watch-together
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: roomauthorityservice
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: roomauthorityservice
+        app.kubernetes.io/part-of: watch-together
+    spec:
+      containers:
+        - name: roomauthorityservice
+          image: watch-together-roomserver:dev
+          imagePullPolicy: IfNotPresent
+          command: ["/app/roomauthorityservice"]
+          ports:
+            - containerPort: 8090
+              name: http
+          env:
+            - name: APP_ENV
+              value: local
+            - name: SERVICE_NAME
+              value: watch-together-roomauthorityservice
+            - name: SERVICE_VERSION
+              value: kind
+            - name: SERVER_INSTANCE_ID
+              value: roomauthorityservice-1
+            - name: DEBUG_SYNC
+              value: "true"
+            - name: INTERNAL_RPC_ADDR
+              value: :8090
+            - name: INTERNAL_RPC_PATH_PREFIX
+              value: /internal.rpc
+            - name: INTERNAL_RPC_TIMEOUT_MS
+              value: "10000"
+            - name: TIMELINE_SERVICE_MODE
+              value: rpc
+            - name: TIMELINE_SERVICE_ADDR
+              value: http://timelineservice:8090
+            - name: ROOM_SERVICE_MODE
+              value: rpc
+            - name: ROOM_SERVICE_ADDR
+              value: http://roomservice:8090
+            - name: WS_CROSS_INSTANCE_BROADCAST_ENABLED
+              value: "true"
+            - name: WS_EVENT_BUS
+              value: nats_core
+            - name: NATS_URL
+              value: nats://nats:4222
+            - name: NATS_NAME
+              value: watch-together-roomauthorityservice
+            - name: NATS_SUBJECT_ROOM_BROADCAST
+              value: wt.room.broadcast.v1
+            - name: CONTROL_IDEMPOTENCY_TTL_MS
+              value: "600000"
+            - name: WS_SEEK_MIN_INTERVAL_MS
+              value: "250"
+            - name: AUTHORITY_RENEW_INTERVAL_MS
+              value: "10000"
+            - name: AUTHORITY_TAKEOVER_SCAN_INTERVAL_MS
+              value: "30000"
+            - name: AUTHORITY_RECOVERY_TIMEOUT_MS
+              value: "5000"
+            - name: METRICS_ENABLED
+              value: "true"
+            - name: METRICS_PATH
+              value: /metrics
+            - name: READINESS_PATH
+              value: /readyz
+            - name: REDIS_ADDR
+              value: redis:6380
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: watch-together-secret
+                  key: redis-password
+            - name: REDIS_DB
+              value: "0"
+            - name: REDIS_REQUIRED
+              value: "true"
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 20
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 15
+            timeoutSeconds: 3
+            failureThreshold: 6
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: roomauthorityservice
+spec:
+  selector:
+    app.kubernetes.io/name: roomauthorityservice
+  ports:
+    - name: http
+      port: 8090
+      targetPort: 8090

@@ -1,0 +1,269 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: migrate-main
+  labels:
+    app.kubernetes.io/part-of: watch-together
+    watch-together/job-phase: migration
+spec:
+  backoffLimit: 3
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/part-of: watch-together
+        watch-together/job-phase: migration
+    spec:
+      restartPolicy: OnFailure
+      initContainers:
+        - name: wait-postgres
+          image: postgres:16-alpine
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/sh", "-c"]
+          args:
+            - until pg_isready -h postgres -U app -d anime_watch_dev; do sleep 2; done
+          env:
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: watch-together-secret
+                  key: postgres-password
+      containers:
+        - name: migrate
+          image: migrate/migrate:v4.17.1
+          imagePullPolicy: IfNotPresent
+          args:
+            - -path=/migrations
+            - -database=postgres://app:app@postgres:5432/anime_watch_dev?sslmode=disable
+            - up
+          volumeMounts:
+            - name: migrations
+              mountPath: /migrations
+      volumes:
+        - name: migrations
+          configMap:
+            name: migrations-main
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: migrate-identity
+  labels:
+    app.kubernetes.io/part-of: watch-together
+    watch-together/job-phase: migration
+spec:
+  backoffLimit: 3
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/part-of: watch-together
+        watch-together/job-phase: migration
+    spec:
+      restartPolicy: OnFailure
+      initContainers:
+        - name: wait-postgres
+          image: postgres:16-alpine
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/sh", "-c"]
+          args:
+            - until pg_isready -h postgres -U app -d anime_watch_identity_dev; do sleep 2; done
+          env:
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: watch-together-secret
+                  key: postgres-password
+      containers:
+        - name: migrate
+          image: migrate/migrate:v4.17.1
+          imagePullPolicy: IfNotPresent
+          args:
+            - -path=/migrations
+            - -database=postgres://app:app@postgres:5432/anime_watch_identity_dev?sslmode=disable
+            - up
+          volumeMounts:
+            - name: migrations
+              mountPath: /migrations
+      volumes:
+        - name: migrations
+          configMap:
+            name: migrations-identity
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: migrate-room
+  labels:
+    app.kubernetes.io/part-of: watch-together
+    watch-together/job-phase: migration
+spec:
+  backoffLimit: 3
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/part-of: watch-together
+        watch-together/job-phase: migration
+    spec:
+      restartPolicy: OnFailure
+      initContainers:
+        - name: wait-postgres
+          image: postgres:16-alpine
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/sh", "-c"]
+          args:
+            - until pg_isready -h postgres -U app -d anime_watch_room_dev; do sleep 2; done
+          env:
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: watch-together-secret
+                  key: postgres-password
+      containers:
+        - name: migrate
+          image: migrate/migrate:v4.17.1
+          imagePullPolicy: IfNotPresent
+          args:
+            - -path=/migrations
+            - -database=postgres://app:app@postgres:5432/anime_watch_room_dev?sslmode=disable
+            - up
+          volumeMounts:
+            - name: migrations
+              mountPath: /migrations
+      volumes:
+        - name: migrations
+          configMap:
+            name: migrations-room
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: migrate-media
+  labels:
+    app.kubernetes.io/part-of: watch-together
+    watch-together/job-phase: migration
+spec:
+  backoffLimit: 3
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/part-of: watch-together
+        watch-together/job-phase: migration
+    spec:
+      restartPolicy: OnFailure
+      initContainers:
+        - name: wait-postgres
+          image: postgres:16-alpine
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/sh", "-c"]
+          args:
+            - until pg_isready -h postgres -U app -d anime_watch_media_dev; do sleep 2; done
+          env:
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: watch-together-secret
+                  key: postgres-password
+      containers:
+        - name: migrate
+          image: migrate/migrate:v4.17.1
+          imagePullPolicy: IfNotPresent
+          args:
+            - -path=/migrations
+            - -database=postgres://app:app@postgres:5432/anime_watch_media_dev?sslmode=disable
+            - up
+          volumeMounts:
+            - name: migrations
+              mountPath: /migrations
+      volumes:
+        - name: migrations
+          configMap:
+            name: migrations-media
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: migrate-progress
+  labels:
+    app.kubernetes.io/part-of: watch-together
+    watch-together/job-phase: migration
+spec:
+  backoffLimit: 3
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/part-of: watch-together
+        watch-together/job-phase: migration
+    spec:
+      restartPolicy: OnFailure
+      initContainers:
+        - name: wait-postgres
+          image: postgres:16-alpine
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/sh", "-c"]
+          args:
+            - until pg_isready -h postgres -U app -d anime_watch_progress_dev; do sleep 2; done
+          env:
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: watch-together-secret
+                  key: postgres-password
+      containers:
+        - name: migrate
+          image: migrate/migrate:v4.17.1
+          imagePullPolicy: IfNotPresent
+          args:
+            - -path=/migrations
+            - -database=postgres://app:app@postgres:5432/anime_watch_progress_dev?sslmode=disable
+            - up
+          volumeMounts:
+            - name: migrations
+              mountPath: /migrations
+      volumes:
+        - name: migrations
+          configMap:
+            name: migrations-progress
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: migrate-timeline
+  labels:
+    app.kubernetes.io/part-of: watch-together
+    watch-together/job-phase: migration
+spec:
+  backoffLimit: 3
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/part-of: watch-together
+        watch-together/job-phase: migration
+    spec:
+      restartPolicy: OnFailure
+      initContainers:
+        - name: wait-postgres
+          image: postgres:16-alpine
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/sh", "-c"]
+          args:
+            - until pg_isready -h postgres -U app -d anime_watch_timeline_dev; do sleep 2; done
+          env:
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: watch-together-secret
+                  key: postgres-password
+      containers:
+        - name: migrate
+          image: migrate/migrate:v4.17.1
+          imagePullPolicy: IfNotPresent
+          args:
+            - -path=/migrations
+            - -database=postgres://app:app@postgres:5432/anime_watch_timeline_dev?sslmode=disable
+            - up
+          volumeMounts:
+            - name: migrations
+              mountPath: /migrations
+      volumes:
+        - name: migrations
+          configMap:
+            name: migrations-timeline

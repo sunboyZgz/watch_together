@@ -5,7 +5,7 @@ TIMELINE_MIGRATIONS_DIR := ./timeline_migrations
 PROGRESS_MIGRATIONS_DIR := ./progress_migrations
 ROOM_MIGRATIONS_DIR := ./room_migrations
 
-.PHONY: migration-create migration-up migration-down migration-version identity-migration-up identity-migration-down identity-migration-version media-migration-up media-migration-down media-migration-version timeline-migration-up timeline-migration-down timeline-migration-version progress-migration-up progress-migration-down progress-migration-version room-migration-up room-migration-down room-migration-version proto-lint proto-generate verify-phase8 verify-phase9 verify-phase10 verify-phase11 verify-phase16 verify-phase23 verify-phase24 verify-phase25 verify-phase26 verify-phase27 verify-phase29 verify-phase30-ready
+.PHONY: migration-create migration-up migration-down migration-version identity-migration-up identity-migration-down identity-migration-version media-migration-up media-migration-down media-migration-version timeline-migration-up timeline-migration-down timeline-migration-version progress-migration-up progress-migration-down progress-migration-version room-migration-up room-migration-down room-migration-version proto-lint proto-generate verify-phase8 verify-phase9 verify-phase10 verify-phase11 verify-phase16 verify-phase23 verify-phase24 verify-phase25 verify-phase26 verify-phase27 verify-phase29 verify-phase30-ready kind-create kind-delete kind-load-images verify-phase30-kind
 
 migration-create:
 	@test -n "$(name)" || (echo "usage: make migration-create name=create_users_table" && exit 1)
@@ -121,3 +121,15 @@ verify-phase29:
 
 verify-phase30-ready:
 	@powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/verify_phase30_ready.ps1
+
+kind-create:
+	@powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/kind_create.ps1
+
+kind-delete:
+	@powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/kind_delete.ps1
+
+kind-load-images:
+	@powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/kind_load_images.ps1
+
+verify-phase30-kind:
+	@powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/verify_phase30_kind.ps1

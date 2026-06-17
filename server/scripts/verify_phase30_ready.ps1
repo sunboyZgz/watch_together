@@ -44,6 +44,7 @@ Invoke-Step 'Required local images for Compose and kind preflight' {
         'redis:7.2-alpine',
         'nats:2.10-alpine',
         'nginx:1.27-alpine',
+        'migrate/migrate:v4.17.1',
         'quay.io/minio/minio:latest',
         'quay.io/minio/mc:latest'
     )

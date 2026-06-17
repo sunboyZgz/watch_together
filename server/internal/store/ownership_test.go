@@ -1,6 +1,7 @@
 package store
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -807,6 +808,108 @@ func TestServiceImageAllowsComposeCommandToSelectRoleBinary(t *testing.T) {
 	}
 }
 
+func TestKindOverlayUsesNodePortAndTwoRoomserverReplicas(t *testing.T) {
+	overlay := readK8sYAML(t, "../../k8s/overlays/kind")
+	roomserver := requireK8sObject(t, overlay, "Deployment", "roomserver")
+	if replicas := k8sInt(k8sMap(roomserver["spec"])["replicas"]); replicas != 2 {
+		t.Fatalf("kind overlay roomserver replicas = %d, want 2", replicas)
+	}
+
+	nginx := requireK8sObject(t, overlay, "Service", "nginx")
+	spec := k8sMap(nginx["spec"])
+	if serviceType := k8sString(spec["type"]); serviceType != "NodePort" {
+		t.Fatalf("kind overlay nginx service type = %q, want NodePort", serviceType)
+	}
+	ports := k8sSlice(spec["ports"])
+	if len(ports) == 0 {
+		t.Fatalf("kind overlay nginx service has no ports")
+	}
+	portSpec := k8sMap(ports[0])
+	if nodePort := k8sInt(portSpec["nodePort"]); nodePort != 30080 {
+		t.Fatalf("kind overlay nginx nodePort = %d, want 30080", nodePort)
+	}
+}
+
+func TestKindBaseRoutesPublicHTTPAndKeepsEdgeServicesOffBusinessDatabases(t *testing.T) {
+	base := readK8sYAML(t, "../../k8s/base")
+
+	nginx := requireK8sObject(t, base, "ConfigMap", "nginx-config")
+	data := k8sMap(nginx["data"])
+	conf := k8sString(data["default.conf"])
+	for _, expected := range []string{
+		"upstream watch_together_api",
+		"server apigateway:8080;",
+		"upstream watch_together_ws",
+		"server roomserver:8080;",
+		"location /ws",
+		"proxy_pass http://watch_together_ws;",
+	} {
+		if !strings.Contains(conf, expected) {
+			t.Fatalf("kind nginx config missing %q", expected)
+		}
+	}
+
+	for _, deploymentName := range []string{"apigateway", "roomserver", "roomauthorityservice"} {
+		deployment := requireK8sObject(t, base, "Deployment", deploymentName)
+		envNames := deploymentEnvNames(deployment)
+		for _, forbidden := range []string{
+			"DATABASE_URL",
+			"IDENTITY_DATABASE_URL",
+			"ROOM_DATABASE_URL",
+			"MEDIA_DATABASE_URL",
+			"PROGRESS_DATABASE_URL",
+			"TIMELINE_DATABASE_URL",
+		} {
+			if containsString(envNames, forbidden) {
+				t.Fatalf("deployment/%s must not define %s", deploymentName, forbidden)
+			}
+		}
+	}
+
+	for deploymentName, expectedEnv := range map[string]string{
+		"identityservice": "IDENTITY_DATABASE_URL",
+		"roomservice":     "ROOM_DATABASE_URL",
+		"mediaservice":    "MEDIA_DATABASE_URL",
+		"progressservice": "PROGRESS_DATABASE_URL",
+		"timelineservice": "TIMELINE_DATABASE_URL",
+	} {
+		deployment := requireK8sObject(t, base, "Deployment", deploymentName)
+		envNames := deploymentEnvNames(deployment)
+		if !containsString(envNames, expectedEnv) {
+			t.Fatalf("deployment/%s must define %s, got %v", deploymentName, expectedEnv, envNames)
+		}
+	}
+}
+
+func TestKindBaseUsesApacheKafkaAndNoBitnamiArtifacts(t *testing.T) {
+	content, err := os.ReadFile("../../k8s/base/infra.yaml")
+	if err != nil {
+		t.Fatalf("read kind infra manifest: %v", err)
+	}
+	text := string(content)
+	for _, expected := range []string{
+		"image: apache/kafka:3.7.0",
+		"KAFKA_PROCESS_ROLES",
+		"KAFKA_CONTROLLER_QUORUM_VOTERS",
+		"KAFKA_LOG_DIRS",
+		"/tmp/kraft-combined-logs",
+	} {
+		if !strings.Contains(text, expected) {
+			t.Fatalf("kind infra manifest missing %q", expected)
+		}
+	}
+	for _, forbidden := range []string{
+		"bitnami/kafka",
+		"KAFKA_CFG_",
+		"/bitnami/kafka",
+		"ALLOW_PLAINTEXT_LISTENER",
+	} {
+		if strings.Contains(text, forbidden) {
+			t.Fatalf("kind infra manifest must not contain %q", forbidden)
+		}
+	}
+}
+
 func TestStoreSQLWritesStayInsideOwnerBoundary(t *testing.T) {
 	registry := loadOwnershipRegistry(t)
 	for fileName, contextName := range registry.StoreFiles {
@@ -1079,6 +1182,85 @@ func readCompose(t *testing.T, path string) composeDocument {
 	return document
 }
 
+func readK8sYAML(t *testing.T, path string) []map[string]any {
+	t.Helper()
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat k8s yaml path %s: %v", path, err)
+	}
+	var files []string
+	if info.IsDir() {
+		matches, err := filepath.Glob(filepath.Join(path, "*.yaml"))
+		if err != nil {
+			t.Fatalf("glob k8s yaml path %s: %v", path, err)
+		}
+		files = matches
+	} else {
+		files = []string{path}
+	}
+	var objects []map[string]any
+	for _, file := range files {
+		content, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatalf("read k8s yaml file %s: %v", file, err)
+		}
+		decoder := yaml.NewDecoder(bytes.NewReader(content))
+		for {
+			var object map[string]any
+			err := decoder.Decode(&object)
+			if err != nil {
+				if strings.Contains(err.Error(), "EOF") {
+					break
+				}
+				t.Fatalf("parse k8s yaml file %s: %v", file, err)
+			}
+			if len(object) == 0 {
+				continue
+			}
+			objects = append(objects, object)
+		}
+	}
+	if len(objects) == 0 {
+		t.Fatalf("expected k8s yaml path %s to contain objects", path)
+	}
+	return objects
+}
+
+func requireK8sObject(t *testing.T, objects []map[string]any, kind string, name string) map[string]any {
+	t.Helper()
+	for _, object := range objects {
+		if k8sString(object["kind"]) != kind {
+			continue
+		}
+		metadata := k8sMap(object["metadata"])
+		if k8sString(metadata["name"]) == name {
+			return object
+		}
+	}
+	t.Fatalf("expected k8s object kind=%s name=%s", kind, name)
+	return nil
+}
+
+func deploymentEnvNames(deployment map[string]any) []string {
+	spec := k8sMap(deployment["spec"])
+	template := k8sMap(spec["template"])
+	podSpec := k8sMap(template["spec"])
+	containers := k8sSlice(podSpec["containers"])
+	var names []string
+	for _, containerValue := range containers {
+		container := k8sMap(containerValue)
+		env := k8sSlice(container["env"])
+		for _, envValue := range env {
+			entry := k8sMap(envValue)
+			name := k8sString(entry["name"])
+			if name != "" {
+				names = append(names, name)
+			}
+		}
+	}
+	return names
+}
+
 func requireComposeService(t *testing.T, document composeDocument, name string) composeService {
 	t.Helper()
 	service, ok := document.Services[name]
@@ -1145,6 +1327,53 @@ func toString(value any) string {
 	return fmt.Sprint(value)
 }
 
+func k8sMap(value any) map[string]any {
+	if value == nil {
+		return map[string]any{}
+	}
+	if typed, ok := value.(map[string]any); ok {
+		return typed
+	}
+	return map[string]any{}
+}
+
+func k8sSlice(value any) []any {
+	if value == nil {
+		return nil
+	}
+	if typed, ok := value.([]any); ok {
+		return typed
+	}
+	return nil
+}
+
+func k8sString(value any) string {
+	if value == nil {
+		return ""
+	}
+	if typed, ok := value.(string); ok {
+		return strings.TrimSpace(typed)
+	}
+	return strings.TrimSpace(fmt.Sprint(value))
+}
+
+func k8sInt(value any) int {
+	switch typed := value.(type) {
+	case int:
+		return typed
+	case int64:
+		return int(typed)
+	case float64:
+		return int(typed)
+	case string:
+		var parsed int
+		_, _ = fmt.Sscanf(strings.TrimSpace(typed), "%d", &parsed)
+		return parsed
+	default:
+		return 0
+	}
+}
+
 func uniqueMatches(content string, expression *regexp.Regexp) []string {
 	seen := map[string]bool{}
 	var tables []string
@@ -1190,6 +1419,15 @@ func uniqueStrings(values []string) []string {
 func containsContext(contexts []string, contextName string) bool {
 	for _, candidate := range contexts {
 		if candidate == contextName {
+			return true
+		}
+	}
+	return false
+}
+
+func containsString(values []string, expected string) bool {
+	for _, value := range values {
+		if value == expected {
 			return true
 		}
 	}
