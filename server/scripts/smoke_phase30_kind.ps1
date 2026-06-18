@@ -17,6 +17,200 @@ $WsUrl = 'ws://127.0.0.1:30080/ws'
 $SmokeEpisodeID = '00000000-0000-0000-0000-000000230102'
 $shouldDeleteCluster = $DeleteAfterRun -and -not $KeepCluster
 
+Add-Type -TypeDefinition @'
+using System;
+using System.Collections.Concurrent;
+using System.IO;
+using System.Net.WebSockets;
+using System.Text;
+using System.Text.RegularExpressions;
+using System.Threading;
+using System.Threading.Tasks;
+
+public sealed class Phase30SmokeWebSocket : IDisposable
+{
+    private readonly BlockingCollection<string> messages = new BlockingCollection<string>();
+    private readonly SemaphoreSlim sendLock = new SemaphoreSlim(1, 1);
+    private readonly CancellationTokenSource receiveCancel = new CancellationTokenSource();
+    private readonly Task receiveTask;
+    private bool disposed;
+
+    public ClientWebSocket Socket { get; private set; }
+    public WebSocketCloseStatus? CloseStatus { get; private set; }
+    public string CloseDescription { get; private set; }
+    public Exception ReceiveError { get; private set; }
+
+    private Phase30SmokeWebSocket(ClientWebSocket socket)
+    {
+        Socket = socket;
+        receiveTask = Task.Run((Func<Task>)ReceiveLoop);
+    }
+
+    public static Phase30SmokeWebSocket Connect(string url, string token, int connectTimeoutSeconds)
+    {
+        ClientWebSocket socket = new ClientWebSocket();
+        socket.Options.SetRequestHeader("Authorization", "Bearer " + token);
+        CancellationTokenSource connectCancel = new CancellationTokenSource(TimeSpan.FromSeconds(connectTimeoutSeconds));
+        try
+        {
+            socket.ConnectAsync(new Uri(url), connectCancel.Token).GetAwaiter().GetResult();
+            return new Phase30SmokeWebSocket(socket);
+        }
+        catch
+        {
+            socket.Dispose();
+            throw;
+        }
+        finally
+        {
+            connectCancel.Dispose();
+        }
+    }
+
+    public void Send(string text)
+    {
+        SendStringAsync(text).GetAwaiter().GetResult();
+    }
+
+    public string Receive(int timeoutSeconds)
+    {
+        string message;
+        if (messages.TryTake(out message, TimeSpan.FromSeconds(timeoutSeconds)))
+        {
+            return message;
+        }
+        if (ReceiveError != null)
+        {
+            throw new InvalidOperationException("websocket receive loop failed", ReceiveError);
+        }
+        if (CloseStatus.HasValue)
+        {
+            throw new InvalidOperationException("websocket closed before expected message: " + CloseStatus.Value + " " + CloseDescription);
+        }
+        throw new TimeoutException("timed out waiting for websocket message");
+    }
+
+    public bool WaitClosed(int timeoutSeconds)
+    {
+        DateTime deadline = DateTime.UtcNow.AddSeconds(timeoutSeconds);
+        while (DateTime.UtcNow < deadline)
+        {
+            if (CloseStatus.HasValue ||
+                Socket.State == WebSocketState.Closed ||
+                Socket.State == WebSocketState.Aborted)
+            {
+                return true;
+            }
+            Thread.Sleep(100);
+        }
+        return false;
+    }
+
+    private async Task ReceiveLoop()
+    {
+        byte[] buffer = new byte[8192];
+        try
+        {
+            while (!receiveCancel.IsCancellationRequested)
+            {
+                using (MemoryStream stream = new MemoryStream())
+                {
+                    WebSocketReceiveResult result;
+                    do
+                    {
+                        ArraySegment<byte> segment = new ArraySegment<byte>(buffer);
+                        result = await Socket.ReceiveAsync(segment, receiveCancel.Token).ConfigureAwait(false);
+                        if (result.MessageType == WebSocketMessageType.Close)
+                        {
+                            CloseStatus = result.CloseStatus;
+                            CloseDescription = result.CloseStatusDescription;
+                            messages.CompleteAdding();
+                            return;
+                        }
+                        stream.Write(buffer, 0, result.Count);
+                    } while (!result.EndOfMessage);
+
+                    string text = Encoding.UTF8.GetString(stream.ToArray());
+                    string heartbeatAck;
+                    if (TryBuildHeartbeatAck(text, out heartbeatAck))
+                    {
+                        await SendStringAsync(heartbeatAck).ConfigureAwait(false);
+                    }
+                    else
+                    {
+                        messages.Add(text, receiveCancel.Token);
+                    }
+                }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception ex)
+        {
+            ReceiveError = ex;
+            messages.CompleteAdding();
+        }
+    }
+
+    private async Task SendStringAsync(string text)
+    {
+        byte[] bytes = Encoding.UTF8.GetBytes(text);
+        ArraySegment<byte> segment = new ArraySegment<byte>(bytes);
+        await sendLock.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            await Socket.SendAsync(segment, WebSocketMessageType.Text, true, CancellationToken.None).ConfigureAwait(false);
+        }
+        finally
+        {
+            sendLock.Release();
+        }
+    }
+
+    private static bool TryBuildHeartbeatAck(string text, out string heartbeatAck)
+    {
+        heartbeatAck = null;
+        if (!Regex.IsMatch(text, "\"type\"\\s*:\\s*\"heartbeat\""))
+        {
+            return false;
+        }
+        Match match = Regex.Match(text, "\"serverTimeMs\"\\s*:\\s*(\\d+)");
+        if (!match.Success)
+        {
+            return false;
+        }
+        long clientTimeMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        heartbeatAck = "{\"type\":\"heartbeat_ack\",\"payload\":{\"serverTimeMs\":" + match.Groups[1].Value + ",\"clientTimeMs\":" + clientTimeMs + "}}";
+        return true;
+    }
+
+    public void Dispose()
+    {
+        if (disposed)
+        {
+            return;
+        }
+        disposed = true;
+        receiveCancel.Cancel();
+        try
+        {
+            if (Socket.State == WebSocketState.Open)
+            {
+                Socket.CloseAsync(WebSocketCloseStatus.NormalClosure, "smoke done", CancellationToken.None).Wait(TimeSpan.FromSeconds(5));
+            }
+        }
+        catch
+        {
+        }
+        Socket.Dispose();
+        receiveCancel.Dispose();
+        sendLock.Dispose();
+        messages.Dispose();
+    }
+}
+'@
+
 function Invoke-Step {
     param(
         [string] $Name,
@@ -252,48 +446,52 @@ function New-SmokeUser {
 }
 
 function New-SmokeWebSocket {
-    param([string] $Token)
-    $socket = [System.Net.WebSockets.ClientWebSocket]::new()
-    [void]$socket.Options.SetRequestHeader('Authorization', "Bearer $Token")
-    $cts = [System.Threading.CancellationTokenSource]::new([TimeSpan]::FromSeconds(20))
-    [void]$socket.ConnectAsync([Uri]$WsUrl, $cts.Token).GetAwaiter().GetResult()
-    return $socket
+    param(
+        [string] $Token,
+        [int] $TimeoutSeconds = 60
+    )
+
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    $attempt = 0
+    $lastError = ''
+    do {
+        try {
+            return [Phase30SmokeWebSocket]::Connect($WsUrl, $Token, 20)
+        } catch {
+            $lastError = $_.Exception.Message
+            $attempt++
+            if ((Get-Date) -ge $deadline) {
+                break
+            }
+            $delayMs = [Math]::Min(8000, [int](500 * [Math]::Pow(2, [Math]::Min($attempt - 1, 4))))
+            Start-Sleep -Milliseconds $delayMs
+        }
+    } while ((Get-Date) -lt $deadline)
+
+    throw "websocket connect to $WsUrl failed after $attempt attempts: $lastError"
 }
 
 function Send-WsJson {
     param(
-        [System.Net.WebSockets.ClientWebSocket] $Socket,
+        [Phase30SmokeWebSocket] $Socket,
         [object] $Message
     )
     $json = $Message | ConvertTo-Json -Depth 20 -Compress
-    $bytes = [System.Text.Encoding]::UTF8.GetBytes($json)
-    $segment = [System.ArraySegment[byte]]::new($bytes, 0, $bytes.Length)
-    [void]$Socket.SendAsync($segment, [System.Net.WebSockets.WebSocketMessageType]::Text, $true, [System.Threading.CancellationToken]::None).GetAwaiter().GetResult()
+    $Socket.Send($json)
 }
 
 function Receive-WsJson {
     param(
-        [System.Net.WebSockets.ClientWebSocket] $Socket,
+        [Phase30SmokeWebSocket] $Socket,
         [int] $TimeoutSeconds = 20
     )
-    $buffer = New-Object byte[] 8192
-    $stream = [System.IO.MemoryStream]::new()
-    $cts = [System.Threading.CancellationTokenSource]::new([TimeSpan]::FromSeconds($TimeoutSeconds))
-    do {
-        $segment = [System.ArraySegment[byte]]::new($buffer, 0, $buffer.Length)
-        $result = $Socket.ReceiveAsync($segment, $cts.Token).GetAwaiter().GetResult()
-        if ($result.MessageType -eq [System.Net.WebSockets.WebSocketMessageType]::Close) {
-            throw "websocket closed before expected message: $($result.CloseStatus) $($result.CloseStatusDescription)"
-        }
-        $stream.Write($buffer, 0, $result.Count)
-    } while (-not $result.EndOfMessage)
-    $text = [System.Text.Encoding]::UTF8.GetString($stream.ToArray())
+    $text = $Socket.Receive($TimeoutSeconds)
     return $text | ConvertFrom-Json
 }
 
 function Read-WsUntil {
     param(
-        [System.Net.WebSockets.ClientWebSocket] $Socket,
+        [Phase30SmokeWebSocket] $Socket,
         [string] $Type,
         [string] $RequestID = '',
         [int] $TimeoutSeconds = 25
@@ -326,52 +524,33 @@ function Read-WsUntil {
 
 function Wait-WsClosed {
     param(
-        [System.Net.WebSockets.ClientWebSocket] $Socket,
+        [Phase30SmokeWebSocket] $Socket,
         [string] $Name,
         [int] $TimeoutSeconds = 120
     )
     if ($null -eq $Socket) {
         return
     }
-    $buffer = New-Object byte[] 4096
-    $cts = [System.Threading.CancellationTokenSource]::new([TimeSpan]::FromSeconds($TimeoutSeconds))
-    try {
-        do {
-            $segment = [System.ArraySegment[byte]]::new($buffer, 0, $buffer.Length)
-            $result = $Socket.ReceiveAsync($segment, $cts.Token).GetAwaiter().GetResult()
-            if ($result.MessageType -eq [System.Net.WebSockets.WebSocketMessageType]::Close) {
-                $reason = [string]$result.CloseStatusDescription
-                if (-not [string]::IsNullOrWhiteSpace($reason) -and $reason -ne 'server draining') {
-                    throw "$Name closed with reason '$reason', want server draining"
-                }
-                return
-            }
-        } while ($true)
-    } catch [System.OperationCanceledException] {
+    if (-not $Socket.WaitClosed($TimeoutSeconds)) {
         throw "timed out waiting for $Name websocket to close during rollout"
-    } catch {
-        if ($Socket.State -eq [System.Net.WebSockets.WebSocketState]::Closed -or
-            $Socket.State -eq [System.Net.WebSockets.WebSocketState]::Aborted) {
-            return
-        }
-        throw
+    }
+    $reason = [string]$Socket.CloseDescription
+    if (-not [string]::IsNullOrWhiteSpace($reason) -and $reason -ne 'server draining') {
+        throw "$Name closed with reason '$reason', want server draining"
     }
 }
 
 function Close-SmokeWebSocket {
-    param([System.Net.WebSockets.ClientWebSocket] $Socket)
+    param([Phase30SmokeWebSocket] $Socket)
     if ($null -eq $Socket) {
         return
-    }
-    if ($Socket.State -eq [System.Net.WebSockets.WebSocketState]::Open) {
-        [void]$Socket.CloseAsync([System.Net.WebSockets.WebSocketCloseStatus]::NormalClosure, 'smoke done', [System.Threading.CancellationToken]::None).GetAwaiter().GetResult()
     }
     $Socket.Dispose()
 }
 
 function Join-SmokeRoom {
     param(
-        [System.Net.WebSockets.ClientWebSocket] $Socket,
+        [Phase30SmokeWebSocket] $Socket,
         [string] $RoomCode,
         [string] $UserID,
         [string] $DeviceID
@@ -389,8 +568,8 @@ function Join-SmokeRoom {
 
 function Assert-ControlsAccepted {
     param(
-        [System.Net.WebSockets.ClientWebSocket] $HostSocket,
-        [System.Net.WebSockets.ClientWebSocket] $ViewerSocket,
+        [Phase30SmokeWebSocket] $HostSocket,
+        [Phase30SmokeWebSocket] $ViewerSocket,
         [string] $RoomCode,
         [string] $HostUserID,
         [int64] $InitialSeq,
@@ -488,14 +667,14 @@ try {
 
     if ($ResetCluster) {
         Invoke-Step 'reset kind cluster' {
-            Invoke-KindScript -Name 'kind_delete.ps1' -Arguments @('-ClusterName', $ClusterName)
-            Invoke-KindScript -Name 'kind_create.ps1' -Arguments @('-ClusterName', $ClusterName)
+            Invoke-KindScript -Name 'kind_delete.ps1' -Arguments @($ClusterName)
+            Invoke-KindScript -Name 'kind_create.ps1' -Arguments @($ClusterName)
         }
     } else {
         Invoke-Step 'ensure kind cluster exists' {
             $clusters = @(& kind get clusters)
             if ((@($clusters | Where-Object { $_ -eq $ClusterName })).Count -eq 0) {
-                Invoke-KindScript -Name 'kind_create.ps1' -Arguments @('-ClusterName', $ClusterName)
+                Invoke-KindScript -Name 'kind_create.ps1' -Arguments @($ClusterName)
             }
         }
     }
@@ -508,7 +687,7 @@ try {
 
     if (-not $SkipImageLoad) {
         Invoke-Step 'load images into kind' {
-            Invoke-KindScript -Name 'kind_load_images.ps1' -Arguments @('-ClusterName', $ClusterName)
+            Invoke-KindScript -Name 'kind_load_images.ps1' -Arguments @($ClusterName)
         }
     }
 
@@ -632,6 +811,6 @@ WHERE to_regclass('public.' || shadow.table_name) IS NOT NULL;
     Close-SmokeWebSocket -Socket $hostSocket
     Close-SmokeWebSocket -Socket $viewerSocket
     if ($shouldDeleteCluster) {
-        Invoke-KindScript -Name 'kind_delete.ps1' -Arguments @('-ClusterName', $ClusterName)
+        Invoke-KindScript -Name 'kind_delete.ps1' -Arguments @($ClusterName)
     }
 }

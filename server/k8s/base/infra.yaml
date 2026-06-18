@@ -208,6 +208,8 @@ metadata:
     app.kubernetes.io/part-of: watch-together
 spec:
   replicas: 1
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app.kubernetes.io/name: kafka
@@ -289,6 +291,7 @@ metadata:
     app.kubernetes.io/name: kafka
     app.kubernetes.io/part-of: watch-together
 spec:
+  publishNotReadyAddresses: true
   selector:
     app.kubernetes.io/name: kafka
   ports:

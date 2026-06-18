@@ -166,21 +166,21 @@ if ($RunSmoke) {
     Invoke-Step 'Phase 30 kind rolling restart smoke' {
         Push-Location $ServerRoot
         try {
-            $smokeArgs = @()
+            $smokeArgs = @{}
             if ($ResetCluster) {
-                $smokeArgs += '-ResetCluster'
+                $smokeArgs.ResetCluster = $true
             }
             if ($DeleteAfterRun) {
-                $smokeArgs += '-DeleteAfterRun'
+                $smokeArgs.DeleteAfterRun = $true
             }
             if ($KeepCluster) {
-                $smokeArgs += '-KeepCluster'
+                $smokeArgs.KeepCluster = $true
             }
             if ($SkipBuild) {
-                $smokeArgs += '-SkipBuild'
+                $smokeArgs.SkipBuild = $true
             }
             if ($SkipImageLoad) {
-                $smokeArgs += '-SkipImageLoad'
+                $smokeArgs.SkipImageLoad = $true
             }
             & .\scripts\smoke_phase30_kind.ps1 @smokeArgs
         } finally {
