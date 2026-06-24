@@ -140,6 +140,7 @@ func (b *MemoryRoomBroadcastBus) PublishRoomEnvelope(ctx context.Context, event 
 	return nil
 }
 
+// TODO: 可以加入多级优先队列？来让handler不一定要作用到所有的topic之上。
 func (b *MemoryRoomBroadcastBus) SubscribeRoomBroadcasts(ctx context.Context, handler RoomBroadcastHandler) error {
 	if handler == nil {
 		return nil

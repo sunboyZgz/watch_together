@@ -1329,6 +1329,7 @@ func (h *WebSocketHandler) writeRoomDeviceSwitchResult(
 	})
 }
 
+// TODO：会导致产生过多的goroutine吗？
 func (h *WebSocketHandler) scheduleRoomDeviceSwitchTimeout(pending roomDeviceSwitch) {
 	timeout := time.Until(pending.ExpiresAt)
 	if timeout <= 0 {

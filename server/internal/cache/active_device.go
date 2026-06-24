@@ -12,6 +12,7 @@ import (
 
 const defaultActiveDeviceLeaseTTL = 45 * time.Second
 
+// heartbeat tick -> refreshActiveDeviceLeaseForClient -> ActiveDeviceRegistry.Acquire -> Redis SET 同一个 key 并重置 TTL
 type ActiveDeviceLease struct {
 	DeviceID     string `json:"deviceId"`
 	InstanceID   string `json:"instanceId"`

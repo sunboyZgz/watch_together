@@ -181,6 +181,8 @@ func (m *Manager) GetOrCreate(roomID string) *Room {
 
 // ActiveClientForUser scans active rooms for the current authoritative room
 // connection of one logical user. It is intentionally process-local for the MVP.
+
+// TODO: 用来全局查找：这个用户现在是否已经在某个房间里在线，如果在线，返回他所在房间和对应的活跃客户端。效率较低
 func (m *Manager) ActiveClientForUser(userID string) (ActiveClientLookup, bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()

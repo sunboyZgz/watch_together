@@ -64,3 +64,6 @@ cd android
 ```
 
 For full configuration, media ingest, API, and sync details, use the docs linked above.
+
+## TODO
+eliminate the code relevant with local development mode 

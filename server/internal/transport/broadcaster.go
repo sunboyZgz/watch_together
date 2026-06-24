@@ -62,6 +62,8 @@ func newBoundedBroadcaster(config broadcastConfig) *boundedBroadcaster {
 	}
 }
 
+
+//TODO: 是否会被慢任务拖累，虽然有一个超时机制的协助。
 func (b *boundedBroadcaster) Broadcast(
 	ctx context.Context,
 	clients []clientWriter,
